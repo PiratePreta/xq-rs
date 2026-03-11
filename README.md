@@ -1,3 +1,3 @@
-# Quip Aglais SDK
+# Aglais Extended Quantum VM SDK
 
 TBA
