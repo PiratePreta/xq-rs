@@ -38,10 +38,10 @@ lint-deny:
 test: test-unit test-integration
 
 test-unit:
-	cargo nextest run --workspace --all-features --lib --profile ci-test
+	cargo nextest run --workspace --all-features --lib --cargo-profile ci-test
 
 test-integration:
-	cargo nextest run --workspace --all-features --test '*' --profile ci-test
+	cargo nextest run --workspace --all-features --test '*' --cargo-profile ci-test
 
 test-miri:
 	cargo +nightly miri test --workspace --all-features
