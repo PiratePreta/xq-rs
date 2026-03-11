@@ -1,6 +1,14 @@
-.PHONY: all lint lint-clippy lint-fmt lint-taplo lint-doc lint-semver lint-deny test test-unit test-integration test-miri
+.PHONY: all deps lint lint-clippy lint-fmt lint-taplo lint-doc lint-semver lint-deny test test-unit test-integration test-miri
 
 all: lint test
+
+# -- Dependencies -----------------------------------------------------------
+
+deps:
+	rustup component add clippy rustfmt
+	rustup toolchain install nightly --component miri
+	cargo +nightly miri setup
+	cargo install taplo-cli cargo-semver-checks cargo-deny cargo-nextest --locked
 
 # -- Lints ------------------------------------------------------------------
 
