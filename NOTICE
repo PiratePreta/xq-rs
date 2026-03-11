@@ -1,0 +1,75 @@
+Quip Aglais SDK
+Copyright (C) 2025 Postquant Labs Incorporated
+
+This software is licensed under the GNU Affero General Public License v3.0 or later.
+See the LICENSE file for the full license text.
+
+================================================================================
+THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
+================================================================================
+
+This project incorporates components from the following open source projects.
+The original copyright notices and licenses are provided below.
+
+================================================================================
+APACHE-2.0 LICENSED COMPONENTS
+================================================================================
+
+TBA
+
+The Apache License 2.0 is available at:
+http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+BSD-3-CLAUSE LICENSED COMPONENTS
+================================================================================
+
+TBA
+
+The BSD-3-Clause License is available at:
+https://opensource.org/licenses/BSD-3-Clause
+
+================================================================================
+MIT LICENSED COMPONENTS
+================================================================================
+
+TBA
+
+The MIT License is available at:
+https://opensource.org/licenses/MIT
+
+================================================================================
+PSF/BSD-COMPATIBLE LICENSED COMPONENTS
+================================================================================
+
+TBA
+
+================================================================================
+GPL-3.0 LICENSED COMPONENTS
+================================================================================
+
+TBA
+
+The GPL-3.0 License is available at:
+https://www.gnu.org/licenses/gpl-3.0.html
+
+================================================================================
+LICENSE COMPATIBILITY
+================================================================================
+
+All third-party components listed above are compatible with the GNU Affero
+General Public License v3.0 under which this software is licensed.
+
+When this software is distributed or made available as a network service,
+it must be provided under the terms of the AGPL-3.0 license, which includes:
+
+1. Making the complete source code available to users
+2. Preserving all copyright notices and license information
+3. Providing access to source code for network users (Section 13 of AGPL-3.0)
+
+For the full terms of the GNU Affero General Public License v3.0, see the
+LICENSE file in the root of this distribution.
+
+================================================================================
+END OF NOTICE FILE
+================================================================================
