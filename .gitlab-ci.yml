@@ -44,7 +44,7 @@ lint:taplo:
 
 # -- Documentation ----------------------------------------------------------
 
-doc:
+lint:rustdoc:
     stage: lint
     variables:
         RUSTDOCFLAGS: "-D warnings"
@@ -53,7 +53,7 @@ doc:
 
 # -- Semantic version check -------------------------------------------------
 
-lint:semver:
+lint:semver-checks:
     stage: lint
     before_script:
         - cargo install cargo-semver-checks --locked
@@ -66,7 +66,7 @@ lint:semver:
 # -- License compliance and security ----------------------------------------
 
 lint:deny:
-    stage: check
+    stage: lint
     before_script:
         - cargo install cargo-deny --locked
     script:
