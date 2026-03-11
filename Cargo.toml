@@ -1,12 +1,15 @@
 [workspace]
 resolver = "3"
-members  = [  ]
+members = [
+    "crates/bytecode",
+]
 
 [workspace.package]
 repository = "https://gitlab.com/piqued/quip-aglais"
 license    = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
+aglais-xqvm-bytecode = { path = "./crates/bytecode" }
 
 [workspace.lints.clippy]
 dbg-macro             = "warn"
