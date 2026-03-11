@@ -11,7 +11,7 @@
 ## License Compliance Checklist
 - [ ] All new files include the required AGPL-3.0-or-later license header
 - [ ] Any new dependencies are AGPL-3.0-or-later compatible
-- [ ] NOTICE file updated if adding Apache-2.0 licensed dependencies
+- [ ] NOTICE file updated if adding AGPL-3.0-or-later compatible dependencies.
 - [ ] `deny.toml` updated if the license is not listed and its compatible with AGPL-3.0-or-later
 - [ ] No proprietary or incompatible code was incorporated
 
