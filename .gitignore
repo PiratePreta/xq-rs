@@ -35,3 +35,10 @@ credentials.json
 certs/
 *.crt
 *.csr
+
+### AI Agents ###
+
+# Prefer using AGENTS.md than any vendor-specific file names and formats.
+CLAUDE.md
+CODEX.md
+CHARM.md
