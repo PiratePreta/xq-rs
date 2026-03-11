@@ -1,4 +1,4 @@
-Quip Aglais SDK
+Aglais Extended Quantum VM
 Copyright (C) 2025 Postquant Labs Incorporated
 
 This software is licensed under the GNU Affero General Public License v3.0 or later.
@@ -15,43 +15,17 @@ The original copyright notices and licenses are provided below.
 APACHE-2.0 LICENSED COMPONENTS
 ================================================================================
 
-TBA
+The following components are licensed under the Apache License 2.0,
+or dual-licensed under Apache-2.0 OR MIT (as noted).
+
+--------------------------------------------------------------------------------
+Rust compiler and standard library (Apache-2.0 OR MIT)
+Copyright (c) The Rust Project Developers (https://thanks.rust-lang.org)
+https://www.rust-lang.org
+--------------------------------------------------------------------------------
 
 The Apache License 2.0 is available at:
 http://www.apache.org/licenses/LICENSE-2.0
-
-================================================================================
-BSD-3-CLAUSE LICENSED COMPONENTS
-================================================================================
-
-TBA
-
-The BSD-3-Clause License is available at:
-https://opensource.org/licenses/BSD-3-Clause
-
-================================================================================
-MIT LICENSED COMPONENTS
-================================================================================
-
-TBA
-
-The MIT License is available at:
-https://opensource.org/licenses/MIT
-
-================================================================================
-PSF/BSD-COMPATIBLE LICENSED COMPONENTS
-================================================================================
-
-TBA
-
-================================================================================
-GPL-3.0 LICENSED COMPONENTS
-================================================================================
-
-TBA
-
-The GPL-3.0 License is available at:
-https://www.gnu.org/licenses/gpl-3.0.html
 
 ================================================================================
 LICENSE COMPATIBILITY
@@ -69,7 +43,3 @@ it must be provided under the terms of the AGPL-3.0 license, which includes:
 
 For the full terms of the GNU Affero General Public License v3.0, see the
 LICENSE file in the root of this distribution.
-
-================================================================================
-END OF NOTICE FILE
-================================================================================
