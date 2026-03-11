@@ -54,7 +54,7 @@ deny = [
 
 # Crates whose license cargo-deny cannot detect automatically.
 # Run `cargo deny list` to find candidates, then clarify them here.
-[[licenses.clarify]]
+# [[licenses.clarify]]
 # example — uncomment and fill in when cargo deny check reports an unknown:
 # name = "ring"
 # expression = "MIT AND ISC AND OpenSSL"
