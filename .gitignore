@@ -3,3 +3,35 @@ debug/
 target/
 **/*.rs.bk
 *.pdb
+
+### System-related ###
+.DS_Store
+Thumbs.db
+
+### Secret keys ###
+*.pem
+*.key
+*.p12
+*.pfx
+*.der
+
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.ssh
+
+*.gpg
+*.asc
+
+.env
+.env.*
+*.secret
+*.secrets
+*.token
+*.credentials
+credentials.json
+
+certs/
+*.crt
+*.csr
