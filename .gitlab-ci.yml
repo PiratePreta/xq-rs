@@ -1,0 +1,79 @@
+default:
+    image: rust:latest
+    cache:
+        key:
+            files:
+                - Cargo.lock
+        paths:
+            - .cargo/registry/
+            - .cargo/git/
+            - target/
+
+variables:
+    CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
+
+stages:
+    - check
+    - test
+
+# -- Lints ------------------------------------------------------------------
+
+clippy:
+    stage: check
+    before_script:
+        - rustup component add clippy
+    script:
+        - cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# -- Formatting -------------------------------------------------------------
+
+fmt:
+    stage: check
+    before_script:
+        - rustup component add rustfmt
+    script:
+        - cargo fmt --all -- --check
+
+# -- Documentation ----------------------------------------------------------
+
+doc:
+    stage: check
+    variables:
+        RUSTDOCFLAGS: "-D warnings"
+    script:
+        - cargo doc --workspace --all-features --no-deps
+
+# -- Semantic version check -------------------------------------------------
+
+semver:
+    stage: check
+    before_script:
+        - cargo install cargo-semver-checks --locked
+    script:
+        - cargo semver-checks check-release --workspace
+    rules:
+        - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+        - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+# -- License compliance -----------------------------------------------------
+
+licenses:
+    stage: check
+    before_script:
+        - cargo install cargo-deny --locked
+    script:
+        - cargo deny check licenses
+
+# -- Unit tests -------------------------------------------------------------
+
+test:unit:
+    stage: test
+    script:
+        - cargo test --workspace --all-features --lib
+
+# -- Integration tests ------------------------------------------------------
+
+test:integration:
+    stage: test
+    script:
+        - cargo test --workspace --all-features --test '*'
