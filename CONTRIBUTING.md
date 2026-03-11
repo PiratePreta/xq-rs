@@ -15,8 +15,11 @@ Be respectful in all project spaces, including issues, merge requests, and code 
 - Rust (stable, latest recommended)
 - `cargo clippy` — `rustup component add clippy`
 - `cargo fmt` — `rustup component add rustfmt`
+- `taplo` — `cargo install taplo-cli --locked`
 - `cargo deny` — `cargo install cargo-deny --locked`
 - `cargo semver-checks` — `cargo install cargo-semver-checks --locked`
+- `cargo nextest` — `cargo install cargo-nextest --locked` (optionally, but highly recomended)
+- Miri interpreter, see [here](#undefined-behaviour)
 
 ## Development Workflow
 
@@ -25,6 +28,7 @@ All checks must pass before a merge request is accepted. Run them locally before
 ```sh
 # Formatting
 cargo fmt --all
+taplo fmt
 
 # Lints (must be warning-free)
 cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -36,7 +40,11 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 cargo deny check
 
 # Tests
-cargo test --workspace --all-features
+cargo test --workspace --all-features # OR
+cargo nextest run --workspace --all-features
+
+# Miri tests
+cargo +nightly miri test --workspace --all-features
 ```
 
 ## Commit Messages
@@ -82,7 +90,7 @@ cargo +nightly miri test --workspace --all-features
 
 - All public items must be documented (`missing-docs` is enforced).
 - Follow standard Rust naming conventions (`nonstandard-style = "deny"`).
-- Run `cargo fmt` before committing — formatting is checked in CI.
+- Run `cargo fmt` and `taplo fmt` before committing — formatting is checked in CI.
 
 ## Licensing
 
@@ -122,7 +130,7 @@ By submitting a contribution to this project, you:
 
 Add a Signed-off-by line to your commit messages:
 
-```
+```sh
 git commit -s -m "Your commit message"
 ```
 

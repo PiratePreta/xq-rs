@@ -1,0 +1,58 @@
+repos:
+    # Rust formatting
+    - repo: local
+      hooks:
+          - id: cargo-fmt
+            name: cargo fmt
+            entry: cargo fmt --all
+            language: system
+            types: [rust]
+            pass_filenames: false
+
+    # Clippy lint
+    - repo: local
+      hooks:
+          - id: cargo-clippy
+            name: cargo clippy
+            entry: cargo clippy --workspace --all-targets --all-features -- -D warnings
+            language: system
+            pass_filenames: false
+            types: [rust]
+            stages: [pre-push]
+
+    # TOML formatting
+    - repo: local
+      hooks:
+          - id: taplo-format
+            name: taplo fmt
+            entry: taplo fmt
+            language: system
+            types: [toml]
+            args: []
+          - id: taplo-lint
+            name: taplo lint
+            entry: taplo lint
+            language: system
+            types: [toml]
+            args: [--default-schema-catalogs]
+            stages: [pre-push]
+
+    # Dependency and license checks
+    - repo: local
+      hooks:
+          - id: cargo-deny
+            name: cargo deny
+            entry: cargo deny check
+            language: system
+            pass_filenames: false
+            stages: [pre-push]
+
+    # Documentation warnings
+    - repo: local
+      hooks:
+          - id: cargo-doc
+            name: cargo doc warnings
+            entry: bash -c 'RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps'
+            language: system
+            pass_filenames: false
+            stages: [pre-push]

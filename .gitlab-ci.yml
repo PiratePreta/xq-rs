@@ -13,13 +13,13 @@ variables:
     CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
 
 stages:
-    - check
+    - lint
     - test
 
 # -- Lints ------------------------------------------------------------------
 
-clippy:
-    stage: check
+lint:clippy:
+    stage: lint
     before_script:
         - rustup component add clippy
     script:
@@ -27,17 +27,25 @@ clippy:
 
 # -- Formatting -------------------------------------------------------------
 
-fmt:
-    stage: check
+lint:rustfmt:
+    stage: lint
     before_script:
         - rustup component add rustfmt
     script:
         - cargo fmt --all -- --check
 
+lint:taplo:
+    stage: lint
+    before_script:
+        - cargo install taplo-cli --locked
+    script:
+        - taplo lint check
+        - taplo fmt --check
+
 # -- Documentation ----------------------------------------------------------
 
 doc:
-    stage: check
+    stage: lint
     variables:
         RUSTDOCFLAGS: "-D warnings"
     script:
@@ -45,8 +53,8 @@ doc:
 
 # -- Semantic version check -------------------------------------------------
 
-semver:
-    stage: check
+lint:semver:
+    stage: lint
     before_script:
         - cargo install cargo-semver-checks --locked
     script:
@@ -55,9 +63,9 @@ semver:
         - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
         - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
 
-# -- License compliance -----------------------------------------------------
+# -- License compliance and security ----------------------------------------
 
-licenses:
+lint:deny:
     stage: check
     before_script:
         - cargo install cargo-deny --locked
