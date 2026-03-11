@@ -24,8 +24,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 # Documentation (must be warning-free)
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
-# License compliance
-cargo deny check licenses
+# Deny checks
+cargo deny check
 
 # Tests
 cargo test --workspace --all-features

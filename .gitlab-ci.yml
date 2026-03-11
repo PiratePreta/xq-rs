@@ -62,7 +62,7 @@ licenses:
     before_script:
         - cargo install cargo-deny --locked
     script:
-        - cargo deny check licenses
+        - cargo deny check
 
 # -- Unit tests -------------------------------------------------------------
 
