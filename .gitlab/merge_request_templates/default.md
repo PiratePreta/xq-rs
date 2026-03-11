@@ -24,5 +24,6 @@
 - [ ] `cargo doc --workspace --all-features --no-deps` builds without warnings
 - [ ] `cargo deny check` passes
 - [ ] `cargo test --workspace --all-features` passes
+- [ ] `cargo +nightly miri test --workspace --all-features` passes (or N/A)
 - [ ] All public items are documented
 - [ ] New source files include the AGPL license header

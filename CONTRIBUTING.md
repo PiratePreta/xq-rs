@@ -65,10 +65,22 @@ Implements #12
 
 Public API changes must be semver-compatible. `cargo semver-checks` runs automatically on the default branch and on version tags. Breaking changes require a major version bump.
 
+## Undefined Behaviour
+
+Rust Miri runs in CI to detect undefined behaviour and unsound code originating
+from `unsafe` blocks, dependencies, or procedural macros.
+
+You can run Miri locally on nightly:
+
+```sh
+rustup toolchain install nightly --component miri
+cargo +nightly miri setup
+cargo +nightly miri test --workspace --all-features
+```
+
 ## Code Style
 
 - All public items must be documented (`missing-docs` is enforced).
-- `unsafe` code is not allowed (`unsafe-code = "deny"`).
 - Follow standard Rust naming conventions (`nonstandard-style = "deny"`).
 - Run `cargo fmt` before committing — formatting is checked in CI.
 
