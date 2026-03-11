@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = []
+
+[workspace.package]
+license = "AGPL-3.0-or-later"
+repository = "https://gitlab.com/piqued/quip-aglais"
+
+[workspace.dependencies]
+
+[workspace.lints.rust]
+missing-docs = "warn"
+nonstandard-style = "warn"
+redundant-lifetimes = "warn"
+rust-2018-idioms = "deny"
+unreachable-pub = "warn"
+unsafe-code = "deny"
+unused-extern-crates = "warn"
+unused-imports = "warn"
+unused-must-use = "warn"
+unused-qualifications = "warn"
+unused-results = "warn"
+
+[workspace.lints.clippy]
+dbg-macro = "warn"
+manual-string-new = "warn"
+octal-escapes = "allow"
+redundant-clone = "warn"
+uninlined-format-args = "warn"
+use-self = "warn"
+indexing-slicing = "warn"
+index_refutable_slice = "warn"
+
+[workspace.lints.rustdoc]
+all = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 16
+
+[profile.ci-test]
+inherits = "release"
+opt-level = 0
+lto = false
+codegen-units = 256
+debug-assertions = true
+overflow-checks = true
