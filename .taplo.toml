@@ -3,6 +3,7 @@ include = [
 ]
 
 exclude = [
+    ".cargo/**",
     ".git/**",
     "target/**",
     "**/Cargo.lock",
