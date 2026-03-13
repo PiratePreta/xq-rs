@@ -1,0 +1,20 @@
+[package]
+name                 = "aglais-xqvm-disasm"
+description          = "Disassembler for Aglais XQVM"
+version              = "0.1.0"
+license.workspace    = true
+repository.workspace = true
+edition              = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+aglais-xqvm-bytecode = { path = "../bytecode" }
+clap                 = { version = "4", features = [ "derive" ] }
+miette               = { version = "7", features = [ "fancy" ] }
+thiserror            = "2"
+
+[[bin]]
+name = "disasm"
+path = "src/bin/disasm.rs"
