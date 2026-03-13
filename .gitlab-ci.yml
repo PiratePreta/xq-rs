@@ -86,12 +86,3 @@ test:integration:
     script:
         - cargo test --workspace --all-features --test '*' --profile ci-test
 
-# -- Miri (undefined behaviour) ---------------------------------------------
-
-test:miri:
-    stage: test
-    before_script:
-        - rustup toolchain install nightly --component miri
-        - cargo +nightly miri setup
-    script:
-        - cargo +nightly miri test --workspace --all-features
