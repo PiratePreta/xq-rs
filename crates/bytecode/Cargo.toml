@@ -10,6 +10,7 @@ edition              = "2024"
 workspace = true
 
 [dependencies]
+pastey    = "0.2.1"
 postcard  = { version = "1", features = [ "alloc" ] }
 serde     = { version = "1", default-features = false }
 thiserror = "2"

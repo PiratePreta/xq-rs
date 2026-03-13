@@ -6,6 +6,7 @@ version = 4
 name = "aglais-xqvm-bytecode"
 version = "0.1.0"
 dependencies = [
+ "pastey",
  "postcard",
  "serde",
  "serde_json",
@@ -97,6 +98,12 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+
+[[package]]
+name = "pastey"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b867cad97c0791bbd3aaa6472142568c6c9e8f71937e98379f584cfb0cf35bec"
 
 [[package]]
 name = "postcard"
