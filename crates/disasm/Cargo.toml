@@ -16,5 +16,5 @@ miette.workspace     = true
 thiserror.workspace  = true
 
 [[bin]]
-name = "disasm"
-path = "src/bin/disasm.rs"
+name = "xqdism"
+path = "src/bin/xqdism.rs"

@@ -30,13 +30,13 @@ use aglais_xqvm_bytecode::types::{Instruction, Register};
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn disasm() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_disasm"))
+fn xqdism() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_xqdism"))
 }
 
 /// Run `disasm` with `input` piped to stdin; return the captured output.
 fn run_stdin(input: &[u8]) -> Output {
-    let mut child = disasm()
+    let mut child = xqdism()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -53,9 +53,9 @@ fn run_stdin(input: &[u8]) -> Output {
     child.wait_with_output().expect("failed to wait on disasm")
 }
 
-/// Run `disasm` with `path` as the file argument; return the captured output.
+/// Run `xqdism` with `path` as the file argument; return the captured output.
 fn run_file(path: &Path) -> Output {
-    disasm()
+    xqdism()
         .arg(path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
