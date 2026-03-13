@@ -5,3 +5,9 @@ version              = "0.1.0"
 license.workspace    = true
 repository.workspace = true
 edition              = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"

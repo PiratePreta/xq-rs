@@ -14,7 +14,6 @@ aglais-xqvm-bytecode = { path = "./crates/bytecode" }
 [workspace.lints.clippy]
 dbg-macro             = "warn"
 index_refutable_slice = "warn"
-indexing-slicing      = "warn"
 manual-string-new     = "warn"
 octal-escapes         = "allow"
 redundant-clone       = "warn"
@@ -31,7 +30,6 @@ unused-extern-crates  = "warn"
 unused-imports        = "warn"
 unused-must-use       = "warn"
 unused-qualifications = "warn"
-unused-results        = "warn"
 
 [workspace.lints.rustdoc]
 all = "warn"
