@@ -17,8 +17,8 @@
 
 //! Bytecode definition for the Aglais X-Quadratic Virtual Machine (XQVM).
 //!
-//! This crate defines the opcode table and instruction types used across
-//! all XQVM tooling crates.
+//! This crate defines the opcode table, instruction types, and binary
+//! serialization for the XQVM bytecode format.
 //!
 //! | Item | Description |
 //! |---|---|
@@ -26,6 +26,7 @@
 //! | [`types::Opcode`] | `#[repr(u8)]` enum and [`types::DecodeError`] |
 //! | [`types::Instruction`] | Fully decoded instruction with operands |
 //! | [`types::Register`] | 8-bit register slot operand |
+//! | [`codec`] | [`codec::encode`] / [`codec::decode`] -- binary wire format |
 //!
 //! # The x-macro pattern
 //!
@@ -73,3 +74,4 @@
 // lands at the crate root automatically.
 #[macro_use]
 pub mod types;
+pub mod codec;
