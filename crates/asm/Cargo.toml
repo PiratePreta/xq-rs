@@ -1,0 +1,22 @@
+[package]
+name                 = "aglais-xqvm-asm"
+description          = "Assembler for Aglais XQVM"
+version              = "0.1.0"
+license.workspace    = true
+repository.workspace = true
+edition              = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+aglais-xqvm-bytecode = { path = "../bytecode" }
+clap                 = { version = "4", features = [ "derive" ] }
+miette               = { version = "7", features = [ "fancy" ] }
+pest                 = "2"
+pest_derive          = "2"
+thiserror            = "2"
+
+[[bin]]
+name = "xqasm"
+path = "src/bin/xqasm.rs"

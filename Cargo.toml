@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/bytecode",
+    "crates/asm",
     "crates/disasm",
 ]
 
