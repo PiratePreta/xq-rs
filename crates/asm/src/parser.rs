@@ -129,7 +129,9 @@ fn visit_line(
                 let label_name = inner
                     .into_inner()
                     .next()
-                    .expect("label_def always contains label_id")
+                    .unwrap_or_else(|| {
+                        unreachable!("grammar guarantees label_def contains label_id")
+                    })
                     .as_str()
                     .to_string();
                 out.push(AsmLine::LabelDef {
@@ -157,7 +159,7 @@ fn visit_instruction(
 
     let mnemonic_pair = inner
         .next()
-        .expect("instruction always starts with mnemonic");
+        .unwrap_or_else(|| unreachable!("grammar guarantees instruction starts with mnemonic"));
     let mnemonic = mnemonic_pair.as_str().to_string();
 
     let mut operands = Vec::new();
@@ -183,7 +185,7 @@ fn visit_operand(
     let inner = pair
         .into_inner()
         .next()
-        .expect("operand always has one inner rule");
+        .unwrap_or_else(|| unreachable!("grammar guarantees operand has one inner rule"));
     let (line, col) = inner.line_col();
     let text = inner.as_str();
 

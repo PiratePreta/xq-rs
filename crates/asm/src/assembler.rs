@@ -438,7 +438,8 @@ macro_rules! impl_assemble_non_jump {
                         let mut _iter = instr.operands.iter();
                         $(
                             let $fname = <$ftype as FromOperand>::from_operand(
-                                _iter.next().unwrap(),
+                                // SAFETY: operand count was verified to equal EXPECTED above.
+                                _iter.next().unwrap_or_else(|| unreachable!()),
                                 stringify!($fname),
                                 &instr.mnemonic,
                                 instr.line,

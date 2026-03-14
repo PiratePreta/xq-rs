@@ -67,7 +67,10 @@ use crate::types::{Instruction, Register};
 /// assert_eq!(codec::encode(&Instruction::Nop {}),  [0x00]);
 /// ```
 pub fn encode(instr: &Instruction) -> Vec<u8> {
-    postcard::to_allocvec(instr).expect("encoding a well-formed Instruction never fails")
+    // SAFETY: postcard serialization of a statically-known Rust type with no
+    // I/O and a fixed-capacity allocator is infallible -- it only fails on
+    // I/O errors or allocator exhaustion, neither of which can occur here.
+    postcard::to_allocvec(instr).unwrap_or_else(|_| unreachable!())
 }
 
 /// Decode a single instruction from the start of `bytes`.
