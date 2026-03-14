@@ -4,7 +4,7 @@
 // contain an optional label definition, an optional instruction, and an
 // optional comment.  Blank lines and comment-only lines are fully legal.
 //
-// Mnemonics are uppercase ASCII (e.g. PUSH, VECPUSH, IDXGRID).
+// Mnemonics are case-insensitive ASCII (e.g. PUSH, push, pUsH).
 // Label identifiers are lower/mixed case starting with a letter or underscore.
 // Registers have the form r<digits> (e.g. r0, r255).
 // Integer literals may be signed decimal or 0x-prefixed hexadecimal.
@@ -31,8 +31,8 @@ register = @{ "r" ~ ASCII_DIGIT{1, 3} }
 /// A label identifier: letter or underscore, then alphanumeric or underscore.
 label_id = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 
-/// An instruction mnemonic: one or more uppercase letters/digits.
-mnemonic = @{ ASCII_ALPHA_UPPER ~ (ASCII_ALPHA_UPPER | ASCII_DIGIT)* }
+/// An instruction mnemonic: one or more ASCII letters/digits, any case.
+mnemonic = @{ ASCII_ALPHA ~ (ASCII_ALPHA | ASCII_DIGIT)* }
 
 // ---------------------------------------------------------------------------
 // Operands

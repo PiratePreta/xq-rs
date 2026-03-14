@@ -236,6 +236,43 @@ fn hex_and_decimal_literals() {
 }
 
 // ---------------------------------------------------------------------------
+// Case-insensitive mnemonics
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowercase_mnemonics_assemble() {
+    let instrs = asm("push 5\npush 3\nadd\nhalt");
+    assert_eq!(instrs[0], Instruction::Push { imm: 5 });
+    assert_eq!(instrs[1], Instruction::Push { imm: 3 });
+    assert_eq!(instrs[2], Instruction::Add {});
+    assert_eq!(instrs[3], Instruction::Halt {});
+}
+
+#[test]
+fn mixed_case_mnemonics_assemble() {
+    let instrs = asm("pUsH 7\nHaLt");
+    assert_eq!(instrs[0], Instruction::Push { imm: 7 });
+    assert_eq!(instrs[1], Instruction::Halt {});
+}
+
+#[test]
+fn mixed_case_produces_same_bytecode_as_uppercase() {
+    let upper = assemble_source("PUSH 1\nADD\nHALT").unwrap();
+    let lower = assemble_source("push 1\nadd\nhalt").unwrap();
+    let mixed = assemble_source("Push 1\nAdd\nHalt").unwrap();
+    assert_eq!(upper, lower);
+    assert_eq!(upper, mixed);
+}
+
+#[test]
+fn case_insensitive_jump_mnemonics() {
+    let instrs = asm("jump done\nnop\ndone:\nhalt");
+    assert_eq!(instrs[0], Instruction::Jump { offset: 5 });
+    assert_eq!(instrs[1], Instruction::Nop {});
+    assert_eq!(instrs[2], Instruction::Halt {});
+}
+
+// ---------------------------------------------------------------------------
 // Error cases
 // ---------------------------------------------------------------------------
 

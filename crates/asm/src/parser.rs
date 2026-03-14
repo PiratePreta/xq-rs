@@ -160,7 +160,7 @@ fn visit_instruction(
     let mnemonic_pair = inner
         .next()
         .unwrap_or_else(|| unreachable!("grammar guarantees instruction starts with mnemonic"));
-    let mnemonic = mnemonic_pair.as_str().to_string();
+    let mnemonic = mnemonic_pair.as_str().to_ascii_uppercase();
 
     let mut operands = Vec::new();
     for op_pair in inner {
@@ -398,5 +398,47 @@ mod tests {
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "VECPUSH");
         assert_eq!(i.operands, [Operand::Register(5)]);
+    }
+
+    #[test]
+    fn mnemonic_lowercase_normalized() {
+        let lines = parse_test("push 1").unwrap();
+        let i = instr(&lines);
+        assert_eq!(i.mnemonic, "PUSH");
+        assert_eq!(i.operands, [Operand::Integer(1)]);
+    }
+
+    #[test]
+    fn mnemonic_mixed_case_normalized() {
+        let lines = parse_test("pUsH 7").unwrap();
+        let i = instr(&lines);
+        assert_eq!(i.mnemonic, "PUSH");
+        assert_eq!(i.operands, [Operand::Integer(7)]);
+    }
+
+    #[test]
+    fn mnemonic_titlecase_normalized() {
+        let lines = parse_test("Halt").unwrap();
+        let i = instr(&lines);
+        assert_eq!(i.mnemonic, "HALT");
+        assert!(i.operands.is_empty());
+    }
+
+    #[test]
+    fn mnemonic_case_insensitive_program() {
+        let src = "push 1\npush 2\nadd\nhalt";
+        let lines = parse_test(src).unwrap();
+        assert_eq!(lines.len(), 4);
+        let mnemonics: Vec<&str> = lines
+            .iter()
+            .filter_map(|l| {
+                if let AsmLine::Instruction(i) = l {
+                    Some(i.mnemonic.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(mnemonics, ["PUSH", "PUSH", "ADD", "HALT"]);
     }
 }
