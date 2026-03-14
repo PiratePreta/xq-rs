@@ -27,14 +27,14 @@
 //! use aglais_xqvm_asm::parser::parse;
 //! use aglais_xqvm_asm::ast::{AsmLine, Operand};
 //!
-//! let lines = parse("PUSH 42\nHALT").unwrap();
+//! let lines = parse("PUSH 42\nHALT", "<test>").unwrap();
 //! assert_eq!(lines.len(), 2);
 //! ```
 
 use pest::Parser;
 
 use crate::ast::{AsmLine, Operand, ParsedInstr};
-use crate::error::ParseError;
+use crate::error::{ParseError, make_span, make_src};
 
 // ---------------------------------------------------------------------------
 // Pest parser generated from grammar.pest
@@ -62,9 +62,11 @@ use generated::Rule;
 
 /// Parse `source` into a flat list of [`AsmLine`] values.
 ///
-/// Blank lines and comment-only lines produce no entries.  A line that
-/// contains both a label definition and an instruction produces two entries:
-/// first a [`AsmLine::LabelDef`], then an [`AsmLine::Instruction`].
+/// `name` is used as the file name in diagnostic output (e.g. `"prog.xqasm"`
+/// or `"<input>"`).  Blank lines and comment-only lines produce no entries.
+/// A line that contains both a label definition and an instruction produces
+/// two entries: first a [`AsmLine::LabelDef`], then an
+/// [`AsmLine::Instruction`].
 ///
 /// # Errors
 ///
@@ -76,20 +78,20 @@ use generated::Rule;
 /// use aglais_xqvm_asm::parser::parse;
 /// use aglais_xqvm_asm::ast::{AsmLine, Operand};
 ///
-/// let lines = parse("loop:\n  JUMPI loop").unwrap();
-/// assert!(matches!(lines[0], AsmLine::LabelDef(_)));
+/// let lines = parse("loop:\n  JUMPI loop", "<test>").unwrap();
+/// assert!(matches!(lines[0], AsmLine::LabelDef { .. }));
 /// assert!(matches!(lines[1], AsmLine::Instruction(_)));
 /// ```
-pub fn parse(source: &str) -> Result<Vec<AsmLine>, ParseError> {
+pub fn parse(source: &str, name: &str) -> Result<Vec<AsmLine>, ParseError> {
     let pairs = AsmParser::parse(Rule::program, source).map_err(|e| {
         let (line, col) = match e.line_col {
             pest::error::LineColLocation::Pos((l, c)) => (l, c),
             pest::error::LineColLocation::Span((l, c), _) => (l, c),
         };
         ParseError {
-            line,
-            col,
             message: e.variant.to_string(),
+            src: make_src(source, name),
+            span: make_span(source, line, col, 1),
         }
     })?;
 
@@ -103,7 +105,7 @@ pub fn parse(source: &str) -> Result<Vec<AsmLine>, ParseError> {
             if line_pair.as_rule() != Rule::line {
                 continue;
             }
-            visit_line(line_pair, &mut out)?;
+            visit_line(line_pair, source, name, &mut out)?;
         }
     }
 
@@ -116,21 +118,28 @@ pub fn parse(source: &str) -> Result<Vec<AsmLine>, ParseError> {
 
 fn visit_line(
     line_pair: pest::iterators::Pair<'_, Rule>,
+    source: &str,
+    name: &str,
     out: &mut Vec<AsmLine>,
 ) -> Result<(), ParseError> {
     for inner in line_pair.into_inner() {
         match inner.as_rule() {
             Rule::label_def => {
-                let name = inner
+                let (line, col) = inner.line_col();
+                let label_name = inner
                     .into_inner()
                     .next()
                     .expect("label_def always contains label_id")
                     .as_str()
                     .to_string();
-                out.push(AsmLine::LabelDef(name));
+                out.push(AsmLine::LabelDef {
+                    name: label_name,
+                    line,
+                    col,
+                });
             }
             Rule::instruction => {
-                out.push(visit_instruction(inner)?);
+                out.push(visit_instruction(inner, source, name)?);
             }
             _ => {}
         }
@@ -138,7 +147,11 @@ fn visit_line(
     Ok(())
 }
 
-fn visit_instruction(pair: pest::iterators::Pair<'_, Rule>) -> Result<AsmLine, ParseError> {
+fn visit_instruction(
+    pair: pest::iterators::Pair<'_, Rule>,
+    source: &str,
+    name: &str,
+) -> Result<AsmLine, ParseError> {
     let (line, col) = pair.line_col();
     let mut inner = pair.into_inner();
 
@@ -150,7 +163,7 @@ fn visit_instruction(pair: pest::iterators::Pair<'_, Rule>) -> Result<AsmLine, P
     let mut operands = Vec::new();
     for op_pair in inner {
         if op_pair.as_rule() == Rule::operand {
-            operands.push(visit_operand(op_pair)?);
+            operands.push(visit_operand(op_pair, source, name)?);
         }
     }
 
@@ -162,7 +175,11 @@ fn visit_instruction(pair: pest::iterators::Pair<'_, Rule>) -> Result<AsmLine, P
     }))
 }
 
-fn visit_operand(pair: pest::iterators::Pair<'_, Rule>) -> Result<Operand, ParseError> {
+fn visit_operand(
+    pair: pest::iterators::Pair<'_, Rule>,
+    source: &str,
+    name: &str,
+) -> Result<Operand, ParseError> {
     let inner = pair
         .into_inner()
         .next()
@@ -174,21 +191,21 @@ fn visit_operand(pair: pest::iterators::Pair<'_, Rule>) -> Result<Operand, Parse
         Rule::register => {
             let digits = &text[1..]; // strip leading 'r'
             let slot: u64 = digits.parse().map_err(|_| ParseError {
-                line,
-                col,
                 message: format!("register index '{digits}' is not a valid number"),
+                src: make_src(source, name),
+                span: make_span(source, line, col, text.len()),
             })?;
             if slot > 255 {
                 return Err(ParseError {
-                    line,
-                    col,
                     message: format!("register index {slot} is out of range [0, 255]"),
+                    src: make_src(source, name),
+                    span: make_span(source, line, col, text.len()),
                 });
             }
             Ok(Operand::Register(slot as u8))
         }
         Rule::integer => {
-            let value = parse_integer(text, line, col)?;
+            let value = parse_integer(text, line, col, source, name)?;
             Ok(Operand::Integer(value))
         }
         Rule::label_id => Ok(Operand::LabelRef(text.to_string())),
@@ -196,7 +213,13 @@ fn visit_operand(pair: pest::iterators::Pair<'_, Rule>) -> Result<Operand, Parse
     }
 }
 
-fn parse_integer(text: &str, line: usize, col: usize) -> Result<i64, ParseError> {
+fn parse_integer(
+    text: &str,
+    line: usize,
+    col: usize,
+    source: &str,
+    name: &str,
+) -> Result<i64, ParseError> {
     let (neg, rest) = match text.strip_prefix('-') {
         Some(r) => (true, r),
         None => (false, text.strip_prefix('+').unwrap_or(text)),
@@ -208,26 +231,26 @@ fn parse_integer(text: &str, line: usize, col: usize) -> Result<i64, ParseError>
         rest.parse::<u64>()
     }
     .map_err(|_| ParseError {
-        line,
-        col,
         message: format!("invalid integer literal '{text}'"),
+        src: make_src(source, name),
+        span: make_span(source, line, col, text.len()),
     })?;
 
     if neg {
         // -magnitude must fit in i64: magnitude <= 2^63
         if magnitude > (i64::MAX as u64) + 1 {
             return Err(ParseError {
-                line,
-                col,
                 message: format!("integer literal '{text}' underflows i64"),
+                src: make_src(source, name),
+                span: make_span(source, line, col, text.len()),
             });
         }
         Ok(-(magnitude as i64))
     } else {
         i64::try_from(magnitude).map_err(|_| ParseError {
-            line,
-            col,
             message: format!("integer literal '{text}' overflows i64"),
+            src: make_src(source, name),
+            span: make_span(source, line, col, text.len()),
         })
     }
 }
@@ -250,9 +273,13 @@ mod tests {
         panic!("no instruction found")
     }
 
+    fn parse_test(src: &str) -> Result<Vec<AsmLine>, ParseError> {
+        parse(src, "<test>")
+    }
+
     #[test]
     fn parse_nop() {
-        let lines = parse("NOP").unwrap();
+        let lines = parse_test("NOP").unwrap();
         assert_eq!(lines.len(), 1);
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "NOP");
@@ -261,7 +288,7 @@ mod tests {
 
     #[test]
     fn parse_push_positive() {
-        let lines = parse("PUSH 42").unwrap();
+        let lines = parse_test("PUSH 42").unwrap();
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "PUSH");
         assert_eq!(i.operands, [Operand::Integer(42)]);
@@ -269,21 +296,21 @@ mod tests {
 
     #[test]
     fn parse_push_negative() {
-        let lines = parse("PUSH -99").unwrap();
+        let lines = parse_test("PUSH -99").unwrap();
         let i = instr(&lines);
         assert_eq!(i.operands, [Operand::Integer(-99)]);
     }
 
     #[test]
     fn parse_push_hex() {
-        let lines = parse("PUSH 0xFF").unwrap();
+        let lines = parse_test("PUSH 0xFF").unwrap();
         let i = instr(&lines);
         assert_eq!(i.operands, [Operand::Integer(255)]);
     }
 
     #[test]
     fn parse_load_register() {
-        let lines = parse("LOAD r3").unwrap();
+        let lines = parse_test("LOAD r3").unwrap();
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "LOAD");
         assert_eq!(i.operands, [Operand::Register(3)]);
@@ -291,7 +318,7 @@ mod tests {
 
     #[test]
     fn parse_energy_two_registers() {
-        let lines = parse("ENERGY r0 r1").unwrap();
+        let lines = parse_test("ENERGY r0 r1").unwrap();
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "ENERGY");
         assert_eq!(i.operands, [Operand::Register(0), Operand::Register(1)]);
@@ -299,30 +326,30 @@ mod tests {
 
     #[test]
     fn parse_jump_label_ref() {
-        let lines = parse("JUMP loop_top").unwrap();
+        let lines = parse_test("JUMP loop_top").unwrap();
         let i = instr(&lines);
         assert_eq!(i.operands, [Operand::LabelRef("loop_top".to_string())]);
     }
 
     #[test]
     fn parse_jump_integer_offset() {
-        let lines = parse("JUMP -10").unwrap();
+        let lines = parse_test("JUMP -10").unwrap();
         let i = instr(&lines);
         assert_eq!(i.operands, [Operand::Integer(-10)]);
     }
 
     #[test]
     fn parse_label_def() {
-        let lines = parse("loop:").unwrap();
+        let lines = parse_test("loop:").unwrap();
         assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0], AsmLine::LabelDef("loop".to_string()));
+        assert!(matches!(&lines[0], AsmLine::LabelDef { name, .. } if name == "loop"));
     }
 
     #[test]
     fn parse_label_and_instruction_same_line() {
-        let lines = parse("start: NOP").unwrap();
+        let lines = parse_test("start: NOP").unwrap();
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], AsmLine::LabelDef("start".to_string()));
+        assert!(matches!(&lines[0], AsmLine::LabelDef { name, .. } if name == "start"));
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "NOP");
     }
@@ -330,13 +357,13 @@ mod tests {
     #[test]
     fn parse_multiline_program() {
         let src = "PUSH 1\nPUSH 2\nADD\nHALT";
-        let lines = parse(src).unwrap();
+        let lines = parse_test(src).unwrap();
         assert_eq!(lines.len(), 4);
     }
 
     #[test]
     fn parse_comment_only_line_ignored() {
-        let lines = parse("; this is a comment\nHALT").unwrap();
+        let lines = parse_test("; this is a comment\nHALT").unwrap();
         assert_eq!(lines.len(), 1);
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "HALT");
@@ -344,30 +371,30 @@ mod tests {
 
     #[test]
     fn parse_inline_comment() {
-        let lines = parse("NOP ; do nothing").unwrap();
+        let lines = parse_test("NOP ; do nothing").unwrap();
         assert_eq!(lines.len(), 1);
     }
 
     #[test]
     fn parse_blank_lines_ignored() {
         let src = "\nNOP\n\nHALT\n";
-        let lines = parse(src).unwrap();
+        let lines = parse_test(src).unwrap();
         assert_eq!(lines.len(), 2);
     }
 
     #[test]
     fn parse_register_out_of_range() {
-        assert!(parse("LOAD r256").is_err());
+        assert!(parse_test("LOAD r256").is_err());
     }
 
     #[test]
     fn parse_invalid_syntax_returns_error() {
-        assert!(parse("@@@").is_err());
+        assert!(parse_test("@@@").is_err());
     }
 
     #[test]
     fn parse_vecpush_instruction() {
-        let lines = parse("VECPUSH r5").unwrap();
+        let lines = parse_test("VECPUSH r5").unwrap();
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "VECPUSH");
         assert_eq!(i.operands, [Operand::Register(5)]);

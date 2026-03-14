@@ -82,7 +82,14 @@ pub enum AsmLine {
     /// A label definition, e.g. `loop_top:`.
     ///
     /// The label is anchored to the byte offset of the *next* instruction.
-    LabelDef(String),
+    LabelDef {
+        /// The label name without the trailing colon.
+        name: String,
+        /// 1-based source line of the definition.
+        line: usize,
+        /// 1-based source column of the first character of the label name.
+        col: usize,
+    },
     /// An instruction with zero or more operands.
     Instruction(ParsedInstr),
 }

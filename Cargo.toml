@@ -15,7 +15,7 @@ aglais-xqvm-asm      = { path = "./crates/asm" }
 aglais-xqvm-bytecode = { path = "./crates/bytecode" }
 aglais-xqvm-disasm   = { path = "./crates/disasm" }
 clap                 = { version = "4", features = [ "derive" ] }
-miette               = { version = "7", features = [ "fancy" ] }
+miette               = { version = "7", features = [ "fancy", "derive" ] }
 pastey               = "0.2.1"
 serde                = { version = "1", default-features = false }
 thiserror            = "2"

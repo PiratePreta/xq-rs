@@ -23,7 +23,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use miette::{IntoDiagnostic, WrapErr, miette};
+use miette::{IntoDiagnostic, WrapErr};
 
 /// Assemble an XQVM assembly source file into binary bytecode.
 #[derive(Parser, Debug)]
@@ -48,7 +48,9 @@ fn main() -> miette::Result<()> {
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to read '{}'", args.input.display()))?;
 
-    let bytecode = aglais_xqvm_asm::assemble_source(&source).map_err(|e| miette!("{e}"))?;
+    let name = args.input.display().to_string();
+    let lines = aglais_xqvm_asm::parser::parse(&source, &name)?;
+    let bytecode = aglais_xqvm_asm::assembler::assemble(&lines, &source, &name)?;
 
     if args.stdout {
         use std::io::Write as _;

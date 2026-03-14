@@ -16,23 +16,79 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Error types for the XQVM assembler.
+//!
+//! All error types implement [`miette::Diagnostic`], so callers that use
+//! `miette::Result` receive a source-code snippet with a caret pointing to
+//! the exact token that caused the failure.
 
+use std::sync::Arc;
+
+use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
+
+// ---------------------------------------------------------------------------
+// Internal span helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a 1-based `(line, col)` position to a zero-based byte offset.
+pub(crate) fn offset_for(source: &str, line: usize, col: usize) -> usize {
+    let mut cur_line = 1usize;
+    let mut line_start = 0usize;
+    for (i, ch) in source.char_indices() {
+        if cur_line == line {
+            return (line_start + col.saturating_sub(1)).min(source.len());
+        }
+        if ch == '\n' {
+            cur_line += 1;
+            line_start = i + ch.len_utf8();
+        }
+    }
+    if cur_line == line {
+        return (line_start + col.saturating_sub(1)).min(source.len());
+    }
+    source.len()
+}
+
+/// Build a [`NamedSource`] from a source string and a display name.
+pub(crate) fn make_src(source: &str, name: &str) -> NamedSource<Arc<str>> {
+    NamedSource::new(name, Arc::from(source))
+}
+
+/// Build a [`SourceSpan`] pointing at a 1-based `(line, col)` with the given
+/// byte length.
+pub(crate) fn make_span(source: &str, line: usize, col: usize, len: usize) -> SourceSpan {
+    (offset_for(source, line, col), len).into()
+}
 
 // ---------------------------------------------------------------------------
 // ParseError
 // ---------------------------------------------------------------------------
 
 /// A syntax error produced by the parser.
-#[derive(Debug, Error)]
-#[error("parse error at line {line}, col {col}: {message}")]
+///
+/// The embedded [`NamedSource`] and [`SourceSpan`] let miette render a
+/// source snippet with a caret when the error is displayed.
+///
+/// # Examples
+///
+/// ```rust
+/// use aglais_xqvm_asm::parser::parse;
+///
+/// let err = parse("@@@", "<test>").unwrap_err();
+/// assert!(err.to_string().contains("error"));
+/// ```
+#[derive(Debug, Error, Diagnostic)]
+#[error("{message}")]
+#[diagnostic(code(xqasm::parse_error))]
 pub struct ParseError {
-    /// 1-based line number where the error occurred.
-    pub line: usize,
-    /// 1-based column number where the error occurred.
-    pub col: usize,
     /// Human-readable description of the error.
     pub message: String,
+    /// Source text used for snippet rendering.
+    #[source_code]
+    pub(crate) src: NamedSource<Arc<str>>,
+    /// Span of the offending token.
+    #[label("syntax error")]
+    pub(crate) span: SourceSpan,
 }
 
 // ---------------------------------------------------------------------------
@@ -40,21 +96,28 @@ pub struct ParseError {
 // ---------------------------------------------------------------------------
 
 /// A semantic error produced by the assembler.
-#[derive(Debug, Error)]
+///
+/// Each variant carries a [`NamedSource`] and a [`SourceSpan`] so that miette
+/// can display the failing token inline in the source listing.
+#[derive(Debug, Error, Diagnostic)]
 pub enum AssembleError {
     /// The mnemonic string does not correspond to any XQVM opcode.
-    #[error("line {line}: unknown mnemonic '{mnemonic}'")]
+    #[error("unknown mnemonic `{mnemonic}`")]
+    #[diagnostic(code(xqasm::unknown_mnemonic))]
     UnknownMnemonic {
         /// The unrecognised mnemonic string.
         mnemonic: String,
-        /// 1-based source line number.
-        line: usize,
-        /// 1-based source column.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("unknown mnemonic")]
+        span: SourceSpan,
     },
 
     /// The instruction was given the wrong number of operands.
-    #[error("line {line}: '{mnemonic}' expects {expected} operand(s), got {got}")]
+    #[error("'{mnemonic}' expects {expected} operand(s), got {got}")]
+    #[diagnostic(code(xqasm::wrong_operand_count))]
     WrongOperandCount {
         /// Mnemonic of the failing instruction.
         mnemonic: String,
@@ -62,15 +125,18 @@ pub enum AssembleError {
         expected: usize,
         /// Number of operands actually supplied.
         got: usize,
-        /// 1-based source line number.
-        line: usize,
-        /// 1-based source column.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("wrong number of operands")]
+        span: SourceSpan,
     },
 
     /// An operand was of the wrong kind (e.g. an integer where a register
     /// was expected).
-    #[error("line {line}: operand '{field}' of '{mnemonic}' must be a {expected_kind}")]
+    #[error("operand '{field}' of '{mnemonic}' must be a {expected_kind}")]
+    #[diagnostic(code(xqasm::wrong_operand_kind))]
     WrongOperandKind {
         /// Mnemonic of the failing instruction.
         mnemonic: String,
@@ -78,28 +144,34 @@ pub enum AssembleError {
         field: String,
         /// Description of the expected kind.
         expected_kind: String,
-        /// 1-based source line number.
-        line: usize,
-        /// 1-based source column.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("wrong operand kind")]
+        span: SourceSpan,
     },
 
     /// A register literal was out of the valid `[0, 255]` range.
-    #[error("line {line}: register index {value} is out of range [0, 255]")]
+    #[error("register index {value} is out of range [0, 255]")]
+    #[diagnostic(code(xqasm::register_out_of_range))]
     RegisterOutOfRange {
         /// The out-of-range value.
         value: u64,
-        /// 1-based source line.
-        line: usize,
-        /// 1-based source column.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("out of range")]
+        span: SourceSpan,
     },
 
     /// An integer literal could not be converted to the required type.
     #[error(
-        "line {line}: integer {value} does not fit in {target_type} \
+        "integer {value} does not fit in {target_type} \
          (field '{field}' of '{mnemonic}')"
     )]
+    #[diagnostic(code(xqasm::integer_out_of_range))]
     IntegerOutOfRange {
         /// The problematic integer value.
         value: i64,
@@ -109,49 +181,60 @@ pub enum AssembleError {
         field: String,
         /// Mnemonic.
         mnemonic: String,
-        /// 1-based source line.
-        line: usize,
-        /// 1-based source column.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("out of range")]
+        span: SourceSpan,
     },
 
     /// A label reference was used in a `JUMP`/`JUMPI` but never defined.
-    #[error("line {line}: undefined label '{label}'")]
+    #[error("undefined label '{label}'")]
+    #[diagnostic(code(xqasm::undefined_label))]
     UndefinedLabel {
         /// The label name that was referenced but never defined.
         label: String,
-        /// 1-based source line.
-        line: usize,
-        /// 1-based source column.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("label not defined")]
+        span: SourceSpan,
     },
 
     /// A label was defined more than once in the same source.
-    #[error("label '{label}' is defined more than once (second definition at line {line})")]
+    #[error("label '{label}' is defined more than once")]
+    #[diagnostic(code(xqasm::duplicate_label))]
     DuplicateLabel {
         /// The duplicated label name.
         label: String,
-        /// 1-based source line of the second definition.
-        line: usize,
-        /// 1-based source column of the second definition.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("duplicate definition")]
+        span: SourceSpan,
     },
 
     /// The byte offset between a jump site and its target exceeds the
     /// `i16` range `[-32768, 32767]`.
     #[error(
-        "line {line}: jump offset {delta} to label '{label}' \
+        "jump offset {delta} to label '{label}' \
          does not fit in i16 (max range: -32768..=32767)"
     )]
+    #[diagnostic(code(xqasm::jump_offset_overflow))]
     JumpOffsetOverflow {
         /// The label name.
         label: String,
         /// The computed offset that overflowed.
         delta: i64,
-        /// 1-based source line of the jump instruction.
-        line: usize,
-        /// 1-based source column.
-        col: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+        /// Span of the failing token.
+        #[label("offset too large")]
+        span: SourceSpan,
     },
 }
 
@@ -160,12 +243,18 @@ pub enum AssembleError {
 // ---------------------------------------------------------------------------
 
 /// Top-level error type for the `assemble_source` function.
-#[derive(Debug, Error)]
+///
+/// Implements [`miette::Diagnostic`] by forwarding to the inner parse or
+/// assemble error, so callers see the same source snippet regardless of which
+/// phase failed.
+#[derive(Debug, Error, Diagnostic)]
 pub enum Error {
     /// A syntax error from the pest parser.
     #[error(transparent)]
+    #[diagnostic(transparent)]
     Parse(#[from] ParseError),
     /// A semantic error from the assembler.
     #[error(transparent)]
+    #[diagnostic(transparent)]
     Assemble(#[from] AssembleError),
 }

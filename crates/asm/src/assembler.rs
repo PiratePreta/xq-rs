@@ -39,6 +39,7 @@
 //! use aglais_xqvm_asm::assembler::assemble;
 //! use aglais_xqvm_asm::ast::{AsmLine, Operand, ParsedInstr};
 //!
+//! let src = "PUSH 0\nHALT";
 //! let lines = vec![
 //!     AsmLine::Instruction(ParsedInstr {
 //!         mnemonic: "PUSH".to_string(),
@@ -51,10 +52,15 @@
 //!         line: 2, col: 1,
 //!     }),
 //! ];
-//! let bytes = assemble(&lines).unwrap();
+//! let bytes = assemble(&lines, src, "<test>").unwrap();
 //! assert_eq!(bytes[0], 0x10); // PUSH opcode
 //! assert_eq!(*bytes.last().unwrap(), 0x0F); // HALT opcode
 //! ```
+
+// AssembleError carries a NamedSource<Arc<str>> in every variant so that
+// miette can render source snippets.  The extra size is acceptable because
+// error paths in an assembler are not performance-critical.
+#![allow(clippy::result_large_err)]
 
 use std::collections::HashMap;
 
@@ -63,7 +69,7 @@ use aglais_xqvm_bytecode::opcodes;
 use aglais_xqvm_bytecode::types::{Instruction, Register};
 
 use crate::ast::{AsmLine, Operand, ParsedInstr};
-use crate::error::AssembleError;
+use crate::error::{AssembleError, make_span, make_src};
 
 // ---------------------------------------------------------------------------
 // Opcode constants for JUMP/JUMPI (special-cased in both passes)
@@ -84,6 +90,10 @@ const JUMP_INSTR_SIZE: usize = 4;
 // ---------------------------------------------------------------------------
 
 /// Assemble a list of parsed lines into a binary bytecode buffer.
+///
+/// `source` and `name` are used solely for diagnostic output: they are
+/// embedded in any [`AssembleError`] so that miette can render a source
+/// snippet with a caret pointing at the failing token.
 ///
 /// Performs a two-pass assembly:
 /// 1. Compute byte offsets for every label.
@@ -106,37 +116,46 @@ const JUMP_INSTR_SIZE: usize = 4;
 /// use aglais_xqvm_asm::parser::parse;
 /// use aglais_xqvm_asm::assembler::assemble;
 ///
-/// let lines = parse("PUSH 5\nPUSH 3\nADD\nHALT").unwrap();
-/// let bytes = assemble(&lines).unwrap();
+/// let src = "PUSH 5\nPUSH 3\nADD\nHALT";
+/// let lines = parse(src, "<test>").unwrap();
+/// let bytes = assemble(&lines, src, "<test>").unwrap();
 /// assert!(!bytes.is_empty());
 /// ```
-pub fn assemble(lines: &[AsmLine]) -> Result<Vec<u8>, AssembleError> {
-    let labels = build_label_table(lines)?;
-    emit(lines, &labels)
+pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Vec<u8>, AssembleError> {
+    let labels = build_label_table(lines, source, name)?;
+    emit(lines, &labels, source, name)
 }
 
 // ---------------------------------------------------------------------------
 // Pass 1 -- label table
 // ---------------------------------------------------------------------------
 
-fn build_label_table(lines: &[AsmLine]) -> Result<HashMap<String, usize>, AssembleError> {
+fn build_label_table(
+    lines: &[AsmLine],
+    source: &str,
+    name: &str,
+) -> Result<HashMap<String, usize>, AssembleError> {
     let mut labels: HashMap<String, usize> = HashMap::new();
     let mut offset = 0usize;
 
     for line in lines {
         match line {
-            AsmLine::LabelDef(name) => {
-                if labels.contains_key(name.as_str()) {
+            AsmLine::LabelDef {
+                name: label_name,
+                line: lno,
+                col,
+            } => {
+                if labels.contains_key(label_name.as_str()) {
                     return Err(AssembleError::DuplicateLabel {
-                        label: name.clone(),
-                        line: 0,
-                        col: 0,
+                        label: label_name.clone(),
+                        src: make_src(source, name),
+                        span: make_span(source, *lno, *col, label_name.len()),
                     });
                 }
-                labels.insert(name.clone(), offset);
+                labels.insert(label_name.clone(), offset);
             }
             AsmLine::Instruction(instr) => {
-                offset += instruction_size(instr)?;
+                offset += instruction_size(instr, source, name)?;
             }
         }
     }
@@ -145,7 +164,7 @@ fn build_label_table(lines: &[AsmLine]) -> Result<HashMap<String, usize>, Assemb
 }
 
 /// Return the number of bytes this instruction will occupy in the output.
-fn instruction_size(instr: &ParsedInstr) -> Result<usize, AssembleError> {
+fn instruction_size(instr: &ParsedInstr, source: &str, name: &str) -> Result<usize, AssembleError> {
     match instr.mnemonic.as_str() {
         "JUMP" | "JUMPI" => {
             // Always 4 bytes: 1 opcode + 3-byte forced varint.
@@ -155,14 +174,14 @@ fn instruction_size(instr: &ParsedInstr) -> Result<usize, AssembleError> {
                     mnemonic: instr.mnemonic.clone(),
                     expected: 1,
                     got: instr.operands.len(),
-                    line: instr.line,
-                    col: instr.col,
+                    src: make_src(source, name),
+                    span: make_span(source, instr.line, instr.col, instr.mnemonic.len()),
                 });
             }
             Ok(JUMP_INSTR_SIZE)
         }
         _ => {
-            let encoded = assemble_non_jump(instr)?;
+            let encoded = assemble_non_jump(instr, source, name)?;
             Ok(encoded.len())
         }
     }
@@ -172,12 +191,17 @@ fn instruction_size(instr: &ParsedInstr) -> Result<usize, AssembleError> {
 // Pass 2 -- emit
 // ---------------------------------------------------------------------------
 
-fn emit(lines: &[AsmLine], labels: &HashMap<String, usize>) -> Result<Vec<u8>, AssembleError> {
+fn emit(
+    lines: &[AsmLine],
+    labels: &HashMap<String, usize>,
+    source: &str,
+    name: &str,
+) -> Result<Vec<u8>, AssembleError> {
     let mut buf: Vec<u8> = Vec::new();
 
     for line in lines {
         if let AsmLine::Instruction(instr) = line {
-            let bytes = assemble_instr(instr, buf.len(), labels)?;
+            let bytes = assemble_instr(instr, buf.len(), labels, source, name)?;
             buf.extend_from_slice(&bytes);
         }
     }
@@ -189,10 +213,12 @@ fn assemble_instr(
     instr: &ParsedInstr,
     site: usize,
     labels: &HashMap<String, usize>,
+    source: &str,
+    name: &str,
 ) -> Result<Vec<u8>, AssembleError> {
     match instr.mnemonic.as_str() {
-        "JUMP" | "JUMPI" => assemble_jump(instr, site, labels),
-        _ => assemble_non_jump(instr),
+        "JUMP" | "JUMPI" => assemble_jump(instr, site, labels, source, name),
+        _ => assemble_non_jump(instr, source, name),
     }
 }
 
@@ -204,35 +230,38 @@ fn assemble_jump(
     instr: &ParsedInstr,
     site: usize,
     labels: &HashMap<String, usize>,
+    source: &str,
+    name: &str,
 ) -> Result<Vec<u8>, AssembleError> {
     let is_jumpi = instr.mnemonic == "JUMPI";
+    let mnem_span = make_span(source, instr.line, instr.col, instr.mnemonic.len());
 
     if instr.operands.len() != 1 {
         return Err(AssembleError::WrongOperandCount {
             mnemonic: instr.mnemonic.clone(),
             expected: 1,
             got: instr.operands.len(),
-            line: instr.line,
-            col: instr.col,
+            src: make_src(source, name),
+            span: mnem_span,
         });
     }
 
     let offset: i16 = match &instr.operands[0] {
-        Operand::LabelRef(name) => {
+        Operand::LabelRef(label) => {
             let target =
                 labels
-                    .get(name.as_str())
+                    .get(label.as_str())
                     .ok_or_else(|| AssembleError::UndefinedLabel {
-                        label: name.clone(),
-                        line: instr.line,
-                        col: instr.col,
+                        label: label.clone(),
+                        src: make_src(source, name),
+                        span: mnem_span,
                     })?;
             let delta = *target as i64 - site as i64;
             i16::try_from(delta).map_err(|_| AssembleError::JumpOffsetOverflow {
-                label: name.clone(),
+                label: label.clone(),
                 delta,
-                line: instr.line,
-                col: instr.col,
+                src: make_src(source, name),
+                span: mnem_span,
             })?
         }
         Operand::Integer(n) => i16::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
@@ -240,16 +269,16 @@ fn assemble_jump(
             target_type: "i16",
             field: "offset".to_string(),
             mnemonic: instr.mnemonic.clone(),
-            line: instr.line,
-            col: instr.col,
+            src: make_src(source, name),
+            span: mnem_span,
         })?,
         Operand::Register(_) => {
             return Err(AssembleError::WrongOperandKind {
                 mnemonic: instr.mnemonic.clone(),
                 field: "offset".to_string(),
                 expected_kind: "integer or label reference".to_string(),
-                line: instr.line,
-                col: instr.col,
+                src: make_src(source, name),
+                span: mnem_span,
             });
         }
     };
@@ -288,6 +317,8 @@ trait FromOperand: Sized {
         mnemonic: &str,
         line: usize,
         col: usize,
+        source: &str,
+        name: &str,
     ) -> Result<Self, AssembleError>;
 }
 
@@ -298,6 +329,8 @@ impl FromOperand for Register {
         mnemonic: &str,
         line: usize,
         col: usize,
+        source: &str,
+        name: &str,
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Register(n) => Ok(Self(*n)),
@@ -305,8 +338,8 @@ impl FromOperand for Register {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
                 expected_kind: "register (e.g. r0)".to_string(),
-                line,
-                col,
+                src: make_src(source, name),
+                span: make_span(source, line, col, mnemonic.len()),
             }),
         }
     }
@@ -319,6 +352,8 @@ impl FromOperand for i64 {
         mnemonic: &str,
         line: usize,
         col: usize,
+        source: &str,
+        name: &str,
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Integer(n) => Ok(*n),
@@ -326,8 +361,8 @@ impl FromOperand for i64 {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
                 expected_kind: "integer literal".to_string(),
-                line,
-                col,
+                src: make_src(source, name),
+                span: make_span(source, line, col, mnemonic.len()),
             }),
         }
     }
@@ -343,6 +378,8 @@ impl FromOperand for i16 {
         mnemonic: &str,
         line: usize,
         col: usize,
+        source: &str,
+        name: &str,
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Integer(n) => {
@@ -351,22 +388,22 @@ impl FromOperand for i16 {
                     target_type: "i16",
                     field: field.to_string(),
                     mnemonic: mnemonic.to_string(),
-                    line,
-                    col,
+                    src: make_src(source, name),
+                    span: make_span(source, line, col, mnemonic.len()),
                 })
             }
             _ => Err(AssembleError::WrongOperandKind {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
                 expected_kind: "integer literal".to_string(),
-                line,
-                col,
+                src: make_src(source, name),
+                span: make_span(source, line, col, mnemonic.len()),
             }),
         }
     }
 }
 
-/// Generate `fn assemble_non_jump(instr) -> Result<Vec<u8>, AssembleError>`
+/// Generate `fn assemble_non_jump(instr, source, name) -> Result<Vec<u8>, AssembleError>`
 /// using the full opcode table.  JUMP and JUMPI are also present in the
 /// generated match but are unreachable at runtime (the caller routes them to
 /// `assemble_jump` first).
@@ -374,7 +411,11 @@ macro_rules! impl_assemble_non_jump {
     ( $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
           {$($fname:ident: $ftype:ty),*}) ),* $(,)? ) => {
 
-        fn assemble_non_jump(instr: &ParsedInstr) -> Result<Vec<u8>, AssembleError> {
+        fn assemble_non_jump(
+            instr: &ParsedInstr,
+            source: &str,
+            name: &str,
+        ) -> Result<Vec<u8>, AssembleError> {
             match instr.mnemonic.as_str() {
                 $(
                     $mnem => {
@@ -386,8 +427,11 @@ macro_rules! impl_assemble_non_jump {
                                 mnemonic: instr.mnemonic.clone(),
                                 expected: EXPECTED,
                                 got: instr.operands.len(),
-                                line: instr.line,
-                                col: instr.col,
+                                src: make_src(source, name),
+                                span: make_span(
+                                    source, instr.line, instr.col,
+                                    instr.mnemonic.len(),
+                                ),
                             });
                         }
 
@@ -399,6 +443,8 @@ macro_rules! impl_assemble_non_jump {
                                 &instr.mnemonic,
                                 instr.line,
                                 instr.col,
+                                source,
+                                name,
                             )?;
                         )*
 
@@ -407,8 +453,8 @@ macro_rules! impl_assemble_non_jump {
                 )*
                 _ => Err(AssembleError::UnknownMnemonic {
                     mnemonic: instr.mnemonic.clone(),
-                    line: instr.line,
-                    col: instr.col,
+                    src: make_src(source, name),
+                    span: make_span(source, instr.line, instr.col, instr.mnemonic.len()),
                 }),
             }
         }
@@ -433,8 +479,8 @@ mod tests {
     }
 
     fn asm(src: &str) -> Vec<u8> {
-        let lines = parse(src).unwrap();
-        assemble(&lines).unwrap()
+        let lines = parse(src, "<test>").unwrap();
+        assemble(&lines, src, "<test>").unwrap()
     }
 
     #[test]
@@ -519,34 +565,38 @@ mod tests {
 
     #[test]
     fn unknown_mnemonic_error() {
-        let lines = parse("FOOBAR").unwrap();
-        assert!(assemble(&lines).is_err());
+        let src = "FOOBAR";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
     }
 
     #[test]
     fn wrong_operand_count_error() {
-        let lines = parse("HALT r0").unwrap();
-        assert!(assemble(&lines).is_err());
+        let src = "HALT r0";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
     }
 
     #[test]
     fn wrong_operand_kind_error() {
         // LOAD expects a register, not an integer
-        let lines = parse("LOAD 42").unwrap();
-        assert!(assemble(&lines).is_err());
+        let src = "LOAD 42";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
     }
 
     #[test]
     fn undefined_label_error() {
-        let lines = parse("JUMP nowhere").unwrap();
-        assert!(assemble(&lines).is_err());
+        let src = "JUMP nowhere";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
     }
 
     #[test]
     fn duplicate_label_error() {
         let src = "top:\nNOP\ntop:\nHALT";
-        let lines = parse(src).unwrap();
-        assert!(assemble(&lines).is_err());
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
     }
 
     #[test]

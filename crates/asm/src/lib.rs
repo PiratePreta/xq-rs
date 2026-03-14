@@ -52,6 +52,10 @@
 //! For finer control, use [`parser::parse`] and [`assembler::assemble`]
 //! separately.
 
+// Error types carry NamedSource<Arc<str>> for miette source snippets.
+// The extra size is acceptable on error paths in an assembler.
+#![allow(clippy::result_large_err)]
+
 pub mod assembler;
 pub mod ast;
 pub mod error;
@@ -81,7 +85,7 @@ pub mod parser;
 /// assert!(!bytecode.is_empty());
 /// ```
 pub fn assemble_source(source: &str) -> Result<Vec<u8>, error::Error> {
-    let lines = parser::parse(source)?;
-    let bytes = assembler::assemble(&lines)?;
+    let lines = parser::parse(source, "<input>")?;
+    let bytes = assembler::assemble(&lines, source, "<input>")?;
     Ok(bytes)
 }
