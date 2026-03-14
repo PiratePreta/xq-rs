@@ -56,6 +56,7 @@ version = "0.1.0"
 dependencies = [
  "aglais-xqvm-asm",
  "aglais-xqvm-bytecode",
+ "aglais-xqvm-disasm",
  "clap",
  "miette",
  "pastey",

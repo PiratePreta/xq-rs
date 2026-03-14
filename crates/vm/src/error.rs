@@ -17,7 +17,7 @@
 
 //! Runtime error types for the XQVM interpreter.
 //!
-//! [`Error`] describes every fault that can occur during bytecode execution.
+//! [`enum@Error`] describes every fault that can occur during bytecode execution.
 //! For rich terminal diagnostics, convert it to a [`RuntimeDiagnostic`] via
 //! [`Error::into_diagnostic`], which disassembles the bytecode and points a
 //! miette caret at the failing instruction.
@@ -189,7 +189,7 @@ impl From<aglais_xqvm_bytecode::stream::Error> for Error {
 // RuntimeDiagnostic
 // ---------------------------------------------------------------------------
 
-/// A runtime [`Error`] enriched with a disassembly listing as source context.
+/// A runtime [`enum@Error`] enriched with a disassembly listing as source context.
 ///
 /// Construct it via [`Error::into_diagnostic`]. When the error carries a byte
 /// offset, the corresponding disassembly line is highlighted with a caret.
