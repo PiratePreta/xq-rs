@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 aglais-xqvm-asm      = { workspace = true }
 aglais-xqvm-bytecode = { workspace = true }
+aglais-xqvm-disasm   = { workspace = true }
 clap.workspace       = true
 miette.workspace     = true
 pastey.workspace     = true

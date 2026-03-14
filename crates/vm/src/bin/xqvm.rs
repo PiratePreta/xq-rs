@@ -90,8 +90,7 @@ fn main() -> Result<()> {
     }
 
     vm.run(&bytecode)
-        .map_err(|e| miette::miette!("{e}"))
-        .wrap_err("runtime error")?;
+        .map_err(|e| e.into_diagnostic(&bytecode, &args.file.to_string_lossy()))?;
 
     let outputs = vm.outputs();
     let has_outputs = outputs.iter().any(|v| v != &RegVal::default());
