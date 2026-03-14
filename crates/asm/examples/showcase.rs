@@ -27,8 +27,9 @@
 use aglais_xqvm_asm::assemble_source;
 use aglais_xqvm_bytecode::stream::InstructionStream;
 use aglais_xqvm_bytecode::types::Instruction;
+use miette::{IntoDiagnostic, WrapErr};
 
-fn main() {
+fn main() -> miette::Result<()> {
     // -----------------------------------------------------------------------
     // Program 1: sum of 1 + 2 + ... + 5
     //
@@ -64,9 +65,9 @@ fn main() {
         HALT
     ";
 
-    let bytecode = assemble_source(sum_src).expect("sum program assembled");
+    let bytecode = assemble_source(sum_src).wrap_err("failed to assemble sum program")?;
     println!("sum program: {} bytes", bytecode.len());
-    print_disasm(&bytecode);
+    print_disasm(&bytecode)?;
 
     // -----------------------------------------------------------------------
     // Program 2: allocate a 4-variable binary QUBO model, set a diagonal
@@ -86,28 +87,35 @@ fn main() {
         HALT
     ";
 
-    let qubo_bytecode = assemble_source(qubo_src).expect("QUBO program assembled");
+    let qubo_bytecode = assemble_source(qubo_src).wrap_err("failed to assemble QUBO program")?;
     println!("\nQUBO program: {} bytes", qubo_bytecode.len());
-    print_disasm(&qubo_bytecode);
+    print_disasm(&qubo_bytecode)?;
 
     // -----------------------------------------------------------------------
     // Verify sum program instruction sequence
     // -----------------------------------------------------------------------
     let instrs: Vec<Instruction> = InstructionStream::new(&bytecode)
-        .map(|r| r.unwrap().2)
-        .collect();
+        .map(|r| r.map(|(_, _, instr)| instr))
+        .collect::<Result<_, _>>()
+        .into_diagnostic()
+        .wrap_err("failed to decode sum program bytecode")?;
 
     // First instruction must be PUSH 0
     assert_eq!(instrs[0], Instruction::Push { imm: 0 });
     // Last instruction must be HALT
-    assert_eq!(*instrs.last().unwrap(), Instruction::Halt {});
+    let last = instrs
+        .last()
+        .ok_or_else(|| miette::miette!("sum program produced an empty instruction stream"))?;
+    assert_eq!(*last, Instruction::Halt {});
 
     println!("\nAll checks passed.");
+    Ok(())
 }
 
-fn print_disasm(buf: &[u8]) {
+fn print_disasm(buf: &[u8]) -> miette::Result<()> {
     for result in InstructionStream::new(buf) {
-        let (offset, _len, instr) = result.unwrap();
+        let (offset, _len, instr) = result.into_diagnostic()?;
         println!("  {:04X}  {} {:?}", offset, instr.mnemonic(), instr);
     }
+    Ok(())
 }
