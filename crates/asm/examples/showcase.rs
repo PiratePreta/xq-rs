@@ -88,7 +88,7 @@ fn main() -> miette::Result<()> {
     ";
 
     let qubo_bytecode = assemble_source(qubo_src).wrap_err("failed to assemble QUBO program")?;
-    println!("\nQUBO program: {} bytes", qubo_bytecode.len());
+    println!("QUBO program: {} bytes", qubo_bytecode.len());
     print_disasm(&qubo_bytecode)?;
 
     // -----------------------------------------------------------------------
