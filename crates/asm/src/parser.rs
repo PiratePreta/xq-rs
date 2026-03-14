@@ -197,14 +197,12 @@ fn visit_operand(
                 src: make_src(source, name),
                 span: make_span(source, line, col, text.len()),
             })?;
-            if slot > 255 {
-                return Err(ParseError {
-                    message: format!("register index {slot} is out of range [0, 255]"),
-                    src: make_src(source, name),
-                    span: make_span(source, line, col, text.len()),
-                });
-            }
-            Ok(Operand::Register(slot as u8))
+            let reg = u8::try_from(slot).map_err(|_| ParseError {
+                message: format!("register index {slot} is out of range [0, 255]"),
+                src: make_src(source, name),
+                span: make_span(source, line, col, text.len()),
+            })?;
+            Ok(Operand::Register(reg))
         }
         Rule::integer => {
             let value = parse_integer(text, line, col, source, name)?;
