@@ -320,17 +320,25 @@ impl<'a> Disassembly<'a> {
                     }
                     // For PUSHC with a known pool value, render the constant
                     // directly as the operand and annotate with the pool index.
-                    if let Instruction::PushC { idx } = instr
-                        && let Some(val) = self.pool.get(idx)
-                    {
-                        write!(out, "{:<8}{val}  ; [{idx}]", "PUSHC")?;
-                    } else if let Instruction::Push { imm } = instr {
-                        // PUSH carries an i16 immediate; FmtOperand for i16 does
-                        // label resolution (designed for JUMP offsets), so we
-                        // bypass it and render the value as a plain decimal.
-                        write!(out, "{:<8}{imm}", "PUSH")?;
-                    } else {
-                        fmt_instruction(&instr, offset, &labels, out)?;
+                    match instr {
+                        Instruction::PushC { idx } => {
+                            if let Some(val) = self.pool.get(idx) {
+                                write!(out, "{:<8}{val}  ; [{idx}]", "PUSHC")?;
+                            } else {
+                                // As this is an utility tool, we can be more
+                                // lenient and just render the opcode without a value.
+                                write!(out, "{:<8}??  ; [{idx}]", "PUSHC")?;
+                            }
+                        }
+                        Instruction::Push { imm } => {
+                            // PUSH carries an i16 immediate; FmtOperand for i16 does
+                            // label resolution (designed for JUMP offsets), so we
+                            // bypass it and render the value as a plain decimal.
+                            write!(out, "{:<8}{imm}", "PUSH")?;
+                        }
+                        _ => {
+                            fmt_instruction(&instr, offset, &labels, out)?;
+                        }
                     }
                     writeln!(out)?;
                 }
