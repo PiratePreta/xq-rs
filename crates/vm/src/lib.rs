@@ -37,10 +37,10 @@
 //!
 //! let mut b = InstructionBuilder::new();
 //! b.push(10).push(32).add().halt();
-//! let bytecode = b.build().unwrap();
+//! let program = b.build().unwrap();
 //!
 //! let mut vm = Vm::new();
-//! vm.run(&bytecode).unwrap();
+//! vm.run(&program).unwrap();
 //! assert_eq!(vm.stack(), &[42]);
 //! ```
 

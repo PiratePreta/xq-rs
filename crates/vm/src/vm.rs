@@ -29,14 +29,16 @@
 //! // Build: PUSH 3 + PUSH 4 = 7; HALT.
 //! let mut b = InstructionBuilder::new();
 //! b.push(3).push(4).add().halt();
-//! let bytecode = b.build().unwrap();
+//! let program = b.build().unwrap();
 //!
 //! let mut vm = Vm::new();
-//! vm.run(&bytecode).unwrap();
+//! vm.run(&program).unwrap();
 //! assert_eq!(vm.stack(), &[7]);
 //! ```
 
 use aglais_xqvm_bytecode::opcodes;
+use aglais_xqvm_bytecode::pool::ConstantPool;
+use aglais_xqvm_bytecode::program::Program;
 use aglais_xqvm_bytecode::stream::InstructionStream;
 use aglais_xqvm_bytecode::types::{Instruction, Register};
 
@@ -101,10 +103,10 @@ const DEFAULT_STEP_LIMIT: u64 = 10_000_000;
 ///
 /// let mut b = InstructionBuilder::new();
 /// b.push(6).push(7).mul().halt();
-/// let bytecode = b.build().unwrap();
+/// let program = b.build().unwrap();
 ///
 /// let mut vm = Vm::new();
-/// vm.run(&bytecode).unwrap();
+/// vm.run(&program).unwrap();
 /// assert_eq!(vm.stack(), &[42]);
 /// ```
 #[derive(Debug)]
@@ -115,6 +117,7 @@ pub struct Vm {
     calldata: Vec<RegVal>,
     outputs: Vec<RegVal>,
     step_limit: u64,
+    pool: ConstantPool,
 }
 
 impl Default for Vm {
@@ -137,6 +140,7 @@ impl Vm {
             calldata: Vec::new(),
             outputs: Vec::new(),
             step_limit: DEFAULT_STEP_LIMIT,
+            pool: ConstantPool::new(),
         }
     }
 
@@ -159,7 +163,8 @@ impl Vm {
     ///
     /// let mut b = InstructionBuilder::new();
     /// b.push(0).input(Register(0)).halt();
-    /// vm.run(&b.build().unwrap()).unwrap();
+    /// let program = b.build().unwrap();
+    /// vm.run(&program).unwrap();
     /// assert_eq!(vm.register(0), &RegVal::Int(7));
     /// ```
     pub fn set_calldata(&mut self, data: Vec<RegVal>) -> &mut Self {
@@ -215,7 +220,8 @@ impl Vm {
     ///
     /// let mut b = InstructionBuilder::new();
     /// b.load(aglais_xqvm_bytecode::types::Register(0)).halt();
-    /// vm.run(&b.build().unwrap()).unwrap();
+    /// let program = b.build().unwrap();
+    /// vm.run(&program).unwrap();
     /// assert_eq!(vm.stack(), &[42]);
     /// ```
     pub fn set_register(&mut self, r: u8, val: RegVal) -> &mut Self {
@@ -228,15 +234,21 @@ impl Vm {
         self.stack.clear();
         self.regs.iter_mut().for_each(|r| *r = RegVal::default());
         self.loop_stack.clear();
+        self.pool = ConstantPool::new();
     }
 
-    /// Execute a bytecode buffer.
+    /// Execute a [`Program`].
+    ///
+    /// Loads the constant pool from `program` and then executes the instruction
+    /// stream. The pool is replaced on each call, so `PUSHC` instructions in the
+    /// new program always see the correct constants.
     ///
     /// # Errors
     ///
     /// Returns [`Error`] on any runtime fault (stack underflow, bad jump, etc.).
-    pub fn run(&mut self, bytecode: &[u8]) -> Result<(), Error> {
-        let mut stream = InstructionStream::new(bytecode);
+    pub fn run(&mut self, program: &Program) -> Result<(), Error> {
+        self.pool = program.pool().clone();
+        let mut stream = InstructionStream::from_program(program);
         let mut steps: u64 = 0;
 
         loop {
@@ -470,6 +482,15 @@ impl Vm {
 
     fn exec_push(&mut self, _pos: usize, imm: i64) -> Result<StepResult, Error> {
         self.push_val(imm);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c(&mut self, pos: usize, idx: u16) -> Result<StepResult, Error> {
+        let val = self
+            .pool
+            .get(idx)
+            .ok_or(Error::PoolIndexOutOfRange { pos, idx })?;
+        self.push_val(val);
         Ok(StepResult::Continue)
     }
 

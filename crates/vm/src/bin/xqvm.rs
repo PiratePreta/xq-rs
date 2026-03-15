@@ -33,6 +33,7 @@ use clap::Parser;
 use miette::{IntoDiagnostic, Result, WrapErr};
 
 use aglais_xqvm_asm::assemble_source;
+use aglais_xqvm_bytecode::program::Program;
 use aglais_xqvm_vm::value::RegVal;
 use aglais_xqvm_vm::vm::Vm;
 
@@ -70,7 +71,7 @@ fn main() -> Result<()> {
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to read '{}'", args.file.display()))?;
 
-    let bytecode = if args.text {
+    let program: Program = if args.text {
         let text = String::from_utf8(source)
             .into_diagnostic()
             .wrap_err("assembly file is not valid UTF-8")?;
@@ -78,7 +79,9 @@ fn main() -> Result<()> {
             .map_err(|e| miette::miette!("{e}"))
             .wrap_err("assembly failed")?
     } else {
-        source
+        Program::decode(&source)
+            .into_diagnostic()
+            .wrap_err("invalid bytecode: failed to decode program")?
     };
 
     let calldata: Vec<RegVal> = args.calldata.into_iter().map(RegVal::Int).collect();
@@ -89,8 +92,8 @@ fn main() -> Result<()> {
         vm.set_step_limit(args.step_limit);
     }
 
-    vm.run(&bytecode)
-        .map_err(|e| e.into_diagnostic(&bytecode, &args.file.to_string_lossy()))?;
+    vm.run(&program)
+        .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
 
     let outputs = vm.outputs();
     let has_outputs = outputs.iter().any(|v| v != &RegVal::default());

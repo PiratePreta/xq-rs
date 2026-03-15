@@ -26,21 +26,23 @@
 //!
 //! ```rust
 //! use aglais_xqvm_vm::error::Error;
-//! use aglais_xqvm_bytecode::{codec, types::Instruction};
+//! use aglais_xqvm_bytecode::builder::InstructionBuilder;
 //!
-//! let bytecode: Vec<u8> = [Instruction::Push { imm: 0 }, Instruction::Halt {}]
-//!     .iter()
-//!     .flat_map(codec::encode)
-//!     .collect();
+//! let program = InstructionBuilder::new()
+//!     .push(0)
+//!     .halt()
+//!     .build()
+//!     .unwrap();
 //!
 //! let err = Error::DivisionByZero { pos: 0 };
-//! let diag = err.into_diagnostic(&bytecode, "prog.xqbc");
+//! let diag = err.into_diagnostic(&program, "prog.xqbc");
 //! // diag implements miette::Diagnostic and can be returned from main()
 //! ```
 
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 
+use aglais_xqvm_bytecode::program::Program;
 use aglais_xqvm_disasm::display::Disassembly;
 
 /// Errors that can occur during XQVM bytecode execution.
@@ -109,6 +111,10 @@ pub enum Error {
     /// The RESIZE instruction received non-positive dimensions.
     #[error("invalid grid dimensions {rows}x{cols} at byte {pos:#06x}")]
     InvalidGridDimensions { pos: usize, rows: i64, cols: i64 },
+
+    /// PUSHC referenced a pool index that is out of range.
+    #[error("constant pool index {idx} out of range at byte {pos:#06x}")]
+    PoolIndexOutOfRange { pos: usize, idx: u16 },
 }
 
 impl Error {
@@ -133,16 +139,16 @@ impl Error {
     /// fn run() -> miette::Result<()> {
     ///     let mut b = InstructionBuilder::new();
     ///     b.push(10).push(0).div().halt();
-    ///     let bytecode = b.build().unwrap();
+    ///     let program = b.build().unwrap();
     ///
     ///     let mut vm = Vm::new();
-    ///     vm.run(&bytecode)
-    ///         .map_err(|e| e.into_diagnostic(&bytecode, "<inline>"))?;
+    ///     vm.run(&program)
+    ///         .map_err(|e| e.into_diagnostic(&program, "<inline>"))?;
     ///     Ok(())
     /// }
     /// ```
-    pub fn into_diagnostic(self, bytecode: &[u8], name: &str) -> RuntimeDiagnostic {
-        let disasm_text = Disassembly::new(bytecode).to_string();
+    pub fn into_diagnostic(self, program: &Program, name: &str) -> RuntimeDiagnostic {
+        let disasm_text = Disassembly::from_program(program).to_string();
         let span = self
             .byte_pos()
             .and_then(|pos| find_line_span(&disasm_text, pos));
@@ -164,7 +170,8 @@ impl Error {
             | Self::InvalidShift { pos, .. }
             | Self::InvalidGridDimensions { pos, .. }
             | Self::BadJumpTarget { pos, .. }
-            | Self::IndexOutOfBounds { pos, .. } => Some(*pos),
+            | Self::IndexOutOfBounds { pos, .. }
+            | Self::PoolIndexOutOfRange { pos, .. } => Some(*pos),
             Self::RegisterType { .. }
             | Self::CallDataIndex { .. }
             | Self::OutputIndex { .. }
@@ -206,11 +213,11 @@ impl From<aglais_xqvm_bytecode::stream::Error> for Error {
 /// fn run() -> miette::Result<()> {
 ///     let mut b = InstructionBuilder::new();
 ///     b.push(3).push(4).add().halt();
-///     let bytecode = b.build().unwrap();
+///     let program = b.build().unwrap();
 ///
 ///     let mut vm = Vm::new();
-///     vm.run(&bytecode)
-///         .map_err(|e| e.into_diagnostic(&bytecode, "<inline>"))?;
+///     vm.run(&program)
+///         .map_err(|e| e.into_diagnostic(&program, "<inline>"))?;
 ///     Ok(())
 /// }
 /// ```
