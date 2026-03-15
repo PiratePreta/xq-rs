@@ -98,17 +98,11 @@ pub fn parse(source: &str, name: &str) -> Result<Vec<AsmLine>, ParseError> {
 
     let mut out = Vec::new();
 
-    for pair in pairs {
-        if pair.as_rule() != Rule::program {
-            continue;
-        }
-        for line_pair in pair.into_inner() {
-            if line_pair.as_rule() != Rule::line {
-                continue;
-            }
-            visit_line(line_pair, src, &mut out)?;
-        }
-    }
+    pairs
+        .filter(|p| p.as_rule() == Rule::program)
+        .flat_map(|p| p.into_inner())
+        .filter(|p| p.as_rule() == Rule::line)
+        .try_for_each(|line_pair| visit_line(line_pair, src, &mut out))?;
 
     Ok(out)
 }
@@ -122,8 +116,9 @@ fn visit_line(
     src: Source<'_>,
     out: &mut Vec<AsmLine>,
 ) -> Result<(), ParseError> {
-    for inner in line_pair.into_inner() {
-        match inner.as_rule() {
+    line_pair
+        .into_inner()
+        .try_for_each(|inner| match inner.as_rule() {
             Rule::label_def => {
                 let offset = inner.as_span().start();
                 let label_name = inner
@@ -138,14 +133,14 @@ fn visit_line(
                     name: label_name,
                     offset,
                 });
+                Ok(())
             }
             Rule::instruction => {
                 out.push(visit_instruction(inner, src)?);
+                Ok(())
             }
-            _ => {}
-        }
-    }
-    Ok(())
+            _ => Ok(()),
+        })
 }
 
 fn visit_instruction(
@@ -160,12 +155,10 @@ fn visit_instruction(
         .unwrap_or_else(|| unreachable!("grammar guarantees instruction starts with mnemonic"));
     let mnemonic = mnemonic_pair.as_str().to_ascii_uppercase();
 
-    let mut operands = Vec::new();
-    for op_pair in inner {
-        if op_pair.as_rule() == Rule::operand {
-            operands.push(visit_operand(op_pair, src)?);
-        }
-    }
+    let operands = inner
+        .filter(|p| p.as_rule() == Rule::operand)
+        .map(|p| visit_operand(p, src))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(AsmLine::Instruction(ParsedInstr {
         mnemonic,
@@ -255,12 +248,16 @@ mod tests {
     use crate::ast::Operand;
 
     fn instr(lines: &[AsmLine]) -> &ParsedInstr {
-        for l in lines {
-            if let AsmLine::Instruction(i) = l {
-                return i;
-            }
-        }
-        panic!("no instruction found")
+        lines
+            .iter()
+            .find_map(|l| {
+                if let AsmLine::Instruction(i) = l {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .expect("no instruction found")
     }
 
     fn parse_test(src: &str) -> Result<Vec<AsmLine>, ParseError> {
