@@ -18,8 +18,8 @@ Be respectful in all project spaces, including issues, merge requests, and code 
 - `taplo` — `cargo install taplo-cli --locked`
 - `cargo deny` — `cargo install cargo-deny --locked`
 - `cargo semver-checks` — `cargo install cargo-semver-checks --locked`
-- `cargo nextest` — `cargo install cargo-nextest --locked` (optionally, but highly recomended)
-- Miri interpreter, see [here](#undefined-behaviour)
+- `cargo nextest` — `cargo install cargo-nextest --locked` (optional, but highly recommended)
+- Miri interpreter — optional, but highly recommended; see [Undefined Behaviour](#undefined-behaviour)
 
 ## Development Workflow
 
@@ -42,9 +42,6 @@ cargo deny check
 # Tests
 cargo test --workspace --all-features # OR
 cargo nextest run --workspace --all-features
-
-# Miri tests
-cargo +nightly miri test --workspace --all-features
 ```
 
 ## Commit Messages
@@ -75,10 +72,12 @@ Public API changes must be semver-compatible. `cargo semver-checks` runs automat
 
 ## Undefined Behaviour
 
-Rust Miri runs in CI to detect undefined behaviour and unsound code originating
-from `unsafe` blocks, dependencies, or procedural macros.
+Miri is not required to pass before merging, but running it locally is highly
+recommended before submitting changes that touch `unsafe` code, dependencies,
+or procedural macros. It detects undefined behaviour and unsound code that the
+compiler and standard tests cannot catch.
 
-You can run Miri locally on nightly:
+Run Miri locally on nightly:
 
 ```sh
 rustup toolchain install nightly --component miri

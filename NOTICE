@@ -1,5 +1,5 @@
 Aglais Extended Quantum VM
-Copyright (C) 2025 Postquant Labs Incorporated
+Copyright (C) 2026 Postquant Labs Incorporated
 
 This software is licensed under the GNU Affero General Public License v3.0 or later.
 See the LICENSE file for the full license text.
@@ -12,11 +12,24 @@ This project incorporates components from the following open source projects.
 The original copyright notices and licenses are provided below.
 
 ================================================================================
-APACHE-2.0 LICENSED COMPONENTS
+MIT LICENSED COMPONENTS
 ================================================================================
 
-The following components are licensed under the Apache License 2.0,
-or dual-licensed under Apache-2.0 OR MIT (as noted).
+The following components are licensed under the MIT License.
+
+--------------------------------------------------------------------------------
+oxicode 0.1.x (MIT)
+Copyright (c) OxiCode Contributors
+https://github.com/cool-japan/oxicode
+--------------------------------------------------------------------------------
+
+================================================================================
+APACHE-2.0 OR MIT LICENSED COMPONENTS
+================================================================================
+
+The following components are dual-licensed under the Apache License 2.0
+or the MIT License. The full text of both licenses is available at the
+URLs listed below.
 
 --------------------------------------------------------------------------------
 Rust compiler and standard library (Apache-2.0 OR MIT)
@@ -24,8 +37,48 @@ Copyright (c) The Rust Project Developers (https://thanks.rust-lang.org)
 https://www.rust-lang.org
 --------------------------------------------------------------------------------
 
-The Apache License 2.0 is available at:
-http://www.apache.org/licenses/LICENSE-2.0
+--------------------------------------------------------------------------------
+thiserror 2.0.18 (Apache-2.0 OR MIT)
+Copyright (c) David Tolnay <dtolnay@gmail.com>
+https://github.com/dtolnay/thiserror
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+thiserror-impl 2.0.18 (Apache-2.0 OR MIT)
+Copyright (c) David Tolnay <dtolnay@gmail.com>
+https://github.com/dtolnay/thiserror
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+proc-macro2 1.0.106 (Apache-2.0 OR MIT)
+Copyright (c) David Tolnay <dtolnay@gmail.com>
+Copyright (c) Alex Crichton <alex@alexcrichton.com>
+https://github.com/dtolnay/proc-macro2
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+quote 1.0.45 (Apache-2.0 OR MIT)
+Copyright (c) David Tolnay <dtolnay@gmail.com>
+https://github.com/dtolnay/quote
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+syn 2.0.117 (Apache-2.0 OR MIT)
+Copyright (c) David Tolnay <dtolnay@gmail.com>
+https://github.com/dtolnay/syn
+--------------------------------------------------------------------------------
+
+================================================================================
+UNICODE-3.0 LICENSED COMPONENTS
+================================================================================
+
+The following components are licensed under the Unicode License v3.
+
+--------------------------------------------------------------------------------
+unicode-ident 1.0.24 ((MIT OR Apache-2.0) AND Unicode-3.0)
+Copyright (c) David Tolnay <dtolnay@gmail.com>
+https://github.com/dtolnay/unicode-ident
+--------------------------------------------------------------------------------
 
 ================================================================================
 LICENSE COMPATIBILITY

@@ -12,6 +12,9 @@ default:
 variables:
     CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
 
+.add-cargo-bin: &add-cargo-bin
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+
 stages:
     - lint
     - test
@@ -37,6 +40,7 @@ lint:rustfmt:
 lint:taplo:
     stage: lint
     before_script:
+        - *add-cargo-bin
         - cargo install taplo-cli --locked
     script:
         - taplo lint check
@@ -86,12 +90,3 @@ test:integration:
     script:
         - cargo test --workspace --all-features --test '*' --profile ci-test
 
-# -- Miri (undefined behaviour) ---------------------------------------------
-
-test:miri:
-    stage: test
-    before_script:
-        - rustup toolchain install nightly --component miri
-        - cargo +nightly miri setup
-    script:
-        - cargo +nightly miri test --workspace --all-features

@@ -1,0 +1,67 @@
+// XQVM assembly language grammar.
+//
+// Each source file is a sequence of lines separated by newlines.  A line may
+// contain an optional label definition, an optional instruction, and an
+// optional comment.  Blank lines and comment-only lines are fully legal.
+//
+// Mnemonics are case-insensitive ASCII (e.g. PUSH, push, pUsH).
+// Label identifiers are lower/mixed case starting with a letter or underscore.
+// Registers have the form r<digits> (e.g. r0, r255).
+// Integer literals may be signed decimal or 0x-prefixed hexadecimal.
+// Comments begin with ';' and run to the end of the line.
+
+// ---------------------------------------------------------------------------
+// Silent / whitespace
+// ---------------------------------------------------------------------------
+
+WHITESPACE = _{ " " | "\t" }
+COMMENT    = _{ ";" ~ (!NEWLINE ~ ANY)* }
+NEWLINE    = _{ "\r\n" | "\n" }
+
+// ---------------------------------------------------------------------------
+// Terminals
+// ---------------------------------------------------------------------------
+
+/// A signed integer literal: optional sign, then decimal or hex digits.
+integer  = @{ ("-" | "+")? ~ ("0x" ~ ASCII_HEX_DIGIT+ | ASCII_DIGIT+) }
+
+/// A register operand: lowercase 'r' followed by 1-3 decimal digits.
+register = @{ "r" ~ ASCII_DIGIT{1, 3} }
+
+/// A label identifier: letter or underscore, then alphanumeric or underscore.
+label_id = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+/// An instruction mnemonic: one or more ASCII letters/digits, any case.
+mnemonic = @{ ASCII_ALPHA ~ (ASCII_ALPHA | ASCII_DIGIT)* }
+
+// ---------------------------------------------------------------------------
+// Operands
+// ---------------------------------------------------------------------------
+
+/// A single instruction operand: register, integer literal, or label ref.
+/// Order matters: register is tried before label_id to avoid ambiguity
+/// (e.g. 'r3' must become a register, not a label reference).
+operand = { register | integer | label_id }
+
+// ---------------------------------------------------------------------------
+// Line structure
+// ---------------------------------------------------------------------------
+
+/// A label definition: identifier followed by a colon.
+label_def = { label_id ~ ":" }
+
+/// An instruction: mnemonic followed by zero or more operands.
+instruction = { mnemonic ~ operand* }
+
+/// A source line: optional label def + optional instruction, then optional comment.
+/// The two alternatives cover:
+///   1. label_def (instruction optional) -- e.g. "loop:" or "loop: PUSH 1"
+///   2. instruction only                 -- e.g. "PUSH 1"
+line = { (label_def ~ instruction? | instruction)? ~ COMMENT? }
+
+// ---------------------------------------------------------------------------
+// Top-level rule
+// ---------------------------------------------------------------------------
+
+/// A complete program: sequence of lines separated by newlines.
+program = { SOI ~ (line ~ NEWLINE)* ~ line? ~ EOI }

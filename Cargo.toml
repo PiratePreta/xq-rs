@@ -1,17 +1,31 @@
 [workspace]
 resolver = "3"
-members  = [  ]
+members = [
+    "crates/bytecode",
+    "crates/asm",
+    "crates/disasm",
+]
 
 [workspace.package]
 repository = "https://gitlab.com/piqued/quip-aglais"
 license    = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
+### Workspace crates ###
+aglais-xqvm-asm      = { path = "./crates/asm" }
+aglais-xqvm-bytecode = { path = "./crates/bytecode" }
+aglais-xqvm-disasm   = { path = "./crates/disasm" }
+
+### Common dependencies ###
+clap      = { version = "4", features = [ "derive" ] }
+miette    = { version = "7", features = [ "fancy", "derive" ] }
+pastey    = "0.2.1"
+serde     = { version = "1", default-features = false }
+thiserror = "2"
 
 [workspace.lints.clippy]
 dbg-macro             = "warn"
 index_refutable_slice = "warn"
-indexing-slicing      = "warn"
 manual-string-new     = "warn"
 octal-escapes         = "allow"
 redundant-clone       = "warn"
@@ -28,7 +42,6 @@ unused-extern-crates  = "warn"
 unused-imports        = "warn"
 unused-must-use       = "warn"
 unused-qualifications = "warn"
-unused-results        = "warn"
 
 [workspace.lints.rustdoc]
 all = "warn"

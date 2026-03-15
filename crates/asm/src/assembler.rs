@@ -1,0 +1,739 @@
+// Copyright (C) 2026 Postquant Labs Incorporated
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Assembler: converts a parsed [`AsmLine`] list into a [`Program`].
+//!
+//! Delegates label resolution and `JUMP`/`JUMPI` fixups to
+//! [`InstructionBuilder`]. Instructions are emitted in a single pass;
+//! label-based jumps register fixups that [`InstructionBuilder::build`]
+//! resolves at the end, supporting both forward and backward references.
+//!
+//! `PUSHC` is handled specially: the assembly operand is the constant VALUE
+//! (not a pool index). The assembler calls
+//! [`InstructionBuilder::push_const`] which interns the value and emits the
+//! `PUSHC { idx }` instruction automatically.
+//!
+//! `source` and `name` are used solely for diagnostic output: they are
+//! embedded in any [`AssembleError`] so that miette can render a source
+//! snippet with a caret pointing at the failing token.
+//!
+//! # Examples
+//!
+//! ```rust
+//! use aglais_xqvm_asm::assembler::assemble;
+//! use aglais_xqvm_asm::ast::{AsmLine, Operand, ParsedInstr};
+//!
+//! let src = "PUSH 0\nHALT";
+//! let lines = vec![
+//!     AsmLine::Instruction(ParsedInstr {
+//!         mnemonic: "PUSH".to_string(),
+//!         operands: vec![Operand::Integer(0)],
+//!         offset: 0,
+//!     }),
+//!     AsmLine::Instruction(ParsedInstr {
+//!         mnemonic: "HALT".to_string(),
+//!         operands: vec![],
+//!         offset: 7,
+//!     }),
+//! ];
+//! let program = assemble(&lines, src, "<test>").unwrap();
+//! assert_eq!(program.code()[0], 0x10); // PUSH opcode
+//! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
+//! ```
+
+// AssembleError carries a NamedSource<Arc<str>> in every variant so that
+// miette can render source snippets.  The extra size is acceptable because
+// error paths in an assembler are not performance-critical.
+#![allow(clippy::result_large_err)]
+
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+
+use aglais_xqvm_bytecode::builder::InstructionBuilder;
+use aglais_xqvm_bytecode::builder::LabelId;
+use aglais_xqvm_bytecode::program::Program;
+use aglais_xqvm_bytecode::types::{Instruction, Register};
+use aglais_xqvm_bytecode::{builder, opcodes};
+
+use crate::ast::{AsmLine, Operand, ParsedInstr};
+use crate::error::{AssembleError, Source, make_span, make_src};
+
+/// Maps a label name to its [`LabelId`] and the source location where it was
+/// first defined (`None` if only seen as a forward reference so far).
+type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Assemble a list of parsed lines into a [`Program`].
+///
+/// `source` and `name` are used solely for diagnostic output: they are
+/// embedded in any [`AssembleError`] so that miette can render a source
+/// snippet with a caret pointing at the failing token.
+///
+/// Delegates to [`InstructionBuilder`] for label resolution and
+/// `JUMP`/`JUMPI` fixups. Both forward and backward label references are
+/// supported.
+///
+/// `PUSHC <imm>` is handled specially: the integer operand is the constant
+/// value to intern, not a pool index. The pool index is allocated
+/// automatically and deduplicated.
+///
+/// # Errors
+///
+/// - [`AssembleError::UnknownMnemonic`] -- unrecognised mnemonic.
+/// - [`AssembleError::WrongOperandCount`] -- wrong number of operands.
+/// - [`AssembleError::WrongOperandKind`] -- operand of wrong kind.
+/// - [`AssembleError::RegisterOutOfRange`] -- register slot > 255.
+/// - [`AssembleError::IntegerOutOfRange`] -- integer does not fit target type.
+/// - [`AssembleError::UndefinedLabel`] -- label referenced but not defined.
+/// - [`AssembleError::DuplicateLabel`] -- label defined more than once.
+/// - [`AssembleError::JumpOffsetOverflow`] -- jump distance exceeds `i16`.
+/// - [`AssembleError::PoolOverflow`] -- more than 65535 distinct constants.
+///
+/// # Examples
+///
+/// ```rust
+/// use aglais_xqvm_asm::parser::parse;
+/// use aglais_xqvm_asm::assembler::assemble;
+///
+/// let src = "PUSH 5\nPUSH 3\nADD\nHALT";
+/// let lines = parse(src, "<test>").unwrap();
+/// let program = assemble(&lines, src, "<test>").unwrap();
+/// assert!(!program.code().is_empty());
+/// ```
+pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, AssembleError> {
+    let src = Source { text: source, name };
+    let mut b = InstructionBuilder::new();
+    // label name -> (LabelId, first definition location)
+    // location is None when the label was first seen via a forward reference.
+    let mut label_map: LabelMap = HashMap::new();
+    // label names in creation order: label_names[raw_id] == name
+    let mut label_names: Vec<String> = Vec::new();
+    // first jump reference per label name: used for error span reporting
+    let mut first_ref: HashMap<String, usize> = HashMap::new();
+
+    for line in lines {
+        match line {
+            AsmLine::LabelDef {
+                name: label_name,
+                offset: def_offset,
+            } => {
+                let id = match label_map.entry(label_name.clone()) {
+                    Entry::Occupied(e) => {
+                        let (id, placed_at) = e.into_mut();
+                        if let Some(prev_offset) = *placed_at {
+                            return Err(AssembleError::DuplicateLabel {
+                                label: label_name.clone(),
+                                src: make_src(src),
+                                span: make_span(prev_offset, label_name.len()),
+                            });
+                        }
+                        *placed_at = Some(*def_offset);
+                        *id
+                    }
+                    Entry::Vacant(e) => {
+                        label_names.push(label_name.clone());
+                        let id = b.label();
+                        e.insert((id, Some(*def_offset)));
+                        id
+                    }
+                };
+                b.place(id);
+            }
+            AsmLine::Instruction(instr) => match instr.mnemonic.as_str() {
+                "JUMP" | "JUMPI" => {
+                    assemble_jump(
+                        instr,
+                        &mut b,
+                        &mut label_map,
+                        &mut label_names,
+                        &mut first_ref,
+                        src,
+                    )?;
+                }
+                "PUSHC" => {
+                    assemble_pushc(instr, &mut b, src)?;
+                }
+                "PUSH" => {
+                    assemble_push(instr, &mut b, src)?;
+                }
+                _ => {
+                    b.emit(build_instr(instr, src)?);
+                }
+            },
+        }
+    }
+
+    b.build()
+        .map_err(|e| convert_build_error(e, &label_names, &first_ref, src))
+}
+
+// ---------------------------------------------------------------------------
+// Error helpers
+// ---------------------------------------------------------------------------
+
+/// Return `Err(WrongOperandCount)` when `instr.operands.len() != expected`.
+fn check_operand_count(
+    instr: &ParsedInstr,
+    expected: usize,
+    src: Source<'_>,
+) -> Result<(), AssembleError> {
+    if instr.operands.len() != expected {
+        return Err(AssembleError::WrongOperandCount {
+            mnemonic: instr.mnemonic.clone(),
+            expected,
+            got: instr.operands.len(),
+            src: make_src(src),
+            span: make_span(instr.offset, instr.mnemonic.len()),
+        });
+    }
+    Ok(())
+}
+
+/// Build a `WrongOperandKind` error pointing at the mnemonic token.
+fn err_wrong_kind(
+    instr: &ParsedInstr,
+    field: &str,
+    expected_kind: &str,
+    src: Source<'_>,
+) -> AssembleError {
+    AssembleError::WrongOperandKind {
+        mnemonic: instr.mnemonic.clone(),
+        field: field.to_string(),
+        expected_kind: expected_kind.to_string(),
+        src: make_src(src),
+        span: make_span(instr.offset, instr.mnemonic.len()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JUMP / JUMPI
+// ---------------------------------------------------------------------------
+
+fn assemble_jump(
+    instr: &ParsedInstr,
+    b: &mut InstructionBuilder,
+    label_map: &mut LabelMap,
+    label_names: &mut Vec<String>,
+    first_ref: &mut HashMap<String, usize>,
+    src: Source<'_>,
+) -> Result<(), AssembleError> {
+    let mnem_span = make_span(instr.offset, instr.mnemonic.len());
+
+    check_operand_count(instr, 1, src)?;
+
+    match &instr.operands[0] {
+        Operand::LabelRef(label) => {
+            let id = match label_map.entry(label.clone()) {
+                Entry::Occupied(e) => e.get().0,
+                Entry::Vacant(e) => {
+                    label_names.push(label.clone());
+                    let id = b.label();
+                    e.insert((id, None));
+                    id
+                }
+            };
+            first_ref.entry(label.clone()).or_insert(instr.offset);
+            match instr.mnemonic.as_str() {
+                "JUMPI" => b.jump_if(id),
+                _ => b.jump(id),
+            };
+        }
+        Operand::Integer(n) => {
+            let offset = i16::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
+                value: *n,
+                target_type: "i16",
+                field: "offset".to_string(),
+                mnemonic: instr.mnemonic.clone(),
+                src: make_src(src),
+                span: mnem_span,
+            })?;
+            match instr.mnemonic.as_str() {
+                "JUMPI" => b.emit(Instruction::JumpI { offset }),
+                _ => b.emit(Instruction::Jump { offset }),
+            };
+        }
+        Operand::Register(_) => {
+            return Err(err_wrong_kind(
+                instr,
+                "offset",
+                "integer or label reference",
+                src,
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PUSHC
+// ---------------------------------------------------------------------------
+
+/// Handle `PUSHC <imm>`: intern the integer value into the constant pool and
+/// emit a `PUSHC { idx }` instruction. Pool overflow is recorded by
+/// [`InstructionBuilder::push_const`] and surfaced later by `build()`.
+fn assemble_pushc(
+    instr: &ParsedInstr,
+    b: &mut InstructionBuilder,
+    src: Source<'_>,
+) -> Result<(), AssembleError> {
+    check_operand_count(instr, 1, src)?;
+
+    match &instr.operands[0] {
+        Operand::Integer(imm) => {
+            b.push_const(*imm);
+        }
+        _ => {
+            return Err(err_wrong_kind(instr, "imm", "integer literal", src));
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PUSH
+// ---------------------------------------------------------------------------
+
+/// Handle `PUSH <imm>`: emit an inline `Push { imm: i16 }` for values that
+/// fit in 16 bits, or a `PUSHC { idx }` via the constant pool for larger
+/// values. The caller never needs to know which encoding was chosen.
+fn assemble_push(
+    instr: &ParsedInstr,
+    b: &mut InstructionBuilder,
+    src: Source<'_>,
+) -> Result<(), AssembleError> {
+    check_operand_count(instr, 1, src)?;
+
+    match &instr.operands[0] {
+        Operand::Integer(imm) => {
+            b.push(*imm);
+        }
+        _ => {
+            return Err(err_wrong_kind(instr, "imm", "integer literal", src));
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Convert InstructionBuilder errors to AssembleError
+// ---------------------------------------------------------------------------
+
+fn convert_build_error(
+    e: builder::Error,
+    label_names: &[String],
+    first_ref: &HashMap<String, usize>,
+    src: Source<'_>,
+) -> AssembleError {
+    match e {
+        builder::Error::UnplacedLabel { id } => {
+            let label = label_names.get(id).cloned().unwrap_or_default();
+            let offset = first_ref.get(&label).copied().unwrap_or(0);
+            AssembleError::UndefinedLabel {
+                label: label.clone(),
+                src: make_src(src),
+                span: make_span(offset, label.len()),
+            }
+        }
+        builder::Error::OffsetOverflow {
+            label: id, delta, ..
+        } => {
+            let label = label_names.get(id).cloned().unwrap_or_default();
+            let offset = first_ref.get(&label).copied().unwrap_or(0);
+            AssembleError::JumpOffsetOverflow {
+                label: label.clone(),
+                delta,
+                src: make_src(src),
+                span: make_span(offset, label.len()),
+            }
+        }
+        builder::Error::PoolOverflow => AssembleError::PoolOverflow { src: make_src(src) },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generic instruction assembly via opcodes! x-macro
+// ---------------------------------------------------------------------------
+
+/// Trait for converting a parsed [`Operand`] into a concrete field type.
+trait FromOperand: Sized {
+    fn from_operand(
+        op: &Operand,
+        field: &str,
+        mnemonic: &str,
+        offset: usize,
+        src: Source<'_>,
+    ) -> Result<Self, AssembleError>;
+}
+
+impl FromOperand for Register {
+    fn from_operand(
+        op: &Operand,
+        field: &str,
+        mnemonic: &str,
+        offset: usize,
+        src: Source<'_>,
+    ) -> Result<Self, AssembleError> {
+        match op {
+            Operand::Register(n) => Ok(Self(*n)),
+            _ => Err(AssembleError::WrongOperandKind {
+                mnemonic: mnemonic.to_string(),
+                field: field.to_string(),
+                expected_kind: "register (e.g. r0)".to_string(),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
+            }),
+        }
+    }
+}
+
+impl FromOperand for i64 {
+    fn from_operand(
+        op: &Operand,
+        field: &str,
+        mnemonic: &str,
+        offset: usize,
+        src: Source<'_>,
+    ) -> Result<Self, AssembleError> {
+        match op {
+            Operand::Integer(n) => Ok(*n),
+            _ => Err(AssembleError::WrongOperandKind {
+                mnemonic: mnemonic.to_string(),
+                field: field.to_string(),
+                expected_kind: "integer literal".to_string(),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
+            }),
+        }
+    }
+}
+
+/// `u16` is used for `PUSHC` pool indices.
+impl FromOperand for u16 {
+    fn from_operand(
+        op: &Operand,
+        field: &str,
+        mnemonic: &str,
+        offset: usize,
+        src: Source<'_>,
+    ) -> Result<Self, AssembleError> {
+        match op {
+            Operand::Integer(n) => {
+                Self::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
+                    value: *n,
+                    target_type: "u16",
+                    field: field.to_string(),
+                    mnemonic: mnemonic.to_string(),
+                    src: make_src(src),
+                    span: make_span(offset, mnemonic.len()),
+                })
+            }
+            _ => Err(AssembleError::WrongOperandKind {
+                mnemonic: mnemonic.to_string(),
+                field: field.to_string(),
+                expected_kind: "integer literal".to_string(),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
+            }),
+        }
+    }
+}
+
+/// `i16` is used only for `JUMP`/`JUMPI` offsets, which are handled
+/// separately. This impl covers hypothetical non-jump opcodes that take an
+/// `i16` field (currently none).
+impl FromOperand for i16 {
+    fn from_operand(
+        op: &Operand,
+        field: &str,
+        mnemonic: &str,
+        offset: usize,
+        src: Source<'_>,
+    ) -> Result<Self, AssembleError> {
+        match op {
+            Operand::Integer(n) => {
+                Self::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
+                    value: *n,
+                    target_type: "i16",
+                    field: field.to_string(),
+                    mnemonic: mnemonic.to_string(),
+                    src: make_src(src),
+                    span: make_span(offset, mnemonic.len()),
+                })
+            }
+            _ => Err(AssembleError::WrongOperandKind {
+                mnemonic: mnemonic.to_string(),
+                field: field.to_string(),
+                expected_kind: "integer literal".to_string(),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
+            }),
+        }
+    }
+}
+
+/// Generate `fn build_instr(instr, src) -> Result<Instruction, AssembleError>`
+/// using the full opcode table. `JUMP` and `JUMPI` arms are unreachable at
+/// runtime because the caller routes them to `assemble_jump` first.
+macro_rules! impl_build_instr {
+    ( $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
+          {$($fname:ident: $ftype:ty),*}) ),* $(,)? ) => {
+
+        fn build_instr(
+            instr: &ParsedInstr,
+            src: Source<'_>,
+        ) -> Result<Instruction, AssembleError> {
+            match instr.mnemonic.as_str() {
+                $(
+                    $mnem => {
+                        const EXPECTED: usize = 0usize
+                            $( + { let _ = stringify!($fname); 1 })*;
+
+                        if instr.operands.len() != EXPECTED {
+                            return Err(AssembleError::WrongOperandCount {
+                                mnemonic: instr.mnemonic.clone(),
+                                expected: EXPECTED,
+                                got: instr.operands.len(),
+                                src: make_src(src),
+                                span: make_span(instr.offset, instr.mnemonic.len()),
+                            });
+                        }
+
+                        let mut _iter = instr.operands.iter();
+                        $(
+                            // SAFETY: operand count was verified to equal EXPECTED above.
+                            let $fname = <$ftype as FromOperand>::from_operand(
+                                _iter.next().unwrap_or_else(|| unreachable!()),
+                                stringify!($fname),
+                                &instr.mnemonic,
+                                instr.offset,
+                                src,
+                            )?;
+                        )*
+
+                        Ok(Instruction::$variant { $($fname,)* })
+                    }
+                )*
+                _ => Err(AssembleError::UnknownMnemonic {
+                    mnemonic: instr.mnemonic.clone(),
+                    src: make_src(src),
+                    span: make_span(instr.offset, instr.mnemonic.len()),
+                }),
+            }
+        }
+    };
+}
+
+opcodes!(impl_build_instr);
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+    use aglais_xqvm_bytecode::stream::InstructionStream;
+    use aglais_xqvm_bytecode::types::Instruction;
+
+    fn decode_all(buf: &[u8]) -> Vec<Instruction> {
+        InstructionStream::new(buf).map(|r| r.unwrap().2).collect()
+    }
+
+    fn asm(src: &str) -> Vec<u8> {
+        let lines = parse(src, "<test>").unwrap();
+        assemble(&lines, src, "<test>").unwrap().code().to_vec()
+    }
+
+    #[test]
+    fn halt_is_one_byte() {
+        assert_eq!(asm("HALT"), [0x0F]);
+    }
+
+    #[test]
+    fn nop_is_one_byte() {
+        assert_eq!(asm("NOP"), [0x00]);
+    }
+
+    #[test]
+    fn push_zero() {
+        // opcode 0x10, i16(0) in BE = 2 zero bytes
+        assert_eq!(asm("PUSH 0"), [0x10, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn push_negative() {
+        // i16(-1) in BE = [0xFF, 0xFF]
+        assert_eq!(asm("PUSH -1"), [0x10, 0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn load_register() {
+        assert_eq!(asm("LOAD r3"), [0x14, 0x03]);
+    }
+
+    #[test]
+    fn energy_two_registers() {
+        assert_eq!(asm("ENERGY r2 r3"), [0x7F, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn simple_program_roundtrip() {
+        let src = "PUSH 5\nPUSH 3\nADD\nHALT";
+        let buf = asm(src);
+        let instrs = decode_all(&buf);
+        assert_eq!(instrs[0], Instruction::Push { imm: 5 });
+        assert_eq!(instrs[1], Instruction::Push { imm: 3 });
+        assert_eq!(instrs[2], Instruction::Add {});
+        assert_eq!(instrs[3], Instruction::Halt {});
+    }
+
+    #[test]
+    fn forward_jump_label() {
+        // JUMP done (3 bytes at site 0)
+        // NOP       (1 byte  at site 3)
+        // done:
+        // HALT      (1 byte  at site 4)
+        // => delta = 4 - 0 = 4
+        let src = "JUMP done\nNOP\ndone:\nHALT";
+        let buf = asm(src);
+        let instrs = decode_all(&buf);
+        assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
+        assert_eq!(instrs[1], Instruction::Nop {});
+        assert_eq!(instrs[2], Instruction::Halt {});
+    }
+
+    #[test]
+    fn backward_jumpi_label() {
+        // top:
+        // PUSH -1   (3 bytes at 0)
+        // ADD       (1 byte  at 3)
+        // DUPL      (1 byte  at 4)
+        // JUMPI top (3 bytes at 5)
+        // => delta = 0 - 5 = -5
+        let src = "top:\nPUSH -1\nADD\nDUPL\nJUMPI top";
+        let buf = asm(src);
+        let instrs = decode_all(&buf);
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -5 });
+    }
+
+    #[test]
+    fn jump_raw_integer_offset() {
+        let buf = asm("JUMP 3");
+        let instrs = decode_all(&buf);
+        assert_eq!(instrs[0], Instruction::Jump { offset: 3 });
+    }
+
+    #[test]
+    fn unknown_mnemonic_error() {
+        let src = "FOOBAR";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
+    }
+
+    #[test]
+    fn wrong_operand_count_error() {
+        let src = "HALT r0";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
+    }
+
+    #[test]
+    fn wrong_operand_kind_error() {
+        // LOAD expects a register, not an integer
+        let src = "LOAD 42";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
+    }
+
+    #[test]
+    fn undefined_label_error() {
+        let src = "JUMP nowhere";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
+    }
+
+    #[test]
+    fn duplicate_label_error() {
+        let src = "top:\nNOP\ntop:\nHALT";
+        let lines = parse(src, "<test>").unwrap();
+        assert!(assemble(&lines, src, "<test>").is_err());
+    }
+
+    #[test]
+    fn duplicate_label_reports_first_definition_location() {
+        let src = "top:\nNOP\ntop:\nHALT";
+        let lines = parse(src, "<test>").unwrap();
+        let err = assemble(&lines, src, "<test>").unwrap_err();
+        assert!(matches!(
+            err,
+            AssembleError::DuplicateLabel { ref label, .. } if label == "top"
+        ));
+    }
+
+    #[test]
+    fn push_hex_literal() {
+        let buf = asm("PUSH 0xFF");
+        let instrs = decode_all(&buf);
+        assert_eq!(instrs[0], Instruction::Push { imm: 255 });
+    }
+
+    #[test]
+    fn all_zero_arg_instructions_assemble() {
+        // Spot-check a handful of zero-operand mnemonics.
+        for mnem in &["NOP", "HALT", "ADD", "SUB", "MUL", "DIV", "NOT", "AND"] {
+            let buf = asm(mnem);
+            assert_eq!(buf.len(), 1, "expected 1 byte for {mnem}");
+        }
+    }
+
+    #[test]
+    fn pushc_assembles_to_pool_and_index() {
+        let src = "PUSHC 12345";
+        let lines = parse(src, "<test>").unwrap();
+        let program = assemble(&lines, src, "<test>").unwrap();
+        // Pool should contain exactly one entry with value 12345 at index 0.
+        assert_eq!(program.pool().len(), 1, "expected 1 pool entry");
+        assert_eq!(program.pool().get(0), Some(12345i64));
+        // Instruction stream should decode to PushC { idx: 0 }.
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs.len(), 1);
+        assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+    }
+
+    #[test]
+    fn pushc_wrong_operand_count_error() {
+        let src = "PUSHC";
+        let lines = parse(src, "<test>").unwrap();
+        let err = assemble(&lines, src, "<test>").unwrap_err();
+        assert!(matches!(err, AssembleError::WrongOperandCount { .. }));
+    }
+
+    #[test]
+    fn pushc_wrong_operand_kind_error() {
+        let src = "PUSHC r0";
+        let lines = parse(src, "<test>").unwrap();
+        let err = assemble(&lines, src, "<test>").unwrap_err();
+        assert!(matches!(err, AssembleError::WrongOperandKind { .. }));
+    }
+}

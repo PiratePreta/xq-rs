@@ -1,0 +1,19 @@
+[package]
+name                 = "aglais-xqvm-bytecode"
+description          = "Bytecode for Aglais XQVM"
+version              = "0.1.0"
+license.workspace    = true
+repository.workspace = true
+edition              = "2024"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json = "1"
+
+[dependencies]
+pastey.workspace    = true
+oxicode             = { version = "0.1", features = [ "serde" ] }
+serde.workspace     = true
+thiserror.workspace = true
