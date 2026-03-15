@@ -136,13 +136,13 @@ mod tests {
     }
 
     #[test]
-    fn opcode_count_is_68() {
-        assert_eq!(opcodes!(all_opcodes_array).len(), 68);
+    fn opcode_count_is_69() {
+        assert_eq!(opcodes!(all_opcodes_array).len(), 69);
     }
 
     #[test]
     fn unknown_opcode_returns_error() {
-        for byte in [0x08u8, 0x0E, 0x18, 0x46, 0x49, 0x54, 0x59, 0x5C, 0xFE, 0xFF] {
+        for byte in [0x08u8, 0x0E, 0x46, 0x49, 0x54, 0x59, 0x5C, 0xFE, 0xFF] {
             assert_eq!(
                 Opcode::try_from(byte),
                 Err(DecodeError(byte)),

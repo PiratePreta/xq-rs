@@ -106,7 +106,7 @@ fn jump_target_gets_label() {
     let mut b = InstructionBuilder::new();
     let top = b.label();
     let _ = b.place(top).nop().jump(top);
-    let bytes = b.build().unwrap();
+    let bytes = b.build().unwrap().code().to_vec();
 
     let out = run_stdin(&bytes);
     assert!(out.status.success(), "exit: {}", out.status);
@@ -126,7 +126,7 @@ fn conditional_jump_shows_label() {
     let mut b = InstructionBuilder::new();
     let done = b.label();
     let _ = b.push(0).jump_if(done).push(1).place(done).halt();
-    let bytes = b.build().unwrap();
+    let bytes = b.build().unwrap().code().to_vec();
 
     let out = run_stdin(&bytes);
     let text = String::from_utf8(out.stdout).unwrap();

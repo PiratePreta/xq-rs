@@ -166,6 +166,7 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Vec<u8>, 
     }
 
     b.build()
+        .map(|program| program.code().to_vec())
         .map_err(|e| convert_build_error(e, &label_names, &first_ref, source, name))
 }
 
@@ -274,6 +275,9 @@ fn convert_build_error(
                 span: make_span(source, line, col, label.len()),
             }
         }
+        builder::Error::PoolOverflow => AssembleError::PoolOverflow {
+            src: make_src(source, name),
+        },
     }
 }
 
@@ -329,6 +333,39 @@ impl FromOperand for i64 {
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Integer(n) => Ok(*n),
+            _ => Err(AssembleError::WrongOperandKind {
+                mnemonic: mnemonic.to_string(),
+                field: field.to_string(),
+                expected_kind: "integer literal".to_string(),
+                src: make_src(source, name),
+                span: make_span(source, line, col, mnemonic.len()),
+            }),
+        }
+    }
+}
+
+/// `u16` is used for `PUSHC` pool indices.
+impl FromOperand for u16 {
+    fn from_operand(
+        op: &Operand,
+        field: &str,
+        mnemonic: &str,
+        line: usize,
+        col: usize,
+        source: &str,
+        name: &str,
+    ) -> Result<Self, AssembleError> {
+        match op {
+            Operand::Integer(n) => {
+                Self::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
+                    value: *n,
+                    target_type: "u16",
+                    field: field.to_string(),
+                    mnemonic: mnemonic.to_string(),
+                    src: make_src(source, name),
+                    span: make_span(source, line, col, mnemonic.len()),
+                })
+            }
             _ => Err(AssembleError::WrongOperandKind {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),

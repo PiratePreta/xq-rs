@@ -67,6 +67,8 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::codec;
+use crate::pool::ConstantPool;
+use crate::program::Program;
 use crate::types::{Instruction, Opcode};
 
 // ---------------------------------------------------------------------------
@@ -202,21 +204,77 @@ pub struct InstructionStream<'a> {
     bytes: &'a [u8],
     pos: usize,
     labels: BTreeMap<usize, String>,
+    pool: ConstantPool,
 }
 
 impl<'a> InstructionStream<'a> {
-    /// Create a new stream positioned at the start of `bytes`.
+    /// Create a new stream positioned at the start of `bytes` with an empty
+    /// constant pool.
     ///
     /// The constructor performs a single scan of `bytes` to collect all
     /// `JUMP`/`JUMPI` targets and assign label names before any instruction
     /// is returned.
+    ///
+    /// If the instruction stream contains [`PUSHC`](crate::types::Instruction::PushC)
+    /// instructions, use [`with_pool`](Self::with_pool) or
+    /// [`from_program`](Self::from_program) so that pool indices can be
+    /// resolved via [`pool`](Self::pool).
     pub fn new(bytes: &'a [u8]) -> Self {
+        Self::with_pool(bytes, ConstantPool::new())
+    }
+
+    /// Create a new stream with an associated constant pool.
+    ///
+    /// Equivalent to [`new`](Self::new) but attaches `pool` so that callers
+    /// can resolve `PUSHC` indices via [`pool`](Self::pool).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use aglais_xqvm_bytecode::pool::ConstantPool;
+    /// use aglais_xqvm_bytecode::stream::InstructionStream;
+    ///
+    /// let mut pool = ConstantPool::new();
+    /// let _idx = pool.intern(42).unwrap();
+    ///
+    /// let stream = InstructionStream::with_pool(&[], pool);
+    /// assert_eq!(stream.pool().get(0), Some(42));
+    /// ```
+    pub fn with_pool(bytes: &'a [u8], pool: ConstantPool) -> Self {
         let labels = collect_labels(bytes);
         Self {
             bytes,
             pos: 0,
             labels,
+            pool,
         }
+    }
+
+    /// Create a stream from a [`Program`], binding both its instruction bytes
+    /// and its constant pool.
+    ///
+    /// The stream borrows the program's code bytes for its lifetime `'a` and
+    /// clones the pool so both can be used independently after construction.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use aglais_xqvm_bytecode::pool::ConstantPool;
+    /// use aglais_xqvm_bytecode::program::Program;
+    /// use aglais_xqvm_bytecode::stream::InstructionStream;
+    /// use aglais_xqvm_bytecode::types::Instruction;
+    ///
+    /// let mut pool = ConstantPool::new();
+    /// let _idx = pool.intern(99).unwrap();
+    /// let program = Program::new(pool, vec![0x0Fu8]); // HALT
+    ///
+    /// let mut stream = InstructionStream::from_program(&program);
+    /// assert_eq!(stream.pool().get(0), Some(99));
+    /// let (_, _, instr) = stream.next_instruction().unwrap().unwrap();
+    /// assert_eq!(instr, Instruction::Halt {});
+    /// ```
+    pub fn from_program(program: &'a Program) -> Self {
+        Self::with_pool(program.code(), program.pool().clone())
     }
 
     /// Current cursor position (byte offset into the buffer).
@@ -246,6 +304,31 @@ impl<'a> InstructionStream<'a> {
     /// exclusively from `JUMP`/`JUMPI` targets.
     pub fn labels(&self) -> &BTreeMap<usize, String> {
         &self.labels
+    }
+
+    /// The constant pool associated with this stream.
+    ///
+    /// Returns a reference to the pool supplied via
+    /// [`with_pool`](Self::with_pool) or [`from_program`](Self::from_program).
+    /// When the stream was created with [`new`](Self::new), the pool is empty.
+    ///
+    /// Use this to resolve `PUSHC` indices encountered during iteration:
+    ///
+    /// ```rust
+    /// use aglais_xqvm_bytecode::pool::ConstantPool;
+    /// use aglais_xqvm_bytecode::stream::InstructionStream;
+    /// use aglais_xqvm_bytecode::types::Instruction;
+    /// use aglais_xqvm_bytecode::codec;
+    ///
+    /// let mut pool = ConstantPool::new();
+    /// let idx = pool.intern(7).unwrap();
+    /// let buf = codec::encode(&Instruction::PushC { idx });
+    ///
+    /// let stream = InstructionStream::with_pool(&buf, pool);
+    /// assert_eq!(stream.pool().get(0), Some(7));
+    /// ```
+    pub fn pool(&self) -> &ConstantPool {
+        &self.pool
     }
 
     /// Seek to absolute byte offset `pos`.
@@ -587,5 +670,34 @@ mod tests {
         let mut stream = InstructionStream::new(&buf);
         let (_, _, instr) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(instr, Instruction::Load { reg: Register(7) });
+    }
+
+    #[test]
+    fn new_stream_has_empty_pool() {
+        let stream = InstructionStream::new(&[]);
+        assert!(stream.pool().is_empty());
+    }
+
+    #[test]
+    fn with_pool_carries_pool() {
+        let mut pool = ConstantPool::new();
+        pool.intern(42).unwrap();
+        let stream = InstructionStream::with_pool(&[], pool);
+        assert_eq!(stream.pool().get(0), Some(42));
+    }
+
+    #[test]
+    fn from_program_binds_code_and_pool() {
+        use crate::program::Program;
+
+        let mut pool = ConstantPool::new();
+        let idx = pool.intern(7).unwrap();
+        let buf = codec::encode(&Instruction::PushC { idx });
+        let program = Program::new(pool, buf);
+
+        let mut stream = InstructionStream::from_program(&program);
+        assert_eq!(stream.pool().get(0), Some(7));
+        let (_, _, instr) = stream.next_instruction().unwrap().unwrap();
+        assert_eq!(instr, Instruction::PushC { idx: 0 });
     }
 }

@@ -245,7 +245,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn encode_decode_roundtrip_all_68() {
+    fn encode_decode_roundtrip_all_69() {
         for instr in opcodes!(all_instructions) {
             let bytes = encode(&instr);
             let (decoded, consumed) = decode(&bytes).expect("decode failed");

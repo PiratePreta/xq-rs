@@ -155,8 +155,8 @@ mod tests {
     }
 
     #[test]
-    fn instruction_count_is_68() {
-        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 68);
+    fn instruction_count_is_69() {
+        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 69);
     }
 
     #[test]

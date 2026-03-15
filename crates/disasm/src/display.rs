@@ -110,6 +110,17 @@ impl FmtOperand for i64 {
     }
 }
 
+impl FmtOperand for u16 {
+    fn fmt_operand(
+        &self,
+        f: &mut dyn io::Write,
+        _labels: &BTreeMap<usize, String>,
+        _instr_offset: usize,
+    ) -> io::Result<()> {
+        write!(f, "{self}")
+    }
+}
+
 impl FmtOperand for i16 {
     /// Resolve the offset to a label name when possible; fall back to `+N`.
     fn fmt_operand(
@@ -428,5 +439,13 @@ mod tests {
     #[test]
     fn empty_bytecode_produces_empty_output() {
         assert_eq!(Disassembly::new(&[]).to_string(), "");
+    }
+
+    #[test]
+    fn pushc_displays_index() {
+        let buf = assemble(&[Instruction::PushC { idx: 7 }, Instruction::Halt {}]);
+        let text = Disassembly::new(&buf).to_string();
+        assert!(text.contains("PUSHC"), "missing PUSHC in:\n{text}");
+        assert!(text.contains('7'), "missing index 7 in:\n{text}");
     }
 }

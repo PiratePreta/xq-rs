@@ -26,6 +26,8 @@
 //! | [`types::Opcode`] | `#[repr(u8)]` enum and [`types::DecodeError`] |
 //! | [`types::Instruction`] | Fully decoded instruction with operands |
 //! | [`types::Register`] | 8-bit register slot operand |
+//! | [`pool`] | [`pool::ConstantPool`] -- interned `i64` constant table |
+//! | [`program`] | [`program::Program`] -- constant pool + instruction bytes |
 //! | [`builder`] | [`builder::InstructionBuilder`] -- fluent bytecode assembler |
 //! | [`codec`] | [`codec::encode`] / [`codec::decode`] -- binary wire format |
 //! | [`stream`] | [`stream::InstructionStream`] -- incremental seekable reader |
@@ -34,7 +36,7 @@
 //!
 //! All data types are derived from the [`opcodes!`] callback macro. Pass the
 //! name of any `macro_rules!` you define as the argument; it will be invoked
-//! with the full 68-entry opcode table:
+//! with the full 69-entry opcode table:
 //!
 //! ```rust
 //! macro_rules! list_mnemonics {
@@ -44,8 +46,9 @@
 //! }
 //!
 //! let mnemonics = aglais_xqvm_bytecode::opcodes!(list_mnemonics);
-//! assert_eq!(mnemonics.len(), 68);
+//! assert_eq!(mnemonics.len(), 69);
 //! assert!(mnemonics.contains(&"ENERGY"));
+//! assert!(mnemonics.contains(&"PUSHC"));
 //! ```
 //!
 //! # Quick start
@@ -78,4 +81,6 @@
 pub mod types;
 pub mod builder;
 pub mod codec;
+pub mod pool;
+pub mod program;
 pub mod stream;

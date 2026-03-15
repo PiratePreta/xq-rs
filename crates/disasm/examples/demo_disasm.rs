@@ -59,7 +59,7 @@ fn main() {
         .energy(Register(0), Register(1))
         .halt();
 
-    let mut buf = b.build().unwrap();
+    let mut buf = b.build().unwrap().code().to_vec();
 
     // Inject two invalid bytes immediately before the ENERGY instruction to
     // demonstrate that the disassembler renders them as `.byte 0xXX` and

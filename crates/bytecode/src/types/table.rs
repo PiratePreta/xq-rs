@@ -17,7 +17,7 @@
 
 /// Invoke `$mac!` with the complete XQVM opcode table.
 ///
-/// The callback macro receives the full comma-separated list of 68 opcode
+/// The callback macro receives the full comma-separated list of 69 opcode
 /// entries. Each entry has the form:
 ///
 /// ```text
@@ -89,6 +89,8 @@ macro_rules! opcodes {
              {reg: $crate::types::Register}),
             (0x17, Output,  "OUTPUT",   "Pop an output slot index and write the register to it.",
              {reg: $crate::types::Register}),
+            (0x18, PushC,   "PUSHC",    "Push the i64 constant at pool index idx onto the stack.",
+             {idx: u16}),
             // ---------------------------------------------------------------
             // Arithmetic
             // ---------------------------------------------------------------

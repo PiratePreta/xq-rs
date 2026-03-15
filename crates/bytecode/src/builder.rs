@@ -46,8 +46,8 @@
 //! b.pop();
 //! b.halt();
 //!
-//! let buf = b.build().unwrap();
-//! assert!(!buf.is_empty());
+//! let program = b.build().unwrap();
+//! assert!(!program.code().is_empty());
 //! ```
 //!
 //! Forward references work equally well:
@@ -64,13 +64,15 @@
 //! b.place(done);    // anchor here
 //! b.halt();
 //!
-//! let buf = b.build().unwrap();
-//! assert!(!buf.is_empty());
+//! let program = b.build().unwrap();
+//! assert!(!program.code().is_empty());
 //! ```
 
 use thiserror::Error;
 
 use crate::codec;
+use crate::pool::{ConstantPool, PoolOverflow};
+use crate::program::Program;
 use crate::types::{Instruction, Opcode, Register};
 
 // ---------------------------------------------------------------------------
@@ -100,6 +102,11 @@ pub enum Error {
         /// Computed delta that overflowed.
         delta: i64,
     },
+
+    /// More than 65535 distinct `i64` constants were interned via
+    /// [`InstructionBuilder::push_const`].
+    #[error("constant pool overflow: more than 65535 distinct i64 constants")]
+    PoolOverflow,
 }
 
 /// Convenience alias for `std::result::Result<T, `[`enum@Error`]`>`.
@@ -140,6 +147,10 @@ struct Fixup {
 /// [`emit`](Self::emit), anchor labels with [`place`](Self::place), and
 /// finalise the buffer with [`build`](Self::build).
 ///
+/// Use [`push_const`](Self::push_const) to intern an `i64` constant into the
+/// pool and emit a `PUSHC` instruction. The resulting [`Program`] carries both
+/// the pool and the instruction bytes.
+///
 /// # Examples
 ///
 /// ```rust
@@ -157,8 +168,8 @@ struct Fixup {
 ///  .place(skip)
 ///  .halt();
 ///
-/// let buf = b.build().unwrap();
-/// assert!(!buf.is_empty());
+/// let program = b.build().unwrap();
+/// assert!(!program.code().is_empty());
 /// ```
 #[derive(Debug, Default)]
 pub struct InstructionBuilder {
@@ -166,6 +177,9 @@ pub struct InstructionBuilder {
     /// `None` means allocated but not yet placed.
     label_positions: Vec<Option<usize>>,
     fixups: Vec<Fixup>,
+    pool: ConstantPool,
+    /// Deferred error: set when `push_const` encounters a pool overflow.
+    pool_overflow: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +207,12 @@ macro_rules! impl_builder_methods {
     // Skip ENERGY -- `{model: ...}`
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
        {model: $($rest_f:tt)*}), $($rest:tt)* ) => {
+        impl_builder_methods!($($rest)*);
+    };
+
+    // Skip PUSHC -- `{idx: ...}` (has a dedicated push_const method)
+    ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
+       {idx: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
@@ -245,7 +265,8 @@ impl InstructionBuilder {
     /// let mut b = InstructionBuilder::new();
     /// let top = b.label();
     /// b.place(top).nop().jump(top);
-    /// b.build().unwrap();
+    /// let program = b.build().unwrap();
+    /// assert!(!program.code().is_empty());
     /// ```
     pub fn label(&mut self) -> LabelId {
         let id = self.label_positions.len();
@@ -327,6 +348,43 @@ impl InstructionBuilder {
         self.emit(Instruction::Push { imm })
     }
 
+    /// Intern `imm` in the constant pool and emit a `PUSHC` instruction.
+    ///
+    /// If `imm` is already in the pool, the existing index is reused and no
+    /// new pool entry is added. If the pool is full (more than 65535 distinct
+    /// constants), the overflow is recorded and [`build`](Self::build) will
+    /// return [`Error::PoolOverflow`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use aglais_xqvm_bytecode::builder::InstructionBuilder;
+    /// use aglais_xqvm_bytecode::types::Instruction;
+    ///
+    /// let mut b = InstructionBuilder::new();
+    /// b.push_const(42).push_const(42).halt(); // two refs, one pool entry
+    ///
+    /// let program = b.build().unwrap();
+    /// assert_eq!(program.pool().len(), 1);
+    /// assert_eq!(program.pool().get(0), Some(42));
+    /// ```
+    pub fn push_const(&mut self, imm: i64) -> &mut Self {
+        match self.pool.intern(imm) {
+            Ok(idx) => {
+                self.emit(Instruction::PushC { idx });
+            }
+            Err(PoolOverflow) => {
+                // Record overflow; emit a placeholder so the buffer length
+                // stays consistent for subsequent offset computations.
+                if !self.pool_overflow {
+                    self.pool_overflow = true;
+                }
+                self.emit(Instruction::PushC { idx: 0 });
+            }
+        }
+        self
+    }
+
     // -----------------------------------------------------------------------
     // Hamiltonian energy
     // -----------------------------------------------------------------------
@@ -340,14 +398,18 @@ impl InstructionBuilder {
     // Finalise
     // -----------------------------------------------------------------------
 
-    /// Resolve all jump fixups and return the assembled byte buffer.
+    /// Resolve all jump fixups and return the assembled [`Program`].
     ///
     /// For each pending `JUMP`/`JUMPI`, computes `delta = label_pos - site`
-    /// and writes it as a big-endian `i16` into the two bytes that follow the
-    /// opcode (reserved by the `i16::MAX` placeholder).
+    /// and re-encodes the instruction with the resolved `i16` offset in
+    /// place of the placeholder. The returned [`Program`] bundles the
+    /// constant pool (populated by any [`push_const`](Self::push_const)
+    /// calls) with the final instruction bytes.
     ///
     /// # Errors
     ///
+    /// - [`Error::PoolOverflow`] -- more than 65535 distinct constants were
+    ///   passed to [`push_const`](Self::push_const).
     /// - [`Error::UnplacedLabel`] -- a label used in a jump was never
     ///   placed.
     /// - [`Error::OffsetOverflow`] -- the distance between a jump and
@@ -356,22 +418,25 @@ impl InstructionBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::{builder::InstructionBuilder, codec, stream::InstructionStream};
+    /// use aglais_xqvm_bytecode::{builder::InstructionBuilder, stream::InstructionStream};
     /// use aglais_xqvm_bytecode::types::Instruction;
     ///
     /// let mut b = InstructionBuilder::new();
     /// let done = b.label();
     /// b.push(0).jump_if(done).push(1).place(done).halt();
     ///
-    /// let buf = b.build().unwrap();
+    /// let program = b.build().unwrap();
     ///
-    /// // Verify the buffer decodes cleanly.
-    /// let instrs: Vec<_> = InstructionStream::new(&buf)
+    /// // Verify the instruction bytes decode cleanly.
+    /// let instrs: Vec<_> = InstructionStream::new(program.code())
     ///     .collect::<std::result::Result<Vec<_>, _>>()
     ///     .unwrap();
     /// assert_eq!(instrs.last().unwrap().2, Instruction::Halt {});
     /// ```
-    pub fn build(mut self) -> Result<Vec<u8>> {
+    pub fn build(mut self) -> Result<Program> {
+        if self.pool_overflow {
+            return Err(Error::PoolOverflow);
+        }
         for fixup in &self.fixups {
             let label_pos = self.label_positions[fixup.label.0]
                 .ok_or(Error::UnplacedLabel { id: fixup.label.0 })?;
@@ -391,7 +456,7 @@ impl InstructionBuilder {
             let encoded = codec::encode(&instr);
             self.buf[fixup.site..fixup.site + encoded.len()].copy_from_slice(&encoded);
         }
-        Ok(self.buf)
+        Ok(Program::new(self.pool, self.buf))
     }
 }
 
@@ -406,20 +471,24 @@ mod tests {
     use crate::stream::InstructionStream;
     use crate::types::Instruction;
 
+    use crate::pool::ConstantPool;
+    use crate::program::Program;
+
     fn decode_all(buf: &[u8]) -> Vec<Instruction> {
         InstructionStream::new(buf).map(|r| r.unwrap().2).collect()
     }
 
     #[test]
     fn empty_builder_produces_empty_buffer() {
-        assert_eq!(InstructionBuilder::new().build().unwrap(), Vec::<u8>::new());
+        let program = InstructionBuilder::new().build().unwrap();
+        assert_eq!(program, Program::new(ConstantPool::new(), vec![]));
     }
 
     #[test]
     fn push_halt_roundtrip() {
         let mut b = InstructionBuilder::new();
         b.push(42).halt();
-        let instrs = decode_all(&b.build().unwrap());
+        let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(
             instrs,
             [Instruction::Push { imm: 42 }, Instruction::Halt {}]
@@ -434,8 +503,7 @@ mod tests {
         let top = b.label();
         b.place(top).push(3).jump_if(top);
 
-        let buf = b.build().unwrap();
-        let instrs = decode_all(&buf);
+        let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[0], Instruction::Push { imm: 3 });
         assert_eq!(instrs[1], Instruction::JumpI { offset: -9 });
     }
@@ -448,8 +516,7 @@ mod tests {
         let done = b.label();
         b.jump(done).nop().place(done).halt();
 
-        let buf = b.build().unwrap();
-        let instrs = decode_all(&buf);
+        let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Halt {});
@@ -466,17 +533,9 @@ mod tests {
             .place(done)
             .halt();
 
-        let buf = b.build().unwrap();
-        let instrs = decode_all(&buf);
+        let instrs = decode_all(b.build().unwrap().code());
         // Last instruction must be HALT.
         assert_eq!(*instrs.last().unwrap(), Instruction::Halt {});
-        // Both JUMPIs must point to the same target (HALT's offset = 22).
-        let halt_off = 22usize; // 9+3+9+3 = 24? Let me compute:
-        // PUSH(9) + JUMPI(3) + PUSH(9) + JUMPI(3) + HALT(1) = 25 bytes total
-        // HALT is at offset 24.
-        // JUMPI1 at offset 9: delta = 24 - 9 = 15.
-        // JUMPI2 at offset 12+9=... actually let me just check the offsets decode.
-        let _ = halt_off;
         assert_eq!(instrs[0], Instruction::Push { imm: 0 });
         assert_eq!(instrs[2], Instruction::Push { imm: 0 });
         // Both JUMPIs have the same target (HALT) -- just verify they decoded.
@@ -500,8 +559,7 @@ mod tests {
         let l1 = b.label();
         b.place(l0).nop().place(l1).halt();
 
-        let buf = b.build().unwrap();
-        let instrs = decode_all(&buf);
+        let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs, [Instruction::Nop {}, Instruction::Halt {}]);
     }
 
@@ -509,7 +567,7 @@ mod tests {
     fn emit_arbitrary_instruction() {
         let mut b = InstructionBuilder::new();
         b.emit(Instruction::Dupl {}).emit(Instruction::Halt {});
-        let instrs = decode_all(&b.build().unwrap());
+        let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs, [Instruction::Dupl {}, Instruction::Halt {}]);
     }
 
@@ -517,7 +575,7 @@ mod tests {
     fn arithmetic_chain() {
         let mut b = InstructionBuilder::new();
         b.push(10).push(3).add().push(2).mul().neg().halt();
-        let instrs = decode_all(&b.build().unwrap());
+        let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[2], Instruction::Add {});
         assert_eq!(instrs[4], Instruction::Mul {});
         assert_eq!(instrs[5], Instruction::Neg {});
@@ -527,7 +585,7 @@ mod tests {
     fn energy_method_encodes_both_registers() {
         let mut b = InstructionBuilder::new();
         b.energy(Register(1), Register(2)).halt();
-        let instrs = decode_all(&b.build().unwrap());
+        let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(
             instrs[0],
             Instruction::Energy {
@@ -535,6 +593,56 @@ mod tests {
                 sample: Register(2)
             },
         );
+    }
+
+    #[test]
+    fn push_const_interns_and_emits_pushc() {
+        let mut b = InstructionBuilder::new();
+        b.push_const(42).halt();
+
+        let program = b.build().unwrap();
+        assert_eq!(program.pool().len(), 1);
+        assert_eq!(program.pool().get(0), Some(42));
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+        assert_eq!(instrs[1], Instruction::Halt {});
+    }
+
+    #[test]
+    fn push_const_deduplicates_same_value() {
+        let mut b = InstructionBuilder::new();
+        b.push_const(99).push_const(99).halt();
+
+        let program = b.build().unwrap();
+        assert_eq!(
+            program.pool().len(),
+            1,
+            "duplicate constant not deduplicated"
+        );
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+        assert_eq!(instrs[1], Instruction::PushC { idx: 0 });
+    }
+
+    #[test]
+    fn push_const_multiple_distinct_values() {
+        let mut b = InstructionBuilder::new();
+        b.push_const(1).push_const(2).push_const(3).halt();
+
+        let program = b.build().unwrap();
+        assert_eq!(program.pool().len(), 3);
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+        assert_eq!(instrs[1], Instruction::PushC { idx: 1 });
+        assert_eq!(instrs[2], Instruction::PushC { idx: 2 });
+    }
+
+    #[test]
+    fn build_returns_empty_pool_when_no_push_const() {
+        let mut b = InstructionBuilder::new();
+        b.push(5).halt();
+        let program = b.build().unwrap();
+        assert!(program.pool().is_empty());
     }
 
     #[test]
