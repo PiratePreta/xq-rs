@@ -485,14 +485,14 @@ mod tests {
 
     #[test]
     fn offsets_advance_correctly() {
-        // PUSH(0) (9 bytes) at 0, HALT (1 byte) at 9.
+        // PUSH(0) (3 bytes) at 0, HALT (1 byte) at 3.
         let buf = assemble(&[Instruction::Push { imm: 0 }, Instruction::Halt {}]);
         let mut stream = InstructionStream::new(&buf);
 
         let (off0, _, _) = stream.next_instruction().unwrap().unwrap();
         let (off1, _, _) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(off0, 0);
-        assert_eq!(off1, 9);
+        assert_eq!(off1, 3);
         assert_eq!(stream.next_instruction(), None);
     }
 
@@ -516,10 +516,10 @@ mod tests {
 
     #[test]
     fn jump_target_instruction_carries_label() {
-        // PUSH(3) (9 bytes) at 0, JUMPI (3 bytes) at 9; target = 9 + (-9) = 0 -> L0.
+        // PUSH(3) (3 bytes) at 0, JUMPI (3 bytes) at 3; target = 3 + (-3) = 0 -> L0.
         let buf = assemble(&[
             Instruction::Push { imm: 3 },
-            Instruction::JumpI { offset: -9i16 },
+            Instruction::JumpI { offset: -3i16 },
         ]);
         let mut stream = InstructionStream::new(&buf);
 
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn seek_to_second_instruction_skips_first() {
-        // PUSH(0) (9 bytes) at 0, NOP (1 byte) at 9, HALT (1 byte) at 10.
+        // PUSH(0) (3 bytes) at 0, NOP (1 byte) at 3, HALT (1 byte) at 4.
         let buf = assemble(&[
             Instruction::Push { imm: 0 },
             Instruction::Nop {},
@@ -563,9 +563,9 @@ mod tests {
         ]);
         let mut stream = InstructionStream::new(&buf);
 
-        stream.seek(9).unwrap();
+        stream.seek(3).unwrap();
         let (off, _, instr) = stream.next_instruction().unwrap().unwrap();
-        assert_eq!(off, 9);
+        assert_eq!(off, 3);
         assert_eq!(instr, Instruction::Nop {});
     }
 
@@ -594,10 +594,10 @@ mod tests {
 
     #[test]
     fn seek_back_simulates_jump() {
-        // PUSH(3) (9 bytes) at 0, JUMPI (3 bytes) at 9; target = 9 + (-9) = 0.
+        // PUSH(3) (3 bytes) at 0, JUMPI (3 bytes) at 3; target = 3 + (-3) = 0.
         let buf = assemble(&[
             Instruction::Push { imm: 3 },
-            Instruction::JumpI { offset: -9i16 },
+            Instruction::JumpI { offset: -3i16 },
         ]);
         let mut stream = InstructionStream::new(&buf);
 

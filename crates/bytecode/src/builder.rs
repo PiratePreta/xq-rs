@@ -343,9 +343,18 @@ impl InstructionBuilder {
     // Stack
     // -----------------------------------------------------------------------
 
-    /// Emit a `PUSH` instruction with a signed 64-bit immediate value.
+    /// Emit a `PUSH` or `PUSHC` instruction for the given value.
+    ///
+    /// If `imm` fits in `i16` (i.e. `-32768..=32767`), the compact
+    /// `PUSH imm` form is used. For larger values the constant is interned in
+    /// the pool via [`push_const`](Self::push_const) and a `PUSHC` instruction
+    /// is emitted instead.
     pub fn push(&mut self, imm: i64) -> &mut Self {
-        self.emit(Instruction::Push { imm })
+        if let Ok(small) = i16::try_from(imm) {
+            self.emit(Instruction::Push { imm: small })
+        } else {
+            self.push_const(imm)
+        }
     }
 
     /// Intern `imm` in the constant pool and emit a `PUSHC` instruction.
@@ -497,15 +506,15 @@ mod tests {
 
     #[test]
     fn backward_jump_resolves_correctly() {
-        // PUSH(3) (9 bytes) at 0; JUMPI (3 bytes) at 9; target = 0.
-        // delta = 0 - 9 = -9.
+        // PUSH(3) (3 bytes) at 0; JUMPI (3 bytes) at 3; target = 0.
+        // delta = 0 - 3 = -3.
         let mut b = InstructionBuilder::new();
         let top = b.label();
         b.place(top).push(3).jump_if(top);
 
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[0], Instruction::Push { imm: 3 });
-        assert_eq!(instrs[1], Instruction::JumpI { offset: -9 });
+        assert_eq!(instrs[1], Instruction::JumpI { offset: -3 });
     }
 
     #[test]
@@ -643,6 +652,43 @@ mod tests {
         b.push(5).halt();
         let program = b.build().unwrap();
         assert!(program.pool().is_empty());
+    }
+
+    #[test]
+    fn push_large_value_promotes_to_pushc() {
+        // 100_000 does not fit in i16 -- push() should intern it and emit PUSHC.
+        let mut b = InstructionBuilder::new();
+        b.push(100_000i64).halt();
+        let program = b.build().unwrap();
+        assert_eq!(program.pool().len(), 1);
+        assert_eq!(program.pool().get(0), Some(100_000i64));
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+        assert_eq!(instrs[1], Instruction::Halt {});
+    }
+
+    #[test]
+    fn push_i16_max_fits_inline() {
+        let mut b = InstructionBuilder::new();
+        b.push(i64::from(i16::MAX)).halt();
+        let program = b.build().unwrap();
+        assert!(
+            program.pool().is_empty(),
+            "i16::MAX should not go through pool"
+        );
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::Push { imm: i16::MAX });
+    }
+
+    #[test]
+    fn push_i16_max_plus_one_promotes_to_pushc() {
+        let val = i64::from(i16::MAX) + 1;
+        let mut b = InstructionBuilder::new();
+        b.push(val).halt();
+        let program = b.build().unwrap();
+        assert_eq!(program.pool().get(0), Some(val));
+        let instrs = decode_all(program.code());
+        assert!(matches!(instrs[0], Instruction::PushC { .. }));
     }
 
     #[test]

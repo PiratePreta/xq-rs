@@ -324,6 +324,11 @@ impl<'a> Disassembly<'a> {
                         && let Some(val) = self.pool.get(idx)
                     {
                         write!(out, "{:<8}{val}  ; [{idx}]", "PUSHC")?;
+                    } else if let Instruction::Push { imm } = instr {
+                        // PUSH carries an i16 immediate; FmtOperand for i16 does
+                        // label resolution (designed for JUMP offsets), so we
+                        // bypass it and render the value as a plain decimal.
+                        write!(out, "{:<8}{imm}", "PUSH")?;
                     } else {
                         fmt_instruction(&instr, offset, &labels, out)?;
                     }
@@ -398,21 +403,21 @@ mod tests {
 
     #[test]
     fn byte_offsets_are_correct() {
-        // PUSH(0) is 9 bytes (opcode + 8-byte BE i64); HALT starts at offset 9.
+        // PUSH(0) is 3 bytes (opcode + 2-byte BE i16); HALT starts at offset 3.
         let buf = assemble(&[Instruction::Push { imm: 0 }, Instruction::Halt {}]);
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("0x0000"), "missing 0x0000 in:\n{text}");
-        assert!(text.contains("0x0009"), "missing 0x0009 in:\n{text}");
+        assert!(text.contains("0x0003"), "missing 0x0003 in:\n{text}");
     }
 
     #[test]
     fn backward_jump_gets_label() {
-        // PUSH(5) (9 bytes, offset 0) + GT (1 byte, offset 9) = offset 10 for JUMPI.
-        // JUMPI offset = -10  ->  target = 10 + (-10) = 0  -> L0 at offset 0.
+        // PUSH(5) (3 bytes, offset 0) + GT (1 byte, offset 3) = offset 4 for JUMPI.
+        // JUMPI offset = -4  ->  target = 4 + (-4) = 0  -> L0 at offset 0.
         let buf = assemble(&[
             Instruction::Push { imm: 5 },
             Instruction::Gt {},
-            Instruction::JumpI { offset: -10i16 },
+            Instruction::JumpI { offset: -4i16 },
             Instruction::Halt {},
         ]);
         let text = Disassembly::new(&buf).to_string();
@@ -443,16 +448,17 @@ mod tests {
 
     #[test]
     fn two_distinct_jump_targets_get_distinct_labels() {
-        // JUMPI -> offset 0 (L0)  and  JUMP -> offset 9 (L1) -- sorted by address.
+        // JUMPI -> offset 0 (L0)  and  JUMP -> offset 7 (L1) -- sorted by address.
         let buf = assemble(&[
             Instruction::JumpI { offset: -3i16 }, // offset 0; target = 0+(-3) = -3 -> OOB
-            Instruction::Jump { offset: 6i16 },   // offset 3; target = 3+6 = 9
-            Instruction::Push { imm: 0 },         // offset 6
-            Instruction::Halt {},                 // offset 15
+            Instruction::Jump { offset: 4i16 },   // offset 3; target = 3+4 = 7
+            Instruction::Push { imm: 0 },         // offset 6 (3 bytes: 6-8)
+            Instruction::Halt {},                 // offset 9
         ]);
-        // target of JUMP is offset 9 = middle of PUSH, target of JUMPI is -3 (clamped to 0).
-        // L0 appears at offset 0 (JUMPI's own address). L1 is at offset 9, which is
-        // the middle of PUSH -- no instruction starts there, so "L1:" never appears.
+        // target of JUMP is offset 7 = middle of PUSH (starts at 6, 3 bytes), target of
+        // JUMPI is -3 (clamped to 0). L0 appears at offset 0 (JUMPI's own address).
+        // L1 is at offset 7, which is inside PUSH -- no instruction starts there, so
+        // "L1:" never appears.
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("L0:"), "missing L0 in:\n{text}");
         assert!(!text.contains("L1:"), "unexpected L1 in:\n{text}");

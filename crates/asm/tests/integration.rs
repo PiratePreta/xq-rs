@@ -138,13 +138,13 @@ fn forward_jump_resolves() {
 #[test]
 fn backward_jumpi_resolves() {
     // top:
-    // PUSH -1   (9 bytes, site=0)
-    // ADD       (1 byte,  site=9)
-    // DUPL      (1 byte,  site=10)
-    // JUMPI top (3 bytes, site=11)
-    // delta = 0 - 11 = -11
+    // PUSH -1   (3 bytes, site=0)
+    // ADD       (1 byte,  site=3)
+    // DUPL      (1 byte,  site=4)
+    // JUMPI top (3 bytes, site=5)
+    // delta = 0 - 5 = -5
     let instrs = asm("top:\nPUSH -1\nADD\nDUPL\nJUMPI top");
-    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -11 });
+    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -5 });
 }
 
 #[test]
@@ -270,6 +270,23 @@ fn case_insensitive_jump_mnemonics() {
     assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Halt {});
+}
+
+// ---------------------------------------------------------------------------
+// PUSH auto-promotion
+// ---------------------------------------------------------------------------
+
+#[test]
+fn push_large_value_promotes_to_pushc() {
+    // 100000 exceeds i16::MAX (32767), so PUSH auto-promotes to PUSHC via the
+    // constant pool.
+    let program = assemble_source("PUSH 100000\nHALT").expect("assemble failed");
+    assert_eq!(program.pool().len(), 1, "expected one pool entry");
+    assert_eq!(program.pool().get(0), Some(100000i64));
+    // The instruction stream should decode to PushC { idx: 0 } + Halt.
+    let instrs = decode_all(program.code());
+    assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+    assert_eq!(instrs[1], Instruction::Halt {});
 }
 
 // ---------------------------------------------------------------------------

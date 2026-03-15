@@ -73,8 +73,8 @@ macro_rules! opcodes {
             // ---------------------------------------------------------------
             // Stack & Register I/O
             // ---------------------------------------------------------------
-            (0x10, Push,    "PUSH",     "Push a signed 64-bit integer literal onto the stack.",
-             {imm: i64}),
+            (0x10, Push,    "PUSH",     "Push a signed 16-bit integer literal onto the stack.",
+             {imm: i16}),
             (0x11, Pop,     "POP",      "Discard the top of the stack.",
              {}),
             (0x12, Dupl,    "DUPL",     "Duplicate the top of the stack.",

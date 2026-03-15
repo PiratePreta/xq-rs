@@ -93,12 +93,12 @@ fn push_halt_contains_mnemonic_and_immediate() {
 
 #[test]
 fn byte_offsets_appear_in_output() {
-    // PUSH(0) is 9 bytes (opcode + 8-byte BE i64); HALT starts at 0x0009.
+    // PUSH(0) is 3 bytes (opcode + 2-byte BE i16); HALT starts at 0x0003.
     let bytes = assemble(&[Instruction::Push { imm: 0 }, Instruction::Halt {}]);
     let out = run_stdin(&bytes);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("0x0000"), "missing 0x0000 in:\n{text}");
-    assert!(text.contains("0x0009"), "missing 0x0009 in:\n{text}");
+    assert!(text.contains("0x0003"), "missing 0x0003 in:\n{text}");
 }
 
 #[test]

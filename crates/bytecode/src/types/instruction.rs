@@ -176,10 +176,10 @@ mod tests {
 
     #[test]
     fn push_imm_field() {
-        let p = Instruction::Push { imm: i64::MIN };
+        let p = Instruction::Push { imm: i16::MIN };
         assert_eq!(p.opcode(), Opcode::Push);
         if let Instruction::Push { imm } = p {
-            assert_eq!(imm, i64::MIN);
+            assert_eq!(imm, i16::MIN);
         } else {
             panic!("pattern match failed");
         }

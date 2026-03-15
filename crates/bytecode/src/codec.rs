@@ -269,30 +269,21 @@ mod tests {
     }
 
     #[test]
-    fn push_zero_is_nine_bytes() {
-        // opcode 0x10, i64(0) in BE = 8 zero bytes
-        assert_eq!(
-            encode(&Instruction::Push { imm: 0 }),
-            [0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
-        );
+    fn push_zero_is_three_bytes() {
+        // opcode 0x10, i16(0) in BE = 2 zero bytes
+        assert_eq!(encode(&Instruction::Push { imm: 0 }), [0x10, 0x00, 0x00]);
     }
 
     #[test]
     fn push_positive_fixint_be() {
-        // i64(1) in BE = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]
-        assert_eq!(
-            encode(&Instruction::Push { imm: 1 }),
-            [0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]
-        );
+        // i16(1) in BE = [0x00, 0x01]
+        assert_eq!(encode(&Instruction::Push { imm: 1 }), [0x10, 0x00, 0x01]);
     }
 
     #[test]
     fn push_negative_fixint_be() {
-        // i64(-1) in BE = [0xFF; 8]
-        assert_eq!(
-            encode(&Instruction::Push { imm: -1 }),
-            [0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
-        );
+        // i16(-1) in BE = [0xFF, 0xFF]
+        assert_eq!(encode(&Instruction::Push { imm: -1 }), [0x10, 0xFF, 0xFF]);
     }
 
     #[test]
@@ -320,7 +311,7 @@ mod tests {
 
     #[test]
     fn truncated_input_returns_error() {
-        // PUSH opcode without the required 8 operand bytes
+        // PUSH opcode without the required 2 operand bytes
         assert!(decode(&[0x10u8]).is_err());
     }
 

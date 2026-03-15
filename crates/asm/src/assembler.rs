@@ -171,6 +171,9 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
                 "PUSHC" => {
                     assemble_pushc(instr, &mut b, source, name)?;
                 }
+                "PUSH" => {
+                    assemble_push(instr, &mut b, source, name)?;
+                }
                 _ => {
                     b.emit(build_instr(instr, source, name)?);
                 }
@@ -282,6 +285,49 @@ fn assemble_pushc(
     match &instr.operands[0] {
         Operand::Integer(imm) => {
             b.push_const(*imm);
+        }
+        _ => {
+            return Err(AssembleError::WrongOperandKind {
+                mnemonic: instr.mnemonic.clone(),
+                field: "imm".to_string(),
+                expected_kind: "integer literal".to_string(),
+                src: make_src(source, name),
+                span: mnem_span,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PUSH
+// ---------------------------------------------------------------------------
+
+/// Handle `PUSH <imm>`: emit an inline `Push { imm: i16 }` for values that
+/// fit in 16 bits, or a `PUSHC { idx }` via the constant pool for larger
+/// values. The caller never needs to know which encoding was chosen.
+fn assemble_push(
+    instr: &ParsedInstr,
+    b: &mut InstructionBuilder,
+    source: &str,
+    name: &str,
+) -> Result<(), AssembleError> {
+    let mnem_span = make_span(source, instr.line, instr.col, instr.mnemonic.len());
+
+    if instr.operands.len() != 1 {
+        return Err(AssembleError::WrongOperandCount {
+            mnemonic: instr.mnemonic.clone(),
+            expected: 1,
+            got: instr.operands.len(),
+            src: make_src(source, name),
+            span: mnem_span,
+        });
+    }
+
+    match &instr.operands[0] {
+        Operand::Integer(imm) => {
+            b.push(*imm);
         }
         _ => {
             return Err(AssembleError::WrongOperandKind {
@@ -559,20 +605,14 @@ mod tests {
 
     #[test]
     fn push_zero() {
-        // opcode 0x10, i64(0) in BE = 8 zero bytes
-        assert_eq!(
-            asm("PUSH 0"),
-            [0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
-        );
+        // opcode 0x10, i16(0) in BE = 2 zero bytes
+        assert_eq!(asm("PUSH 0"), [0x10, 0x00, 0x00]);
     }
 
     #[test]
     fn push_negative() {
-        // i64(-1) in BE = [0xFF; 8]
-        assert_eq!(
-            asm("PUSH -1"),
-            [0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
-        );
+        // i16(-1) in BE = [0xFF, 0xFF]
+        assert_eq!(asm("PUSH -1"), [0x10, 0xFF, 0xFF]);
     }
 
     #[test]
@@ -614,15 +654,15 @@ mod tests {
     #[test]
     fn backward_jumpi_label() {
         // top:
-        // PUSH -1 (9 bytes at 0)
-        // ADD     (1 byte  at 9)
-        // DUPL    (1 byte  at 10)
-        // JUMPI top (3 bytes at 11)
-        // => delta = 0 - 11 = -11
+        // PUSH -1   (3 bytes at 0)
+        // ADD       (1 byte  at 3)
+        // DUPL      (1 byte  at 4)
+        // JUMPI top (3 bytes at 5)
+        // => delta = 0 - 5 = -5
         let src = "top:\nPUSH -1\nADD\nDUPL\nJUMPI top";
         let buf = asm(src);
         let instrs = decode_all(&buf);
-        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -11 });
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -5 });
     }
 
     #[test]
