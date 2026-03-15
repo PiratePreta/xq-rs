@@ -44,9 +44,9 @@
 //! ```rust
 //! use aglais_xqvm_asm::assemble_source;
 //!
-//! let bytecode = assemble_source("PUSH 42\nHALT").unwrap();
-//! assert_eq!(bytecode[0], 0x10); // PUSH opcode
-//! assert_eq!(*bytecode.last().unwrap(), 0x0F); // HALT opcode
+//! let program = assemble_source("PUSH 42\nHALT").unwrap();
+//! assert_eq!(program.code()[0], 0x10); // PUSH opcode
+//! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
 //! ```
 //!
 //! For finer control, use [`parser::parse`] and [`assembler::assemble`]
@@ -65,7 +65,7 @@ pub mod parser;
 // Convenience entry point
 // ---------------------------------------------------------------------------
 
-/// Parse and assemble `source` into a binary bytecode buffer in one step.
+/// Parse and assemble `source` into a [`aglais_xqvm_bytecode::program::Program`] in one step.
 ///
 /// This is a convenience wrapper around [`parser::parse`] followed by
 /// [`assembler::assemble`].
@@ -81,11 +81,13 @@ pub mod parser;
 /// use aglais_xqvm_asm::assemble_source;
 ///
 /// // A simple program: push two values, add them, halt.
-/// let bytecode = assemble_source("PUSH 5\nPUSH 3\nADD\nHALT").unwrap();
-/// assert!(!bytecode.is_empty());
+/// let program = assemble_source("PUSH 5\nPUSH 3\nADD\nHALT").unwrap();
+/// assert!(!program.code().is_empty());
 /// ```
-pub fn assemble_source(source: &str) -> Result<Vec<u8>, error::Error> {
+pub fn assemble_source(
+    source: &str,
+) -> Result<aglais_xqvm_bytecode::program::Program, error::Error> {
     let lines = parser::parse(source, "<input>")?;
-    let bytes = assembler::assemble(&lines, source, "<input>")?;
-    Ok(bytes)
+    let program = assembler::assemble(&lines, source, "<input>")?;
+    Ok(program)
 }

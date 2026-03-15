@@ -65,9 +65,9 @@ fn main() -> miette::Result<()> {
         HALT
     ";
 
-    let bytecode = assemble_source(sum_src).wrap_err("failed to assemble sum program")?;
-    println!("sum program: {} bytes", bytecode.len());
-    print_disasm(&bytecode)?;
+    let sum_program = assemble_source(sum_src).wrap_err("failed to assemble sum program")?;
+    println!("sum program: {} bytes", sum_program.code().len());
+    print_disasm(sum_program.code())?;
 
     // -----------------------------------------------------------------------
     // Program 2: allocate a 4-variable binary QUBO model, set a diagonal
@@ -87,14 +87,14 @@ fn main() -> miette::Result<()> {
         HALT
     ";
 
-    let qubo_bytecode = assemble_source(qubo_src).wrap_err("failed to assemble QUBO program")?;
-    println!("QUBO program: {} bytes", qubo_bytecode.len());
-    print_disasm(&qubo_bytecode)?;
+    let qubo_program = assemble_source(qubo_src).wrap_err("failed to assemble QUBO program")?;
+    println!("QUBO program: {} bytes", qubo_program.code().len());
+    print_disasm(qubo_program.code())?;
 
     // -----------------------------------------------------------------------
     // Verify sum program instruction sequence
     // -----------------------------------------------------------------------
-    let instrs: Vec<Instruction> = InstructionStream::new(&bytecode)
+    let instrs: Vec<Instruction> = InstructionStream::new(sum_program.code())
         .map(|r| r.map(|(_, _, instr)| instr))
         .collect::<Result<_, _>>()
         .into_diagnostic()

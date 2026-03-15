@@ -50,12 +50,13 @@ fn main() -> miette::Result<()> {
 
     let name = args.input.display().to_string();
     let lines = aglais_xqvm_asm::parser::parse(&source, &name)?;
-    let bytecode = aglais_xqvm_asm::assembler::assemble(&lines, &source, &name)?;
+    let program = aglais_xqvm_asm::assembler::assemble(&lines, &source, &name)?;
+    let encoded = program.encode();
 
     if args.stdout {
         use std::io::Write as _;
         std::io::stdout()
-            .write_all(&bytecode)
+            .write_all(&encoded)
             .into_diagnostic()
             .wrap_err("failed to write bytecode to stdout")?;
     } else {
@@ -64,13 +65,13 @@ fn main() -> miette::Result<()> {
             p.set_extension("xqb");
             p
         });
-        std::fs::write(&out_path, &bytecode)
+        std::fs::write(&out_path, &encoded)
             .into_diagnostic()
             .wrap_err_with(|| format!("failed to write '{}'", out_path.display()))?;
         eprintln!(
             "assembled {} instructions ({} bytes) -> {}",
-            instruction_count(&bytecode),
-            bytecode.len(),
+            instruction_count(program.code()),
+            encoded.len(),
             out_path.display(),
         );
     }

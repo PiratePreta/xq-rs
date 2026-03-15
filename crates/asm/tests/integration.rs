@@ -33,8 +33,8 @@ fn decode_all(buf: &[u8]) -> Vec<Instruction> {
 }
 
 fn asm(src: &str) -> Vec<Instruction> {
-    let buf = assemble_source(src).expect("assemble_source failed");
-    decode_all(&buf)
+    let program = assemble_source(src).expect("assemble_source failed");
+    decode_all(program.code())
 }
 
 // ---------------------------------------------------------------------------
@@ -43,14 +43,14 @@ fn asm(src: &str) -> Vec<Instruction> {
 
 #[test]
 fn empty_program_produces_empty_buffer() {
-    let buf = assemble_source("").unwrap();
-    assert!(buf.is_empty());
+    let prog = assemble_source("").unwrap();
+    assert!(prog.code().is_empty());
 }
 
 #[test]
 fn comment_only_produces_empty_buffer() {
-    let buf = assemble_source("; nothing here\n; more comments").unwrap();
-    assert!(buf.is_empty());
+    let prog = assemble_source("; nothing here\n; more comments").unwrap();
+    assert!(prog.code().is_empty());
 }
 
 #[test]
@@ -260,8 +260,8 @@ fn mixed_case_produces_same_bytecode_as_uppercase() {
     let upper = assemble_source("PUSH 1\nADD\nHALT").unwrap();
     let lower = assemble_source("push 1\nadd\nhalt").unwrap();
     let mixed = assemble_source("Push 1\nAdd\nHalt").unwrap();
-    assert_eq!(upper, lower);
-    assert_eq!(upper, mixed);
+    assert_eq!(upper.code(), lower.code());
+    assert_eq!(upper.code(), mixed.code());
 }
 
 #[test]

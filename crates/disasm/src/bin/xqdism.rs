@@ -30,12 +30,13 @@
 //! When `FILE` is omitted, bytecode is read from standard input.
 
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 use clap::Parser;
 use miette::{IntoDiagnostic, Result, WrapErr};
 
+use aglais_xqvm_bytecode::program::Program;
 use aglais_xqvm_disasm::display::Disassembly;
 
 /// Disassemble XQVM bytecode.
@@ -67,10 +68,14 @@ fn main() -> Result<()> {
         }
     };
 
-    Disassembly::new(&bytes)
-        .write_to(&mut io::stdout())
-        .into_diagnostic()
-        .wrap_err("failed to write disassembly")?;
+    let mut out = Vec::new();
+    match Program::decode(&bytes) {
+        Ok(program) => Disassembly::from_program(&program).write_to(&mut out),
+        Err(_) => Disassembly::new(&bytes).write_to(&mut out),
+    }
+    .into_diagnostic()
+    .wrap_err("failed to write disassembly")?;
+    io::stdout().write_all(&out).into_diagnostic()?;
 
     Ok(())
 }

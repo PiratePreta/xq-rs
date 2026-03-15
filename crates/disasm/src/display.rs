@@ -17,10 +17,16 @@
 
 //! Pretty printer for XQVM bytecode.
 //!
-//! The entry point is [`Disassembly`], which wraps a raw byte slice and
+//! The entry point is [`Disassembly`], which wraps either a raw byte slice or
+//! a complete [`Program`] and
 //! implements [`Display`](std::fmt::Display). Jump targets are automatically
 //! assigned sequential labels (`L0`, `L1`, ...) and rendered both at the
 //! destination and as the operand of the originating `JUMP`/`JUMPI`.
+//!
+//! When a [`Program`] is provided via
+//! [`Disassembly::from_program`], the constant pool is printed as a header
+//! section before the instruction listing. `PUSHC` operands are annotated with
+//! their resolved values (e.g. `PUSHC    0  ; = 12345`).
 //!
 //! Unknown bytes (invalid opcodes or truncated operands) are displayed as
 //! `.byte 0xXX` pseudo-instructions so no information is silently dropped.
@@ -35,10 +41,13 @@
 //! label is present at an address the column is left blank so columns align:
 //!
 //! ```text
-//!   0x0000:  L0:  PUSH     5
-//!   0x0009:       GT
-//!   0x000A:       JUMPI    L0
-//!   0x000D:       HALT
+//! ; constant pool (1 entries):
+//! ;   [0]  12345
+//! ;
+//!   0x0000:  L0:  PUSHC    0  ; = 12345
+//!   0x0003:       GT
+//!   0x0004:       JUMPI    L0
+//!   0x0007:       HALT
 //! ```
 //!
 //! # Examples
@@ -68,6 +77,8 @@ use std::fmt;
 use std::io;
 
 use aglais_xqvm_bytecode::opcodes;
+use aglais_xqvm_bytecode::pool::ConstantPool;
+use aglais_xqvm_bytecode::program::Program;
 use aglais_xqvm_bytecode::stream::{self, InstructionStream};
 use aglais_xqvm_bytecode::types::{Instruction, Register};
 
@@ -181,13 +192,17 @@ opcodes!(impl_fmt_instruction);
 // Public API
 // ---------------------------------------------------------------------------
 
-/// A pretty-printed view of raw XQVM bytecode.
+/// A pretty-printed view of raw XQVM bytecode or a complete [`Program`].
 ///
 /// Jump targets are assigned labels `L0`, `L1`, ... in address order by the
 /// underlying [`InstructionStream`]. Each label is printed inline between the
 /// byte offset and the mnemonic. When no label exists at an address the
 /// column is left blank so all columns align. `JUMP`/`JUMPI` operands are
 /// replaced by the label name when the target is within the same buffer.
+///
+/// When constructed via [`from_program`](Self::from_program), the constant
+/// pool is printed as a header section and `PUSHC` operands are annotated
+/// with their resolved values (e.g. `PUSHC    0  ; = 12345`).
 ///
 /// # Examples
 ///
@@ -213,6 +228,7 @@ opcodes!(impl_fmt_instruction);
 #[derive(Debug, Clone)]
 pub struct Disassembly<'a> {
     stream: InstructionStream<'a>,
+    pool: ConstantPool,
 }
 
 impl<'a> Disassembly<'a> {
@@ -220,10 +236,24 @@ impl<'a> Disassembly<'a> {
     ///
     /// Constructs an [`InstructionStream`] immediately, performing the label
     /// pre-pass so that repeated calls to [`write_to`](Self::write_to)
-    /// reuse the already-computed label map.
+    /// reuse the already-computed label map. No constant pool is attached;
+    /// `PUSHC` operands are displayed as raw indices without value annotation.
     pub fn new(bytes: &'a [u8]) -> Self {
         Self {
             stream: InstructionStream::new(bytes),
+            pool: ConstantPool::new(),
+        }
+    }
+
+    /// Wrap a [`Program`] for display.
+    ///
+    /// If the program has a non-empty constant pool, pool entries are printed
+    /// as a header section and `PUSHC` operands are annotated with their
+    /// resolved values.
+    pub fn from_program(program: &'a Program) -> Self {
+        Self {
+            stream: InstructionStream::from_program(program),
+            pool: program.pool().clone(),
         }
     }
 
@@ -256,6 +286,15 @@ impl<'a> Disassembly<'a> {
     /// assert!(text.contains("HALT"));
     /// ```
     pub fn write_to(&self, out: &mut impl io::Write) -> io::Result<()> {
+        // Print constant pool header if the pool is non-empty.
+        if !self.pool.is_empty() {
+            writeln!(out, "; constant pool ({} entries):", self.pool.len())?;
+            for (i, &val) in self.pool.entries().iter().enumerate() {
+                writeln!(out, ";   [{i}]  {val}")?;
+            }
+            writeln!(out, ";")?;
+        }
+
         // Width of the label column: longest "Lx:" string, or 0 when there
         // are no labels so the column is omitted entirely.
         let label_col = self
@@ -279,7 +318,16 @@ impl<'a> Disassembly<'a> {
                     if label_col > 0 {
                         write!(out, "{label_str:<label_col$}  ")?;
                     }
-                    fmt_instruction(&instr, offset, &labels, out)?;
+                    // Buffer the instruction text so we can append pool annotation.
+                    let mut instr_buf = Vec::new();
+                    fmt_instruction(&instr, offset, &labels, &mut instr_buf)?;
+                    out.write_all(&instr_buf)?;
+                    // Annotate PUSHC with the resolved pool value.
+                    if let Instruction::PushC { idx } = instr
+                        && let Some(val) = self.pool.get(idx)
+                    {
+                        write!(out, "  ; = {val}")?;
+                    }
                     writeln!(out)?;
                 }
                 Err(ref e) => {
@@ -325,6 +373,8 @@ impl fmt::Display for Disassembly<'_> {
 mod tests {
     use super::*;
     use aglais_xqvm_bytecode::codec;
+    use aglais_xqvm_bytecode::pool::ConstantPool;
+    use aglais_xqvm_bytecode::program::Program;
     use aglais_xqvm_bytecode::types::{Instruction, Register};
 
     fn assemble(program: &[Instruction]) -> Vec<u8> {
@@ -443,9 +493,38 @@ mod tests {
 
     #[test]
     fn pushc_displays_index() {
+        // Raw bytes without a pool -- index shown but no annotation.
         let buf = assemble(&[Instruction::PushC { idx: 7 }, Instruction::Halt {}]);
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("PUSHC"), "missing PUSHC in:\n{text}");
         assert!(text.contains('7'), "missing index 7 in:\n{text}");
+        // No pool annotation expected when constructed via `new`.
+        assert!(
+            !text.contains("; ="),
+            "unexpected pool annotation in:\n{text}"
+        );
+    }
+
+    #[test]
+    fn pushc_from_program_shows_pool_value() {
+        let mut pool = ConstantPool::new();
+        let idx = pool.intern(99999i64).unwrap();
+        let buf = assemble(&[Instruction::PushC { idx }, Instruction::Halt {}]);
+        let program = Program::new(pool, buf);
+        let text = Disassembly::from_program(&program).to_string();
+        // Pool header must appear.
+        assert!(
+            text.contains("; constant pool"),
+            "missing pool header in:\n{text}"
+        );
+        assert!(
+            text.contains("99999"),
+            "missing pool value 99999 in:\n{text}"
+        );
+        // PUSHC line must carry annotation.
+        assert!(
+            text.contains("; = 99999"),
+            "missing pool annotation in:\n{text}"
+        );
     }
 }

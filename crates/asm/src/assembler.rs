@@ -15,13 +15,17 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Assembler: converts a parsed [`AsmLine`] list into a binary bytecode
-//! buffer.
+//! Assembler: converts a parsed [`AsmLine`] list into a [`Program`].
 //!
 //! Delegates label resolution and `JUMP`/`JUMPI` fixups to
 //! [`InstructionBuilder`]. Instructions are emitted in a single pass;
 //! label-based jumps register fixups that [`InstructionBuilder::build`]
 //! resolves at the end, supporting both forward and backward references.
+//!
+//! `PUSHC` is handled specially: the assembly operand is the constant VALUE
+//! (not a pool index). The assembler calls
+//! [`InstructionBuilder::push_const`] which interns the value and emits the
+//! `PUSHC { idx }` instruction automatically.
 //!
 //! `source` and `name` are used solely for diagnostic output: they are
 //! embedded in any [`AssembleError`] so that miette can render a source
@@ -46,9 +50,9 @@
 //!         line: 2, col: 1,
 //!     }),
 //! ];
-//! let bytes = assemble(&lines, src, "<test>").unwrap();
-//! assert_eq!(bytes[0], 0x10); // PUSH opcode
-//! assert_eq!(*bytes.last().unwrap(), 0x0F); // HALT opcode
+//! let program = assemble(&lines, src, "<test>").unwrap();
+//! assert_eq!(program.code()[0], 0x10); // PUSH opcode
+//! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
 //! ```
 
 // AssembleError carries a NamedSource<Arc<str>> in every variant so that
@@ -61,6 +65,7 @@ use std::collections::hash_map::Entry;
 
 use aglais_xqvm_bytecode::builder::InstructionBuilder;
 use aglais_xqvm_bytecode::builder::LabelId;
+use aglais_xqvm_bytecode::program::Program;
 use aglais_xqvm_bytecode::types::{Instruction, Register};
 use aglais_xqvm_bytecode::{builder, opcodes};
 
@@ -75,7 +80,7 @@ type LabelMap = HashMap<String, (LabelId, Option<(usize, usize)>)>;
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Assemble a list of parsed lines into a binary bytecode buffer.
+/// Assemble a list of parsed lines into a [`Program`].
 ///
 /// `source` and `name` are used solely for diagnostic output: they are
 /// embedded in any [`AssembleError`] so that miette can render a source
@@ -84,6 +89,10 @@ type LabelMap = HashMap<String, (LabelId, Option<(usize, usize)>)>;
 /// Delegates to [`InstructionBuilder`] for label resolution and
 /// `JUMP`/`JUMPI` fixups. Both forward and backward label references are
 /// supported.
+///
+/// `PUSHC <imm>` is handled specially: the integer operand is the constant
+/// value to intern, not a pool index. The pool index is allocated
+/// automatically and deduplicated.
 ///
 /// # Errors
 ///
@@ -95,6 +104,7 @@ type LabelMap = HashMap<String, (LabelId, Option<(usize, usize)>)>;
 /// - [`AssembleError::UndefinedLabel`] -- label referenced but not defined.
 /// - [`AssembleError::DuplicateLabel`] -- label defined more than once.
 /// - [`AssembleError::JumpOffsetOverflow`] -- jump distance exceeds `i16`.
+/// - [`AssembleError::PoolOverflow`] -- more than 65535 distinct constants.
 ///
 /// # Examples
 ///
@@ -104,10 +114,10 @@ type LabelMap = HashMap<String, (LabelId, Option<(usize, usize)>)>;
 ///
 /// let src = "PUSH 5\nPUSH 3\nADD\nHALT";
 /// let lines = parse(src, "<test>").unwrap();
-/// let bytes = assemble(&lines, src, "<test>").unwrap();
-/// assert!(!bytes.is_empty());
+/// let program = assemble(&lines, src, "<test>").unwrap();
+/// assert!(!program.code().is_empty());
 /// ```
-pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Vec<u8>, AssembleError> {
+pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, AssembleError> {
     let mut b = InstructionBuilder::new();
     // label name -> (LabelId, first definition location)
     // location is None when the label was first seen via a forward reference.
@@ -158,6 +168,9 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Vec<u8>, 
                         name,
                     )?;
                 }
+                "PUSHC" => {
+                    assemble_pushc(instr, &mut b, source, name)?;
+                }
                 _ => {
                     b.emit(build_instr(instr, source, name)?);
                 }
@@ -166,7 +179,6 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Vec<u8>, 
     }
 
     b.build()
-        .map(|program| program.code().to_vec())
         .map_err(|e| convert_build_error(e, &label_names, &first_ref, source, name))
 }
 
@@ -233,6 +245,49 @@ fn assemble_jump(
                 mnemonic: instr.mnemonic.clone(),
                 field: "offset".to_string(),
                 expected_kind: "integer or label reference".to_string(),
+                src: make_src(source, name),
+                span: mnem_span,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PUSHC
+// ---------------------------------------------------------------------------
+
+/// Handle `PUSHC <imm>`: intern the integer value into the constant pool and
+/// emit a `PUSHC { idx }` instruction. Pool overflow is recorded by
+/// [`InstructionBuilder::push_const`] and surfaced later by `build()`.
+fn assemble_pushc(
+    instr: &ParsedInstr,
+    b: &mut InstructionBuilder,
+    source: &str,
+    name: &str,
+) -> Result<(), AssembleError> {
+    let mnem_span = make_span(source, instr.line, instr.col, instr.mnemonic.len());
+
+    if instr.operands.len() != 1 {
+        return Err(AssembleError::WrongOperandCount {
+            mnemonic: instr.mnemonic.clone(),
+            expected: 1,
+            got: instr.operands.len(),
+            src: make_src(source, name),
+            span: mnem_span,
+        });
+    }
+
+    match &instr.operands[0] {
+        Operand::Integer(imm) => {
+            b.push_const(*imm);
+        }
+        _ => {
+            return Err(AssembleError::WrongOperandKind {
+                mnemonic: instr.mnemonic.clone(),
+                field: "imm".to_string(),
+                expected_kind: "integer literal".to_string(),
                 src: make_src(source, name),
                 span: mnem_span,
             });
@@ -489,7 +544,7 @@ mod tests {
 
     fn asm(src: &str) -> Vec<u8> {
         let lines = parse(src, "<test>").unwrap();
-        assemble(&lines, src, "<test>").unwrap()
+        assemble(&lines, src, "<test>").unwrap().code().to_vec()
     }
 
     #[test]
@@ -638,5 +693,35 @@ mod tests {
             let buf = asm(mnem);
             assert_eq!(buf.len(), 1, "expected 1 byte for {mnem}");
         }
+    }
+
+    #[test]
+    fn pushc_assembles_to_pool_and_index() {
+        let src = "PUSHC 12345";
+        let lines = parse(src, "<test>").unwrap();
+        let program = assemble(&lines, src, "<test>").unwrap();
+        // Pool should contain exactly one entry with value 12345 at index 0.
+        assert_eq!(program.pool().len(), 1, "expected 1 pool entry");
+        assert_eq!(program.pool().get(0), Some(12345i64));
+        // Instruction stream should decode to PushC { idx: 0 }.
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs.len(), 1);
+        assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+    }
+
+    #[test]
+    fn pushc_wrong_operand_count_error() {
+        let src = "PUSHC";
+        let lines = parse(src, "<test>").unwrap();
+        let err = assemble(&lines, src, "<test>").unwrap_err();
+        assert!(matches!(err, AssembleError::WrongOperandCount { .. }));
+    }
+
+    #[test]
+    fn pushc_wrong_operand_kind_error() {
+        let src = "PUSHC r0";
+        let lines = parse(src, "<test>").unwrap();
+        let err = assemble(&lines, src, "<test>").unwrap_err();
+        assert!(matches!(err, AssembleError::WrongOperandKind { .. }));
     }
 }
