@@ -25,8 +25,8 @@
 //!
 //! When a [`Program`] is provided via
 //! [`Disassembly::from_program`], the constant pool is printed as a header
-//! section before the instruction listing. `PUSHC` operands are annotated with
-//! their resolved values (e.g. `PUSHC    0  ; = 12345`).
+//! section before the instruction listing. `PUSHC` operands are rendered as
+//! the resolved constant value rather than the raw pool index.
 //!
 //! Unknown bytes (invalid opcodes or truncated operands) are displayed as
 //! `.byte 0xXX` pseudo-instructions so no information is silently dropped.
@@ -44,7 +44,7 @@
 //! ; constant pool (1 entries):
 //! ;   [0]  12345
 //! ;
-//!   0x0000:  L0:  PUSHC    0  ; = 12345
+//!   0x0000:  L0:  PUSHC    12345  ; [0]
 //!   0x0003:       GT
 //!   0x0004:       JUMPI    L0
 //!   0x0007:       HALT
@@ -201,8 +201,8 @@ opcodes!(impl_fmt_instruction);
 /// replaced by the label name when the target is within the same buffer.
 ///
 /// When constructed via [`from_program`](Self::from_program), the constant
-/// pool is printed as a header section and `PUSHC` operands are annotated
-/// with their resolved values (e.g. `PUSHC    0  ; = 12345`).
+/// pool is printed as a header section and `PUSHC` operands are rendered as
+/// the resolved constant value rather than the raw pool index.
 ///
 /// # Examples
 ///
@@ -318,15 +318,14 @@ impl<'a> Disassembly<'a> {
                     if label_col > 0 {
                         write!(out, "{label_str:<label_col$}  ")?;
                     }
-                    // Buffer the instruction text so we can append pool annotation.
-                    let mut instr_buf = Vec::new();
-                    fmt_instruction(&instr, offset, &labels, &mut instr_buf)?;
-                    out.write_all(&instr_buf)?;
-                    // Annotate PUSHC with the resolved pool value.
+                    // For PUSHC with a known pool value, render the constant
+                    // directly as the operand and annotate with the pool index.
                     if let Instruction::PushC { idx } = instr
                         && let Some(val) = self.pool.get(idx)
                     {
-                        write!(out, "  ; = {val}")?;
+                        write!(out, "{:<8}{val}  ; [{idx}]", "PUSHC")?;
+                    } else {
+                        fmt_instruction(&instr, offset, &labels, out)?;
                     }
                     writeln!(out)?;
                 }
@@ -517,14 +516,10 @@ mod tests {
             text.contains("; constant pool"),
             "missing pool header in:\n{text}"
         );
+        // PUSHC must render the constant value directly with the index as comment.
         assert!(
-            text.contains("99999"),
-            "missing pool value 99999 in:\n{text}"
-        );
-        // PUSHC line must carry annotation.
-        assert!(
-            text.contains("; = 99999"),
-            "missing pool annotation in:\n{text}"
+            text.contains("99999  ; [0]"),
+            "missing resolved PUSHC operand in:\n{text}"
         );
     }
 }
