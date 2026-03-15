@@ -71,7 +71,7 @@
 use thiserror::Error;
 
 use crate::codec;
-use crate::types::{Instruction, Register};
+use crate::types::{Instruction, Opcode, Register};
 
 // ---------------------------------------------------------------------------
 // Error and Result
@@ -129,6 +129,7 @@ pub struct LabelId(usize);
 struct Fixup {
     /// Byte offset of the `JUMP`/`JUMPI` instruction (opcode byte).
     site: usize,
+    opcode: Opcode,
     label: LabelId,
 }
 
@@ -289,13 +290,7 @@ impl InstructionBuilder {
     ///
     /// The actual `i16` offset is filled in during [`build`](Self::build).
     pub fn jump(&mut self, label: LabelId) -> &mut Self {
-        let site = self.buf.len();
-        // Placeholder value; any i16 encodes to exactly 2 BE bytes, so the
-        // buffer slot is always the same size regardless of the final offset.
-        self.buf
-            .extend_from_slice(&codec::encode(&Instruction::Jump { offset: i16::MAX }));
-        self.fixups.push(Fixup { site, label });
-        self
+        self.emit_with_fixup(Instruction::Jump { offset: i16::MAX }, label)
     }
 
     /// Emit a `JUMPI` instruction targeting `label`.
@@ -303,12 +298,18 @@ impl InstructionBuilder {
     /// Jumps if the top of the stack is non-zero. The actual `i16` offset is
     /// filled in during [`build`](Self::build).
     pub fn jump_if(&mut self, label: LabelId) -> &mut Self {
+        self.emit_with_fixup(Instruction::JumpI { offset: i16::MAX }, label)
+    }
+
+    fn emit_with_fixup(&mut self, instr: Instruction, label: LabelId) -> &mut Self {
         let site = self.buf.len();
-        // Placeholder value; any i16 encodes to exactly 2 BE bytes, so the
-        // buffer slot is always the same size regardless of the final offset.
-        self.buf
-            .extend_from_slice(&codec::encode(&Instruction::JumpI { offset: i16::MAX }));
-        self.fixups.push(Fixup { site, label });
+        let enc = codec::encode(&instr);
+        self.buf.extend_from_slice(&enc);
+        self.fixups.push(Fixup {
+            site,
+            opcode: instr.opcode(),
+            label,
+        });
         self
     }
 
@@ -382,11 +383,13 @@ impl InstructionBuilder {
                 delta,
             })?;
 
-            // Wire format: [opcode: u8][offset: i16 big-endian]
-            // The placeholder (i16::MAX) reserved exactly 2 bytes at [site+1..=site+2].
-            let [hi, lo] = offset.to_be_bytes();
-            self.buf[fixup.site + 1] = hi;
-            self.buf[fixup.site + 2] = lo;
+            let instr = match fixup.opcode {
+                Opcode::Jump => Instruction::Jump { offset },
+                Opcode::JumpI => Instruction::JumpI { offset },
+                _ => unreachable!("fixups are emitted only for jumps"),
+            };
+            let encoded = codec::encode(&instr);
+            self.buf[fixup.site..fixup.site + encoded.len()].copy_from_slice(&encoded);
         }
         Ok(self.buf)
     }
