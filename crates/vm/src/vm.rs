@@ -480,8 +480,8 @@ impl Vm {
 
     // -- Stack & register I/O --
 
-    fn exec_push(&mut self, _pos: usize, imm: i64) -> Result<StepResult, Error> {
-        self.push_val(imm);
+    fn exec_push(&mut self, _pos: usize, imm: i16) -> Result<StepResult, Error> {
+        self.push_val(i64::from(imm));
         Ok(StepResult::Continue)
     }
 
