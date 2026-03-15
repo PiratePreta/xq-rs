@@ -27,37 +27,28 @@ use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
+// Source helper
+// ---------------------------------------------------------------------------
+
+/// Bundles source text and its display name for diagnostic construction.
+#[derive(Clone, Copy)]
+pub(crate) struct Source<'a> {
+    pub text: &'a str,
+    pub name: &'a str,
+}
+
+// ---------------------------------------------------------------------------
 // Internal span helpers
 // ---------------------------------------------------------------------------
 
-/// Convert a 1-based `(line, col)` position to a zero-based byte offset.
-pub(crate) fn offset_for(source: &str, line: usize, col: usize) -> usize {
-    let mut cur_line = 1usize;
-    let mut line_start = 0usize;
-    for (i, ch) in source.char_indices() {
-        if cur_line == line {
-            return (line_start + col.saturating_sub(1)).min(source.len());
-        }
-        if ch == '\n' {
-            cur_line += 1;
-            line_start = i + ch.len_utf8();
-        }
-    }
-    if cur_line == line {
-        return (line_start + col.saturating_sub(1)).min(source.len());
-    }
-    source.len()
+/// Build a [`NamedSource`] from a [`Source`].
+pub(crate) fn make_src(src: Source<'_>) -> NamedSource<Arc<str>> {
+    NamedSource::new(src.name, Arc::from(src.text))
 }
 
-/// Build a [`NamedSource`] from a source string and a display name.
-pub(crate) fn make_src(source: &str, name: &str) -> NamedSource<Arc<str>> {
-    NamedSource::new(name, Arc::from(source))
-}
-
-/// Build a [`SourceSpan`] pointing at a 1-based `(line, col)` with the given
-/// byte length.
-pub(crate) fn make_span(source: &str, line: usize, col: usize, len: usize) -> SourceSpan {
-    (offset_for(source, line, col), len).into()
+/// Build a [`SourceSpan`] from a byte `offset` and byte `len`.
+pub(crate) fn make_span(offset: usize, len: usize) -> SourceSpan {
+    (offset, len).into()
 }
 
 // ---------------------------------------------------------------------------

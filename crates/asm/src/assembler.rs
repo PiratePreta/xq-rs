@@ -42,12 +42,12 @@
 //!     AsmLine::Instruction(ParsedInstr {
 //!         mnemonic: "PUSH".to_string(),
 //!         operands: vec![Operand::Integer(0)],
-//!         line: 1, col: 1,
+//!         offset: 0,
 //!     }),
 //!     AsmLine::Instruction(ParsedInstr {
 //!         mnemonic: "HALT".to_string(),
 //!         operands: vec![],
-//!         line: 2, col: 1,
+//!         offset: 7,
 //!     }),
 //! ];
 //! let program = assemble(&lines, src, "<test>").unwrap();
@@ -70,11 +70,11 @@ use aglais_xqvm_bytecode::types::{Instruction, Register};
 use aglais_xqvm_bytecode::{builder, opcodes};
 
 use crate::ast::{AsmLine, Operand, ParsedInstr};
-use crate::error::{AssembleError, make_span, make_src};
+use crate::error::{AssembleError, Source, make_span, make_src};
 
 /// Maps a label name to its [`LabelId`] and the source location where it was
 /// first defined (`None` if only seen as a forward reference so far).
-type LabelMap = HashMap<String, (LabelId, Option<(usize, usize)>)>;
+type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -118,6 +118,7 @@ type LabelMap = HashMap<String, (LabelId, Option<(usize, usize)>)>;
 /// assert!(!program.code().is_empty());
 /// ```
 pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, AssembleError> {
+    let src = Source { text: source, name };
     let mut b = InstructionBuilder::new();
     // label name -> (LabelId, first definition location)
     // location is None when the label was first seen via a forward reference.
@@ -125,32 +126,31 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
     // label names in creation order: label_names[raw_id] == name
     let mut label_names: Vec<String> = Vec::new();
     // first jump reference per label name: used for error span reporting
-    let mut first_ref: HashMap<String, (usize, usize)> = HashMap::new();
+    let mut first_ref: HashMap<String, usize> = HashMap::new();
 
     for line in lines {
         match line {
             AsmLine::LabelDef {
                 name: label_name,
-                line: def_line,
-                col: def_col,
+                offset: def_offset,
             } => {
                 let id = match label_map.entry(label_name.clone()) {
                     Entry::Occupied(e) => {
                         let (id, placed_at) = e.into_mut();
-                        if let Some((prev_line, prev_col)) = *placed_at {
+                        if let Some(prev_offset) = *placed_at {
                             return Err(AssembleError::DuplicateLabel {
                                 label: label_name.clone(),
-                                src: make_src(source, name),
-                                span: make_span(source, prev_line, prev_col, label_name.len()),
+                                src: make_src(src),
+                                span: make_span(prev_offset, label_name.len()),
                             });
                         }
-                        *placed_at = Some((*def_line, *def_col));
+                        *placed_at = Some(*def_offset);
                         *id
                     }
                     Entry::Vacant(e) => {
                         label_names.push(label_name.clone());
                         let id = b.label();
-                        e.insert((id, Some((*def_line, *def_col))));
+                        e.insert((id, Some(*def_offset)));
                         id
                     }
                 };
@@ -164,25 +164,62 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
                         &mut label_map,
                         &mut label_names,
                         &mut first_ref,
-                        source,
-                        name,
+                        src,
                     )?;
                 }
                 "PUSHC" => {
-                    assemble_pushc(instr, &mut b, source, name)?;
+                    assemble_pushc(instr, &mut b, src)?;
                 }
                 "PUSH" => {
-                    assemble_push(instr, &mut b, source, name)?;
+                    assemble_push(instr, &mut b, src)?;
                 }
                 _ => {
-                    b.emit(build_instr(instr, source, name)?);
+                    b.emit(build_instr(instr, src)?);
                 }
             },
         }
     }
 
     b.build()
-        .map_err(|e| convert_build_error(e, &label_names, &first_ref, source, name))
+        .map_err(|e| convert_build_error(e, &label_names, &first_ref, src))
+}
+
+// ---------------------------------------------------------------------------
+// Error helpers
+// ---------------------------------------------------------------------------
+
+/// Return `Err(WrongOperandCount)` when `instr.operands.len() != expected`.
+fn check_operand_count(
+    instr: &ParsedInstr,
+    expected: usize,
+    src: Source<'_>,
+) -> Result<(), AssembleError> {
+    if instr.operands.len() != expected {
+        return Err(AssembleError::WrongOperandCount {
+            mnemonic: instr.mnemonic.clone(),
+            expected,
+            got: instr.operands.len(),
+            src: make_src(src),
+            span: make_span(instr.offset, instr.mnemonic.len()),
+        });
+    }
+    Ok(())
+}
+
+/// Build a `WrongOperandKind` error pointing at the mnemonic token.
+fn err_wrong_kind(
+    instr: &ParsedInstr,
+    field: &str,
+    expected_kind: &str,
+    src: Source<'_>,
+) -> AssembleError {
+    AssembleError::WrongOperandKind {
+        mnemonic: instr.mnemonic.clone(),
+        field: field.to_string(),
+        expected_kind: expected_kind.to_string(),
+        src: make_src(src),
+        span: make_span(instr.offset, instr.mnemonic.len()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -194,21 +231,12 @@ fn assemble_jump(
     b: &mut InstructionBuilder,
     label_map: &mut LabelMap,
     label_names: &mut Vec<String>,
-    first_ref: &mut HashMap<String, (usize, usize)>,
-    source: &str,
-    name: &str,
+    first_ref: &mut HashMap<String, usize>,
+    src: Source<'_>,
 ) -> Result<(), AssembleError> {
-    let mnem_span = make_span(source, instr.line, instr.col, instr.mnemonic.len());
+    let mnem_span = make_span(instr.offset, instr.mnemonic.len());
 
-    if instr.operands.len() != 1 {
-        return Err(AssembleError::WrongOperandCount {
-            mnemonic: instr.mnemonic.clone(),
-            expected: 1,
-            got: instr.operands.len(),
-            src: make_src(source, name),
-            span: mnem_span,
-        });
-    }
+    check_operand_count(instr, 1, src)?;
 
     match &instr.operands[0] {
         Operand::LabelRef(label) => {
@@ -221,9 +249,7 @@ fn assemble_jump(
                     id
                 }
             };
-            first_ref
-                .entry(label.clone())
-                .or_insert((instr.line, instr.col));
+            first_ref.entry(label.clone()).or_insert(instr.offset);
             match instr.mnemonic.as_str() {
                 "JUMPI" => b.jump_if(id),
                 _ => b.jump(id),
@@ -235,7 +261,7 @@ fn assemble_jump(
                 target_type: "i16",
                 field: "offset".to_string(),
                 mnemonic: instr.mnemonic.clone(),
-                src: make_src(source, name),
+                src: make_src(src),
                 span: mnem_span,
             })?;
             match instr.mnemonic.as_str() {
@@ -244,13 +270,12 @@ fn assemble_jump(
             };
         }
         Operand::Register(_) => {
-            return Err(AssembleError::WrongOperandKind {
-                mnemonic: instr.mnemonic.clone(),
-                field: "offset".to_string(),
-                expected_kind: "integer or label reference".to_string(),
-                src: make_src(source, name),
-                span: mnem_span,
-            });
+            return Err(err_wrong_kind(
+                instr,
+                "offset",
+                "integer or label reference",
+                src,
+            ));
         }
     }
 
@@ -267,33 +292,16 @@ fn assemble_jump(
 fn assemble_pushc(
     instr: &ParsedInstr,
     b: &mut InstructionBuilder,
-    source: &str,
-    name: &str,
+    src: Source<'_>,
 ) -> Result<(), AssembleError> {
-    let mnem_span = make_span(source, instr.line, instr.col, instr.mnemonic.len());
-
-    if instr.operands.len() != 1 {
-        return Err(AssembleError::WrongOperandCount {
-            mnemonic: instr.mnemonic.clone(),
-            expected: 1,
-            got: instr.operands.len(),
-            src: make_src(source, name),
-            span: mnem_span,
-        });
-    }
+    check_operand_count(instr, 1, src)?;
 
     match &instr.operands[0] {
         Operand::Integer(imm) => {
             b.push_const(*imm);
         }
         _ => {
-            return Err(AssembleError::WrongOperandKind {
-                mnemonic: instr.mnemonic.clone(),
-                field: "imm".to_string(),
-                expected_kind: "integer literal".to_string(),
-                src: make_src(source, name),
-                span: mnem_span,
-            });
+            return Err(err_wrong_kind(instr, "imm", "integer literal", src));
         }
     }
 
@@ -310,33 +318,16 @@ fn assemble_pushc(
 fn assemble_push(
     instr: &ParsedInstr,
     b: &mut InstructionBuilder,
-    source: &str,
-    name: &str,
+    src: Source<'_>,
 ) -> Result<(), AssembleError> {
-    let mnem_span = make_span(source, instr.line, instr.col, instr.mnemonic.len());
-
-    if instr.operands.len() != 1 {
-        return Err(AssembleError::WrongOperandCount {
-            mnemonic: instr.mnemonic.clone(),
-            expected: 1,
-            got: instr.operands.len(),
-            src: make_src(source, name),
-            span: mnem_span,
-        });
-    }
+    check_operand_count(instr, 1, src)?;
 
     match &instr.operands[0] {
         Operand::Integer(imm) => {
             b.push(*imm);
         }
         _ => {
-            return Err(AssembleError::WrongOperandKind {
-                mnemonic: instr.mnemonic.clone(),
-                field: "imm".to_string(),
-                expected_kind: "integer literal".to_string(),
-                src: make_src(source, name),
-                span: mnem_span,
-            });
+            return Err(err_wrong_kind(instr, "imm", "integer literal", src));
         }
     }
 
@@ -350,35 +341,32 @@ fn assemble_push(
 fn convert_build_error(
     e: builder::Error,
     label_names: &[String],
-    first_ref: &HashMap<String, (usize, usize)>,
-    source: &str,
-    name: &str,
+    first_ref: &HashMap<String, usize>,
+    src: Source<'_>,
 ) -> AssembleError {
     match e {
         builder::Error::UnplacedLabel { id } => {
             let label = label_names.get(id).cloned().unwrap_or_default();
-            let (line, col) = first_ref.get(&label).copied().unwrap_or((1, 1));
+            let offset = first_ref.get(&label).copied().unwrap_or(0);
             AssembleError::UndefinedLabel {
                 label: label.clone(),
-                src: make_src(source, name),
-                span: make_span(source, line, col, label.len()),
+                src: make_src(src),
+                span: make_span(offset, label.len()),
             }
         }
         builder::Error::OffsetOverflow {
             label: id, delta, ..
         } => {
             let label = label_names.get(id).cloned().unwrap_or_default();
-            let (line, col) = first_ref.get(&label).copied().unwrap_or((1, 1));
+            let offset = first_ref.get(&label).copied().unwrap_or(0);
             AssembleError::JumpOffsetOverflow {
                 label: label.clone(),
                 delta,
-                src: make_src(source, name),
-                span: make_span(source, line, col, label.len()),
+                src: make_src(src),
+                span: make_span(offset, label.len()),
             }
         }
-        builder::Error::PoolOverflow => AssembleError::PoolOverflow {
-            src: make_src(source, name),
-        },
+        builder::Error::PoolOverflow => AssembleError::PoolOverflow { src: make_src(src) },
     }
 }
 
@@ -392,10 +380,8 @@ trait FromOperand: Sized {
         op: &Operand,
         field: &str,
         mnemonic: &str,
-        line: usize,
-        col: usize,
-        source: &str,
-        name: &str,
+        offset: usize,
+        src: Source<'_>,
     ) -> Result<Self, AssembleError>;
 }
 
@@ -404,10 +390,8 @@ impl FromOperand for Register {
         op: &Operand,
         field: &str,
         mnemonic: &str,
-        line: usize,
-        col: usize,
-        source: &str,
-        name: &str,
+        offset: usize,
+        src: Source<'_>,
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Register(n) => Ok(Self(*n)),
@@ -415,8 +399,8 @@ impl FromOperand for Register {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
                 expected_kind: "register (e.g. r0)".to_string(),
-                src: make_src(source, name),
-                span: make_span(source, line, col, mnemonic.len()),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
             }),
         }
     }
@@ -427,10 +411,8 @@ impl FromOperand for i64 {
         op: &Operand,
         field: &str,
         mnemonic: &str,
-        line: usize,
-        col: usize,
-        source: &str,
-        name: &str,
+        offset: usize,
+        src: Source<'_>,
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Integer(n) => Ok(*n),
@@ -438,8 +420,8 @@ impl FromOperand for i64 {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
                 expected_kind: "integer literal".to_string(),
-                src: make_src(source, name),
-                span: make_span(source, line, col, mnemonic.len()),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
             }),
         }
     }
@@ -451,10 +433,8 @@ impl FromOperand for u16 {
         op: &Operand,
         field: &str,
         mnemonic: &str,
-        line: usize,
-        col: usize,
-        source: &str,
-        name: &str,
+        offset: usize,
+        src: Source<'_>,
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Integer(n) => {
@@ -463,16 +443,16 @@ impl FromOperand for u16 {
                     target_type: "u16",
                     field: field.to_string(),
                     mnemonic: mnemonic.to_string(),
-                    src: make_src(source, name),
-                    span: make_span(source, line, col, mnemonic.len()),
+                    src: make_src(src),
+                    span: make_span(offset, mnemonic.len()),
                 })
             }
             _ => Err(AssembleError::WrongOperandKind {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
                 expected_kind: "integer literal".to_string(),
-                src: make_src(source, name),
-                span: make_span(source, line, col, mnemonic.len()),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
             }),
         }
     }
@@ -486,10 +466,8 @@ impl FromOperand for i16 {
         op: &Operand,
         field: &str,
         mnemonic: &str,
-        line: usize,
-        col: usize,
-        source: &str,
-        name: &str,
+        offset: usize,
+        src: Source<'_>,
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::Integer(n) => {
@@ -498,22 +476,22 @@ impl FromOperand for i16 {
                     target_type: "i16",
                     field: field.to_string(),
                     mnemonic: mnemonic.to_string(),
-                    src: make_src(source, name),
-                    span: make_span(source, line, col, mnemonic.len()),
+                    src: make_src(src),
+                    span: make_span(offset, mnemonic.len()),
                 })
             }
             _ => Err(AssembleError::WrongOperandKind {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
                 expected_kind: "integer literal".to_string(),
-                src: make_src(source, name),
-                span: make_span(source, line, col, mnemonic.len()),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
             }),
         }
     }
 }
 
-/// Generate `fn build_instr(instr, source, name) -> Result<Instruction, AssembleError>`
+/// Generate `fn build_instr(instr, src) -> Result<Instruction, AssembleError>`
 /// using the full opcode table. `JUMP` and `JUMPI` arms are unreachable at
 /// runtime because the caller routes them to `assemble_jump` first.
 macro_rules! impl_build_instr {
@@ -522,8 +500,7 @@ macro_rules! impl_build_instr {
 
         fn build_instr(
             instr: &ParsedInstr,
-            source: &str,
-            name: &str,
+            src: Source<'_>,
         ) -> Result<Instruction, AssembleError> {
             match instr.mnemonic.as_str() {
                 $(
@@ -536,11 +513,8 @@ macro_rules! impl_build_instr {
                                 mnemonic: instr.mnemonic.clone(),
                                 expected: EXPECTED,
                                 got: instr.operands.len(),
-                                src: make_src(source, name),
-                                span: make_span(
-                                    source, instr.line, instr.col,
-                                    instr.mnemonic.len(),
-                                ),
+                                src: make_src(src),
+                                span: make_span(instr.offset, instr.mnemonic.len()),
                             });
                         }
 
@@ -551,10 +525,8 @@ macro_rules! impl_build_instr {
                                 _iter.next().unwrap_or_else(|| unreachable!()),
                                 stringify!($fname),
                                 &instr.mnemonic,
-                                instr.line,
-                                instr.col,
-                                source,
-                                name,
+                                instr.offset,
+                                src,
                             )?;
                         )*
 
@@ -563,8 +535,8 @@ macro_rules! impl_build_instr {
                 )*
                 _ => Err(AssembleError::UnknownMnemonic {
                     mnemonic: instr.mnemonic.clone(),
-                    src: make_src(source, name),
-                    span: make_span(source, instr.line, instr.col, instr.mnemonic.len()),
+                    src: make_src(src),
+                    span: make_span(instr.offset, instr.mnemonic.len()),
                 }),
             }
         }

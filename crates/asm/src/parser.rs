@@ -34,7 +34,7 @@
 use pest::Parser;
 
 use crate::ast::{AsmLine, Operand, ParsedInstr};
-use crate::error::{ParseError, make_span, make_src};
+use crate::error::{ParseError, Source, make_span, make_src};
 
 // ---------------------------------------------------------------------------
 // Pest parser generated from grammar.pest
@@ -83,15 +83,16 @@ use generated::Rule;
 /// assert!(matches!(lines[1], AsmLine::Instruction(_)));
 /// ```
 pub fn parse(source: &str, name: &str) -> Result<Vec<AsmLine>, ParseError> {
+    let src = Source { text: source, name };
     let pairs = AsmParser::parse(Rule::program, source).map_err(|e| {
-        let (line, col) = match e.line_col {
-            pest::error::LineColLocation::Pos((l, c)) => (l, c),
-            pest::error::LineColLocation::Span((l, c), _) => (l, c),
+        let offset = match e.location {
+            pest::error::InputLocation::Pos(o) => o,
+            pest::error::InputLocation::Span((o, _)) => o,
         };
         ParseError {
             message: e.variant.to_string(),
-            src: make_src(source, name),
-            span: make_span(source, line, col, 1),
+            src: make_src(src),
+            span: make_span(offset, 1),
         }
     })?;
 
@@ -105,7 +106,7 @@ pub fn parse(source: &str, name: &str) -> Result<Vec<AsmLine>, ParseError> {
             if line_pair.as_rule() != Rule::line {
                 continue;
             }
-            visit_line(line_pair, source, name, &mut out)?;
+            visit_line(line_pair, src, &mut out)?;
         }
     }
 
@@ -118,14 +119,13 @@ pub fn parse(source: &str, name: &str) -> Result<Vec<AsmLine>, ParseError> {
 
 fn visit_line(
     line_pair: pest::iterators::Pair<'_, Rule>,
-    source: &str,
-    name: &str,
+    src: Source<'_>,
     out: &mut Vec<AsmLine>,
 ) -> Result<(), ParseError> {
     for inner in line_pair.into_inner() {
         match inner.as_rule() {
             Rule::label_def => {
-                let (line, col) = inner.line_col();
+                let offset = inner.as_span().start();
                 let label_name = inner
                     .into_inner()
                     .next()
@@ -136,12 +136,11 @@ fn visit_line(
                     .to_string();
                 out.push(AsmLine::LabelDef {
                     name: label_name,
-                    line,
-                    col,
+                    offset,
                 });
             }
             Rule::instruction => {
-                out.push(visit_instruction(inner, source, name)?);
+                out.push(visit_instruction(inner, src)?);
             }
             _ => {}
         }
@@ -151,10 +150,9 @@ fn visit_line(
 
 fn visit_instruction(
     pair: pest::iterators::Pair<'_, Rule>,
-    source: &str,
-    name: &str,
+    src: Source<'_>,
 ) -> Result<AsmLine, ParseError> {
-    let (line, col) = pair.line_col();
+    let offset = pair.as_span().start();
     let mut inner = pair.into_inner();
 
     let mnemonic_pair = inner
@@ -165,28 +163,26 @@ fn visit_instruction(
     let mut operands = Vec::new();
     for op_pair in inner {
         if op_pair.as_rule() == Rule::operand {
-            operands.push(visit_operand(op_pair, source, name)?);
+            operands.push(visit_operand(op_pair, src)?);
         }
     }
 
     Ok(AsmLine::Instruction(ParsedInstr {
         mnemonic,
         operands,
-        line,
-        col,
+        offset,
     }))
 }
 
 fn visit_operand(
     pair: pest::iterators::Pair<'_, Rule>,
-    source: &str,
-    name: &str,
+    src: Source<'_>,
 ) -> Result<Operand, ParseError> {
     let inner = pair
         .into_inner()
         .next()
         .unwrap_or_else(|| unreachable!("grammar guarantees operand has one inner rule"));
-    let (line, col) = inner.line_col();
+    let offset = inner.as_span().start();
     let text = inner.as_str();
 
     match inner.as_rule() {
@@ -194,18 +190,18 @@ fn visit_operand(
             let digits = &text[1..]; // strip leading 'r'
             let slot: u64 = digits.parse().map_err(|_| ParseError {
                 message: format!("register index '{digits}' is not a valid number"),
-                src: make_src(source, name),
-                span: make_span(source, line, col, text.len()),
+                src: make_src(src),
+                span: make_span(offset, text.len()),
             })?;
             let reg = u8::try_from(slot).map_err(|_| ParseError {
                 message: format!("register index {slot} is out of range [0, 255]"),
-                src: make_src(source, name),
-                span: make_span(source, line, col, text.len()),
+                src: make_src(src),
+                span: make_span(offset, text.len()),
             })?;
             Ok(Operand::Register(reg))
         }
         Rule::integer => {
-            let value = parse_integer(text, line, col, source, name)?;
+            let value = parse_integer(text, offset, src)?;
             Ok(Operand::Integer(value))
         }
         Rule::label_id => Ok(Operand::LabelRef(text.to_string())),
@@ -213,13 +209,7 @@ fn visit_operand(
     }
 }
 
-fn parse_integer(
-    text: &str,
-    line: usize,
-    col: usize,
-    source: &str,
-    name: &str,
-) -> Result<i64, ParseError> {
+fn parse_integer(text: &str, offset: usize, src: Source<'_>) -> Result<i64, ParseError> {
     let (neg, rest) = match text.strip_prefix('-') {
         Some(r) => (true, r),
         None => (false, text.strip_prefix('+').unwrap_or(text)),
@@ -232,8 +222,8 @@ fn parse_integer(
     }
     .map_err(|_| ParseError {
         message: format!("invalid integer literal '{text}'"),
-        src: make_src(source, name),
-        span: make_span(source, line, col, text.len()),
+        src: make_src(src),
+        span: make_span(offset, text.len()),
     })?;
 
     if neg {
@@ -241,16 +231,16 @@ fn parse_integer(
         if magnitude > (i64::MAX as u64) + 1 {
             return Err(ParseError {
                 message: format!("integer literal '{text}' underflows i64"),
-                src: make_src(source, name),
-                span: make_span(source, line, col, text.len()),
+                src: make_src(src),
+                span: make_span(offset, text.len()),
             });
         }
         Ok(-(magnitude as i64))
     } else {
         i64::try_from(magnitude).map_err(|_| ParseError {
             message: format!("integer literal '{text}' overflows i64"),
-            src: make_src(source, name),
-            span: make_span(source, line, col, text.len()),
+            src: make_src(src),
+            span: make_span(offset, text.len()),
         })
     }
 }

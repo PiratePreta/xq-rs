@@ -29,8 +29,7 @@
 //! let line = AsmLine::Instruction(aglais_xqvm_asm::ast::ParsedInstr {
 //!     mnemonic: "PUSH".to_string(),
 //!     operands: vec![Operand::Integer(42)],
-//!     line: 1,
-//!     col:  1,
+//!     offset: 0,
 //! });
 //! if let AsmLine::Instruction(instr) = &line {
 //!     assert_eq!(instr.mnemonic, "PUSH");
@@ -66,10 +65,8 @@ pub struct ParsedInstr {
     pub mnemonic: String,
     /// Operands in declaration order.
     pub operands: Vec<Operand>,
-    /// 1-based source line number.
-    pub line: usize,
-    /// 1-based source column of the mnemonic.
-    pub col: usize,
+    /// Byte offset of the mnemonic within the source text.
+    pub offset: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -85,10 +82,8 @@ pub enum AsmLine {
     LabelDef {
         /// The label name without the trailing colon.
         name: String,
-        /// 1-based source line of the definition.
-        line: usize,
-        /// 1-based source column of the first character of the label name.
-        col: usize,
+        /// Byte offset of the label name within the source text.
+        offset: usize,
     },
     /// An instruction with zero or more operands.
     Instruction(ParsedInstr),
