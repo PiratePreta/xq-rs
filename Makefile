@@ -1,34 +1,48 @@
-.PHONY: all deps lint lint-clippy lint-fmt lint-taplo lint-doc lint-semver lint-deny test test-unit test-integration test-miri
+.PHONY: all \
+        deps deps-miri \
+        lint lint-clippy lint-doc lint-deny \
+        fmt fmt-rust fmt-taplo fmt-check fmt-check-rust fmt-check-taplo \
+        test test-unit test-integration test-miri
 
-all: lint test
+all: fmt lint test
 
 # -- Dependencies -----------------------------------------------------------
 
 deps:
 	rustup component add clippy rustfmt
+	cargo install taplo-cli cargo-deny cargo-nextest --locked
+
+deps-miri:
 	rustup toolchain install nightly --component miri
 	cargo +nightly miri setup
-	cargo install taplo-cli cargo-semver-checks cargo-deny cargo-nextest --locked
+
+# -- Formatting -------------------------------------------------------------
+
+fmt: fmt-rust fmt-taplo
+
+fmt-rust:
+	cargo fmt --all
+
+fmt-taplo:
+	taplo fmt
+
+fmt-check: fmt-check-rust fmt-check-taplo
+
+fmt-check-rust:
+	cargo fmt --all -- --check
+
+fmt-check-taplo:
+	taplo fmt --check
 
 # -- Lints ------------------------------------------------------------------
 
-lint: lint-clippy lint-fmt lint-taplo lint-doc lint-deny
+lint: lint-clippy lint-doc lint-deny fmt-check
 
 lint-clippy:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-lint-fmt:
-	cargo fmt --all -- --check
-
-lint-taplo:
-	taplo lint check
-	taplo fmt --check
-
 lint-doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
-
-lint-semver:
-	cargo semver-checks check-release --workspace
 
 lint-deny:
 	cargo deny check

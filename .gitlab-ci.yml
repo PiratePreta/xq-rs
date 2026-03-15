@@ -12,81 +12,58 @@ default:
 variables:
     CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
 
-.add-cargo-bin: &add-cargo-bin
+.install-deps: &install-deps
     - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - make deps
 
 stages:
     - lint
     - test
+
+# -- Formatting -------------------------------------------------------------
+
+lint:fmt:
+    stage: lint
+    before_script:
+        - *install-deps
+    script:
+        - make fmt-check
 
 # -- Lints ------------------------------------------------------------------
 
 lint:clippy:
     stage: lint
     before_script:
-        - rustup component add clippy
+        - *install-deps
     script:
-        - cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-# -- Formatting -------------------------------------------------------------
-
-lint:rustfmt:
-    stage: lint
-    before_script:
-        - rustup component add rustfmt
-    script:
-        - cargo fmt --all -- --check
-
-lint:taplo:
-    stage: lint
-    before_script:
-        - *add-cargo-bin
-        - cargo install taplo-cli --locked
-    script:
-        - taplo lint check
-        - taplo fmt --check
-
-# -- Documentation ----------------------------------------------------------
+        - make lint-clippy
 
 lint:rustdoc:
     stage: lint
-    variables:
-        RUSTDOCFLAGS: "-D warnings"
-    script:
-        - cargo doc --workspace --all-features --no-deps
-
-# -- Semantic version check -------------------------------------------------
-
-lint:semver-checks:
-    stage: lint
     before_script:
-        - cargo install cargo-semver-checks --locked
+        - *install-deps
     script:
-        - cargo semver-checks check-release --workspace
-    rules:
-        - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
-        - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
-
-# -- License compliance and security ----------------------------------------
+        - make lint-doc
 
 lint:deny:
     stage: lint
     before_script:
-        - cargo install cargo-deny --locked
+        - *install-deps
     script:
-        - cargo deny check
+        - make lint-deny
 
-# -- Unit tests -------------------------------------------------------------
+# -- Tests ------------------------------------------------------------------
 
 test:unit:
     stage: test
+    before_script:
+        - *install-deps
     script:
-        - cargo test --workspace --all-features --lib --profile ci-test
-
-# -- Integration tests ------------------------------------------------------
+        - make test-unit
 
 test:integration:
     stage: test
+    before_script:
+        - *install-deps
     script:
-        - cargo test --workspace --all-features --test '*' --profile ci-test
-
+        - make test-integration

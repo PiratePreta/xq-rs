@@ -13,35 +13,51 @@ Be respectful in all project spaces, including issues, merge requests, and code 
 ## Prerequisites
 
 - Rust (stable, latest recommended)
-- `cargo clippy` — `rustup component add clippy`
-- `cargo fmt` — `rustup component add rustfmt`
-- `taplo` — `cargo install taplo-cli --locked`
-- `cargo deny` — `cargo install cargo-deny --locked`
-- `cargo semver-checks` — `cargo install cargo-semver-checks --locked`
-- `cargo nextest` — `cargo install cargo-nextest --locked` (optional, but highly recommended)
-- Miri interpreter — optional, but highly recommended; see [Undefined Behaviour](#undefined-behaviour)
+- Dev tools — install everything in one step:
+
+```sh
+make deps
+```
+
+This installs: `clippy`, `rustfmt`, `taplo-cli`, `cargo-deny`, `cargo-nextest`.
+
+- Miri interpreter — optional, but highly recommended; see [Undefined Behaviour](#undefined-behaviour):
+
+```sh
+make deps-miri
+```
 
 ## Development Workflow
 
 All checks must pass before a merge request is accepted. Run them locally before pushing:
 
 ```sh
+make all          # lint + test (what CI runs)
+```
+
+Individual targets:
+
+```sh
 # Formatting
-cargo fmt --all
-taplo fmt
+make fmt              # apply all formatting (Rust + TOML)
+make fmt-rust         # cargo fmt --all
+make fmt-taplo        # taplo fmt
 
-# Lints (must be warning-free)
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+make fmt-check        # check formatting without modifying files
+make fmt-check-rust
+make fmt-check-taplo
 
-# Documentation (must be warning-free)
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
-
-# Deny checks
-cargo deny check
+# Lints
+make lint             # all lints + format check
+make lint-clippy      # cargo clippy --workspace --all-targets --all-features -- -D warnings
+make lint-doc         # RUSTDOCFLAGS="-D warnings" cargo doc
+make lint-deny        # cargo deny check
 
 # Tests
-cargo test --workspace --all-features # OR
-cargo nextest run --workspace --all-features
+make test             # unit + integration
+make test-unit        # cargo nextest --lib
+make test-integration # cargo nextest --test '*'
+make test-miri        # cargo +nightly miri test (requires make deps-miri)
 ```
 
 ## Commit Messages
@@ -68,7 +84,7 @@ Implements #12
 
 ## Semver Compliance
 
-Public API changes must be semver-compatible. `cargo semver-checks` runs automatically on the default branch and on version tags. Breaking changes require a major version bump.
+Public API changes must be semver-compatible. Breaking changes require a major version bump.
 
 ## Undefined Behaviour
 
@@ -80,9 +96,8 @@ compiler and standard tests cannot catch.
 Run Miri locally on nightly:
 
 ```sh
-rustup toolchain install nightly --component miri
-cargo +nightly miri setup
-cargo +nightly miri test --workspace --all-features
+make deps-miri   # one-time setup
+make test-miri
 ```
 
 ## Code Style
