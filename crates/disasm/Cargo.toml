@@ -10,10 +10,10 @@ edition              = "2024"
 workspace = true
 
 [dependencies]
-aglais-xqvm-bytecode = { workspace = true }
-clap.workspace       = true
-miette.workspace     = true
-thiserror.workspace  = true
+aglais-xqvm-bytecode.workspace = true
+clap.workspace                 = true
+miette.workspace               = true
+thiserror.workspace            = true
 
 [[bin]]
 name = "xqdism"
