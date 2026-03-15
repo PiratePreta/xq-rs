@@ -67,7 +67,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::codec;
-use crate::types::Instruction;
+use crate::types::{Instruction, Opcode};
 
 // ---------------------------------------------------------------------------
 // Error and Result
@@ -172,10 +172,10 @@ pub(crate) fn collect_labels(bytes: &[u8]) -> BTreeMap<usize, String> {
 /// use aglais_xqvm_bytecode::types::Instruction;
 /// use aglais_xqvm_bytecode::{codec, stream::InstructionStream};
 ///
-/// // Build a short loop: PUSH 3 / JUMPI -2 (back to PUSH at offset 0).
+/// // Build a short loop: PUSH 3 / JUMPI -9 (back to PUSH at offset 0).
 /// let program = [
-///     Instruction::Push  { imm: 3  },        // offset 0, target of JUMPI -> label L0
-///     Instruction::JumpI { offset: -2i16 },  // offset 2; target = 2 + (-2) = 0
+///     Instruction::Push  { imm: 3  },        // offset 0 (9 bytes), target of JUMPI -> label L0
+///     Instruction::JumpI { offset: -9i16 },  // offset 9; target = 9 + (-9) = 0
 /// ];
 /// let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
 ///
@@ -189,9 +189,9 @@ pub(crate) fn collect_labels(bytes: &[u8]) -> BTreeMap<usize, String> {
 ///
 /// // JUMPI has no label at its own address.
 /// let (off1, label1, instr1) = stream.next_instruction().unwrap().unwrap();
-/// assert_eq!(off1, 2);
+/// assert_eq!(off1, 9);
 /// assert_eq!(label1, None);
-/// assert_eq!(instr1, Instruction::JumpI { offset: -2i16 });
+/// assert_eq!(instr1, Instruction::JumpI { offset: -9i16 });
 ///
 /// // Execute the jump: seek back to the label address.
 /// stream.seek(off0).unwrap();
@@ -303,7 +303,7 @@ impl<'a> InstructionStream<'a> {
     /// use aglais_xqvm_bytecode::{codec, stream::{Error, InstructionStream}};
     ///
     /// // Valid instruction followed by an unknown byte.
-    /// // 0x08 is a gap opcode (< 128, single-byte varint, not assigned).
+    /// // 0x08 is a gap opcode (not assigned).
     /// let mut buf = codec::encode(&Instruction::Nop {});
     /// buf.push(0x08u8);
     ///
@@ -357,10 +357,16 @@ impl Iterator for InstructionStream<'_> {
 // Error mapping
 // ---------------------------------------------------------------------------
 
-fn map_decode_error(err: postcard::Error, offset: usize, byte: u8) -> Error {
-    match err {
-        postcard::Error::DeserializeUnexpectedEnd => Error::TruncatedInstruction { offset },
-        _ => Error::UnknownOpcode { offset, byte },
+fn map_decode_error(_err: oxicode::Error, offset: usize, byte: u8) -> Error {
+    // oxicode serde wraps all errors (including UnexpectedEnd) into
+    // Custom { message } before returning from decode_from_slice, so we cannot
+    // distinguish truncation from unknown opcode by inspecting the error value.
+    // Instead: if the first byte is a known opcode, the buffer must be too short
+    // (truncated operands); otherwise the byte itself is the problem.
+    if Opcode::try_from(byte).is_ok() {
+        Error::TruncatedInstruction { offset }
+    } else {
+        Error::UnknownOpcode { offset, byte }
     }
 }
 
@@ -396,14 +402,14 @@ mod tests {
 
     #[test]
     fn offsets_advance_correctly() {
-        // PUSH(0) (2 bytes) at 0, HALT (1 byte) at 2.
+        // PUSH(0) (9 bytes) at 0, HALT (1 byte) at 9.
         let buf = assemble(&[Instruction::Push { imm: 0 }, Instruction::Halt {}]);
         let mut stream = InstructionStream::new(&buf);
 
         let (off0, _, _) = stream.next_instruction().unwrap().unwrap();
         let (off1, _, _) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(off0, 0);
-        assert_eq!(off1, 2);
+        assert_eq!(off1, 9);
         assert_eq!(stream.next_instruction(), None);
     }
 
@@ -427,10 +433,10 @@ mod tests {
 
     #[test]
     fn jump_target_instruction_carries_label() {
-        // PUSH(3) (2 bytes) at 0, JUMPI (2 bytes) at 2; target = 2 + (-2) = 0 -> L0.
+        // PUSH(3) (9 bytes) at 0, JUMPI (3 bytes) at 9; target = 9 + (-9) = 0 -> L0.
         let buf = assemble(&[
             Instruction::Push { imm: 3 },
-            Instruction::JumpI { offset: -2i16 },
+            Instruction::JumpI { offset: -9i16 },
         ]);
         let mut stream = InstructionStream::new(&buf);
 
@@ -450,23 +456,23 @@ mod tests {
 
     #[test]
     fn labels_map_has_correct_entries() {
-        // JUMP (2 bytes) at 0; target = 0 + 3 = 3 -> L0.
-        // NOP (1 byte) at 2.
-        // HALT (1 byte) at 3 -> labeled L0.
+        // JUMP (3 bytes) at 0; target = 0 + 4 = 4 -> L0.
+        // NOP (1 byte) at 3.
+        // HALT (1 byte) at 4 -> labeled L0.
         let buf = assemble(&[
-            Instruction::Jump { offset: 3i16 },
+            Instruction::Jump { offset: 4i16 },
             Instruction::Nop {},
             Instruction::Halt {},
         ]);
         let stream = InstructionStream::new(&buf);
         let labels = stream.labels();
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels.get(&3).map(String::as_str), Some("L0"));
+        assert_eq!(labels.get(&4).map(String::as_str), Some("L0"));
     }
 
     #[test]
     fn seek_to_second_instruction_skips_first() {
-        // PUSH(0) (2 bytes) at 0, NOP (1 byte) at 2, HALT (1 byte) at 3.
+        // PUSH(0) (9 bytes) at 0, NOP (1 byte) at 9, HALT (1 byte) at 10.
         let buf = assemble(&[
             Instruction::Push { imm: 0 },
             Instruction::Nop {},
@@ -474,9 +480,9 @@ mod tests {
         ]);
         let mut stream = InstructionStream::new(&buf);
 
-        stream.seek(2).unwrap();
+        stream.seek(9).unwrap();
         let (off, _, instr) = stream.next_instruction().unwrap().unwrap();
-        assert_eq!(off, 2);
+        assert_eq!(off, 9);
         assert_eq!(instr, Instruction::Nop {});
     }
 
@@ -505,10 +511,10 @@ mod tests {
 
     #[test]
     fn seek_back_simulates_jump() {
-        // PUSH(3) (2 bytes) at 0, JUMPI (2 bytes) at 2; target = 2 + (-2) = 0.
+        // PUSH(3) (9 bytes) at 0, JUMPI (3 bytes) at 9; target = 9 + (-9) = 0.
         let buf = assemble(&[
             Instruction::Push { imm: 3 },
-            Instruction::JumpI { offset: -2i16 },
+            Instruction::JumpI { offset: -9i16 },
         ]);
         let mut stream = InstructionStream::new(&buf);
 
@@ -531,7 +537,7 @@ mod tests {
 
     #[test]
     fn unknown_opcode_returns_error_and_advances() {
-        // 0x08 is a gap opcode (< 128, single-byte varint, not assigned).
+        // 0x08 is a gap opcode (not assigned).
         let buf = [0x08u8, Instruction::Halt {}.opcode() as u8];
         let mut stream = InstructionStream::new(&buf);
 

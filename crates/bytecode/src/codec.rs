@@ -17,15 +17,14 @@
 
 //! Binary codec for XQVM instructions.
 //!
-//! [`Instruction`] is encoded as a sequence `[opcode: u8, operands...]`:
+//! [`Instruction`] is encoded as a fixed-width big-endian sequence
+//! `[opcode: u8, operands...]`:
 //!
-//! * **Sequential formats** (postcard, bincode, ...): opcode as one raw byte,
-//!   then operand fields in declaration order.
+//! * **Binary format** (oxicode BE fixint): opcode as one raw byte, then
+//!   operand fields in declaration order, each at its natural width in
+//!   big-endian byte order -- `i16` as 2 bytes, `i64` as 8 bytes, `u8`/[`Register`]
+//!   as 1 byte.  No varints, no length prefixes.
 //! * **Sequence-based formats** (JSON arrays, ...): `[opcode, val, ...]`.
-//!
-//! The opcode is always a fixint `u8` (one byte).  Integer operands are
-//! encoded by the underlying serializer (`i16` and `i64` are zigzag varint in
-//! postcard; plain numbers in JSON).
 //!
 //! # Examples
 //!
@@ -51,11 +50,26 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::types::{Instruction, Register};
 
 // ---------------------------------------------------------------------------
+// Wire format configuration
+// ---------------------------------------------------------------------------
+
+/// The canonical binary codec configuration: big-endian, fixed-width integers.
+const CODEC_CONFIG: oxicode::config::Configuration<
+    oxicode::config::BigEndian,
+    oxicode::config::Fixint,
+> = oxicode::config::standard()
+    .with_big_endian()
+    .with_fixed_int_encoding();
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /// Encode a single instruction to a `Vec<u8>` in the wire format
 /// `[opcode: u8][operand fields]`.
+///
+/// Integer operands are encoded big-endian at their natural width (`i16` = 2
+/// bytes, `i64` = 8 bytes).  Register operands are a single byte.
 ///
 /// # Examples
 ///
@@ -67,10 +81,10 @@ use crate::types::{Instruction, Register};
 /// assert_eq!(codec::encode(&Instruction::Nop {}),  [0x00]);
 /// ```
 pub fn encode(instr: &Instruction) -> Vec<u8> {
-    // SAFETY: postcard serialization of a statically-known Rust type with no
-    // I/O and a fixed-capacity allocator is infallible -- it only fails on
-    // I/O errors or allocator exhaustion, neither of which can occur here.
-    postcard::to_allocvec(instr).unwrap_or_else(|_| unreachable!())
+    // SAFETY: oxicode serialization of a statically-known Rust type with a
+    // VecWriter is infallible -- no I/O errors or allocator exhaustion can
+    // occur for in-memory encoding.
+    oxicode::serde::encode_to_vec(instr, CODEC_CONFIG).unwrap_or_else(|_| unreachable!())
 }
 
 /// Decode a single instruction from the start of `bytes`.
@@ -79,7 +93,7 @@ pub fn encode(instr: &Instruction) -> Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns a [`postcard::Error`] when the byte slice is too short or the
+/// Returns an [`oxicode::Error`] when the byte slice is too short or the
 /// opcode byte is not a known XQVM opcode.
 ///
 /// # Examples
@@ -94,9 +108,8 @@ pub fn encode(instr: &Instruction) -> Vec<u8> {
 /// assert_eq!(instr, Instruction::Load { reg: Register(3) });
 /// assert_eq!(n, 2);
 /// ```
-pub fn decode(bytes: &[u8]) -> Result<(Instruction, usize), postcard::Error> {
-    let (instr, remaining) = postcard::take_from_bytes(bytes)?;
-    Ok((instr, bytes.len() - remaining.len()))
+pub fn decode(bytes: &[u8]) -> Result<(Instruction, usize), oxicode::Error> {
+    oxicode::serde::decode_from_slice(bytes, CODEC_CONFIG)
 }
 
 // ---------------------------------------------------------------------------
@@ -128,8 +141,8 @@ macro_rules! impl_instruction_serde {
         // Each variant becomes a fixed-length tuple:
         //   (opcode: u8, field0, field1, ...)
         //
-        // postcard: [opcode raw byte][field bytes...]
-        // JSON:     [opcode, val, ...]
+        // oxicode BE fixint: [opcode raw byte][field bytes in BE...]
+        // JSON:              [opcode, val, ...]
 
         impl Serialize for Instruction {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -152,7 +165,7 @@ macro_rules! impl_instruction_serde {
         //
         // Read the opcode element first, then dispatch to read the operands
         // for the matching variant.  Works for any format that calls visit_seq
-        // (postcard, bincode, JSON arrays, ...).
+        // (oxicode, bincode, JSON arrays, ...).
 
         impl<'de> Deserialize<'de> for Instruction {
             fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -192,13 +205,10 @@ macro_rules! impl_instruction_serde {
                     }
                 }
 
-                // Binary formats (postcard, bincode, ...): serialize_tuple
-                // writes no length prefix, so deserialize_tuple is the
-                // matching call -- it reads elements on demand without
-                // consuming a length varint.
-                //
-                // Human-readable formats (JSON, ...): the value is a JSON
-                // array of variable length; deserialize_seq is correct there.
+                // Always use deserialize_tuple: binary formats (oxicode,
+                // bincode, ...) provide elements on demand with no length
+                // prefix; JSON array formats treat the length as a hint only
+                // and work correctly with variable-length arrays too.
                 //
                 // The length hint is the widest variant: opcode (1) plus the
                 // number of operand fields in each variant.
@@ -206,11 +216,7 @@ macro_rules! impl_instruction_serde {
                     .into_iter()
                     .max()
                     .unwrap_or(1);
-                if deserializer.is_human_readable() {
-                    deserializer.deserialize_seq(InstrVisitor)
-                } else {
-                    deserializer.deserialize_tuple(max_fields, InstrVisitor)
-                }
+                deserializer.deserialize_tuple(max_fields, InstrVisitor)
             }
         }
     };
@@ -235,7 +241,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Postcard (binary) roundtrip tests
+    // Binary (oxicode BE fixint) roundtrip tests
     // -----------------------------------------------------------------------
 
     #[test]
@@ -263,33 +269,42 @@ mod tests {
     }
 
     #[test]
-    fn push_zero_is_two_bytes() {
-        // opcode 0x10, zigzag(0) = 0x00
-        assert_eq!(encode(&Instruction::Push { imm: 0 }), [0x10, 0x00]);
+    fn push_zero_is_nine_bytes() {
+        // opcode 0x10, i64(0) in BE = 8 zero bytes
+        assert_eq!(
+            encode(&Instruction::Push { imm: 0 }),
+            [0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
     }
 
     #[test]
-    fn push_positive_zigzag_varint() {
-        // zigzag(1) = 2, varint([0x02])
-        assert_eq!(encode(&Instruction::Push { imm: 1 }), [0x10, 0x02]);
+    fn push_positive_fixint_be() {
+        // i64(1) in BE = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]
+        assert_eq!(
+            encode(&Instruction::Push { imm: 1 }),
+            [0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]
+        );
     }
 
     #[test]
-    fn push_negative_zigzag_varint() {
-        // zigzag(-1) = 1, varint([0x01])
-        assert_eq!(encode(&Instruction::Push { imm: -1 }), [0x10, 0x01]);
+    fn push_negative_fixint_be() {
+        // i64(-1) in BE = [0xFF; 8]
+        assert_eq!(
+            encode(&Instruction::Push { imm: -1 }),
+            [0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
     }
 
     #[test]
-    fn jump_offset_zigzag_varint() {
-        // zigzag(-10) = 19, varint([0x13])
+    fn jump_offset_fixint_be() {
+        // i16(-10) in BE = 0xFFF6
         let bytes = encode(&Instruction::Jump { offset: -10i16 });
-        assert_eq!(bytes, [0x02, 0x13]);
+        assert_eq!(bytes, [0x02, 0xFF, 0xF6]);
     }
 
     #[test]
     fn energy_two_register_bytes() {
-        // Register serialises as raw u8
+        // Register serializes as raw u8
         let bytes = encode(&Instruction::Energy {
             model: Register(2),
             sample: Register(3),
@@ -299,13 +314,13 @@ mod tests {
 
     #[test]
     fn unknown_opcode_returns_error() {
-        // 0x08 is a gap opcode (single-byte fixint, not assigned)
+        // 0x08 is a gap opcode (not assigned)
         assert!(decode(&[0x08u8]).is_err());
     }
 
     #[test]
     fn truncated_input_returns_error() {
-        // PUSH opcode without the required varint operand byte
+        // PUSH opcode without the required 8 operand bytes
         assert!(decode(&[0x10u8]).is_err());
     }
 

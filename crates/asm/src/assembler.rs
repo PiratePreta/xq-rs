@@ -467,14 +467,20 @@ mod tests {
 
     #[test]
     fn push_zero() {
-        // opcode 0x10, zigzag(0)=0
-        assert_eq!(asm("PUSH 0"), [0x10, 0x00]);
+        // opcode 0x10, i64(0) in BE = 8 zero bytes
+        assert_eq!(
+            asm("PUSH 0"),
+            [0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
     }
 
     #[test]
     fn push_negative() {
-        // zigzag(-1) = 1
-        assert_eq!(asm("PUSH -1"), [0x10, 0x01]);
+        // i64(-1) in BE = [0xFF; 8]
+        assert_eq!(
+            asm("PUSH -1"),
+            [0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
     }
 
     #[test]
@@ -500,15 +506,15 @@ mod tests {
 
     #[test]
     fn forward_jump_label() {
-        // JUMP done (4 bytes at site 0)
-        // NOP       (1 byte  at site 4)
+        // JUMP done (3 bytes at site 0)
+        // NOP       (1 byte  at site 3)
         // done:
-        // HALT      (1 byte  at site 5)
-        // => delta = 5 - 0 = 5
+        // HALT      (1 byte  at site 4)
+        // => delta = 4 - 0 = 4
         let src = "JUMP done\nNOP\ndone:\nHALT";
         let buf = asm(src);
         let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::Jump { offset: 5 });
+        assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Halt {});
     }
@@ -516,15 +522,15 @@ mod tests {
     #[test]
     fn backward_jumpi_label() {
         // top:
-        // PUSH -1 (2 bytes at 0)
-        // ADD     (1 byte  at 2)
-        // DUPL    (1 byte  at 3)
-        // JUMPI top (4 bytes at 4)
-        // => delta = 0 - 4 = -4
+        // PUSH -1 (9 bytes at 0)
+        // ADD     (1 byte  at 9)
+        // DUPL    (1 byte  at 10)
+        // JUMPI top (3 bytes at 11)
+        // => delta = 0 - 11 = -11
         let src = "top:\nPUSH -1\nADD\nDUPL\nJUMPI top";
         let buf = asm(src);
         let instrs = decode_all(&buf);
-        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -4 });
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -11 });
     }
 
     #[test]

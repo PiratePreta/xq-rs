@@ -124,13 +124,13 @@ fn energy_instruction() {
 
 #[test]
 fn forward_jump_resolves() {
-    // JUMP done  (4 bytes, site=0)
-    // NOP        (1 byte,  site=4)
+    // JUMP done  (3 bytes, site=0)
+    // NOP        (1 byte,  site=3)
     // done:
-    // HALT       (1 byte,  site=5)
-    // delta = 5 - 0 = 5
+    // HALT       (1 byte,  site=4)
+    // delta = 4 - 0 = 4
     let instrs = asm("JUMP done\nNOP\ndone:\nHALT");
-    assert_eq!(instrs[0], Instruction::Jump { offset: 5 });
+    assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Halt {});
 }
@@ -138,13 +138,13 @@ fn forward_jump_resolves() {
 #[test]
 fn backward_jumpi_resolves() {
     // top:
-    // PUSH -1   (2 bytes, site=0)
-    // ADD       (1 byte,  site=2)
-    // DUPL      (1 byte,  site=3)
-    // JUMPI top (4 bytes, site=4)
-    // delta = 0 - 4 = -4
+    // PUSH -1   (9 bytes, site=0)
+    // ADD       (1 byte,  site=9)
+    // DUPL      (1 byte,  site=10)
+    // JUMPI top (3 bytes, site=11)
+    // delta = 0 - 11 = -11
     let instrs = asm("top:\nPUSH -1\nADD\nDUPL\nJUMPI top");
-    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -4 });
+    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -11 });
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn mixed_case_produces_same_bytecode_as_uppercase() {
 #[test]
 fn case_insensitive_jump_mnemonics() {
     let instrs = asm("jump done\nnop\ndone:\nhalt");
-    assert_eq!(instrs[0], Instruction::Jump { offset: 5 });
+    assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Halt {});
 }

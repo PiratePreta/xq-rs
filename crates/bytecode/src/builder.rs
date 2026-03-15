@@ -290,8 +290,8 @@ impl InstructionBuilder {
     /// The actual `i16` offset is filled in during [`build`](Self::build).
     pub fn jump(&mut self, label: LabelId) -> &mut Self {
         let site = self.buf.len();
-        // Use i16::MAX as placeholder: its zigzag-varint encoding is always
-        // 3 bytes, reserving space for any i16 offset to be patched in build().
+        // Placeholder value; any i16 encodes to exactly 2 BE bytes, so the
+        // buffer slot is always the same size regardless of the final offset.
         self.buf
             .extend_from_slice(&codec::encode(&Instruction::Jump { offset: i16::MAX }));
         self.fixups.push(Fixup { site, label });
@@ -304,8 +304,8 @@ impl InstructionBuilder {
     /// filled in during [`build`](Self::build).
     pub fn jump_if(&mut self, label: LabelId) -> &mut Self {
         let site = self.buf.len();
-        // Use i16::MAX as placeholder: its zigzag-varint encoding is always
-        // 3 bytes, reserving space for any i16 offset to be patched in build().
+        // Placeholder value; any i16 encodes to exactly 2 BE bytes, so the
+        // buffer slot is always the same size regardless of the final offset.
         self.buf
             .extend_from_slice(&codec::encode(&Instruction::JumpI { offset: i16::MAX }));
         self.fixups.push(Fixup { site, label });
@@ -342,8 +342,8 @@ impl InstructionBuilder {
     /// Resolve all jump fixups and return the assembled byte buffer.
     ///
     /// For each pending `JUMP`/`JUMPI`, computes `delta = label_pos - site`
-    /// and writes it as a forced 3-byte zigzag varint into the three bytes
-    /// that follow the opcode (reserved by the `i16::MAX` placeholder).
+    /// and writes it as a big-endian `i16` into the two bytes that follow the
+    /// opcode (reserved by the `i16::MAX` placeholder).
     ///
     /// # Errors
     ///
@@ -382,29 +382,14 @@ impl InstructionBuilder {
                 delta,
             })?;
 
-            // Wire format: [opcode: u8][offset: forced 3-byte zigzag varint]
-            // The placeholder (i16::MAX) reserved exactly 3 bytes at [site+1..=site+3].
-            // Any i16 value zigzag-encodes to at most 3 varint bytes (max zigzag = 65535).
-            let z = u32::from(zigzag_i16(offset));
-            self.buf[fixup.site + 1] = (z & 0x7F) as u8 | 0x80;
-            self.buf[fixup.site + 2] = ((z >> 7) & 0x7F) as u8 | 0x80;
-            self.buf[fixup.site + 3] = (z >> 14) as u8;
+            // Wire format: [opcode: u8][offset: i16 big-endian]
+            // The placeholder (i16::MAX) reserved exactly 2 bytes at [site+1..=site+2].
+            let [hi, lo] = offset.to_be_bytes();
+            self.buf[fixup.site + 1] = hi;
+            self.buf[fixup.site + 2] = lo;
         }
         Ok(self.buf)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Zigzag-encode a signed 16-bit integer to an unsigned 16-bit value.
-///
-/// Maps non-negative `n` to `2n` and negative `n` to `-2n - 1`, so that
-/// small-magnitude values produce small unsigned results and compress well
-/// under varint encoding.
-fn zigzag_i16(n: i16) -> u16 {
-    ((n << 1) ^ (n >> 15)) as u16
 }
 
 // ---------------------------------------------------------------------------
@@ -440,8 +425,8 @@ mod tests {
 
     #[test]
     fn backward_jump_resolves_correctly() {
-        // PUSH(3) (2 bytes) at 0; JUMPI (4 bytes) at 2; target = 0.
-        // delta = 0 - 2 = -2.
+        // PUSH(3) (9 bytes) at 0; JUMPI (3 bytes) at 9; target = 0.
+        // delta = 0 - 9 = -9.
         let mut b = InstructionBuilder::new();
         let top = b.label();
         b.place(top).push(3).jump_if(top);
@@ -449,20 +434,20 @@ mod tests {
         let buf = b.build().unwrap();
         let instrs = decode_all(&buf);
         assert_eq!(instrs[0], Instruction::Push { imm: 3 });
-        assert_eq!(instrs[1], Instruction::JumpI { offset: -2 });
+        assert_eq!(instrs[1], Instruction::JumpI { offset: -9 });
     }
 
     #[test]
     fn forward_jump_resolves_correctly() {
-        // JUMP (4 bytes) at 0; NOP (1 byte) at 4; HALT (1 byte) at 5.
-        // jump target = HALT at 5 -> delta = 5 - 0 = +5.
+        // JUMP (3 bytes) at 0; NOP (1 byte) at 3; HALT (1 byte) at 4.
+        // jump target = HALT at 4 -> delta = 4 - 0 = +4.
         let mut b = InstructionBuilder::new();
         let done = b.label();
         b.jump(done).nop().place(done).halt();
 
         let buf = b.build().unwrap();
         let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::Jump { offset: 5 });
+        assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Halt {});
     }

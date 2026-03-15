@@ -338,21 +338,21 @@ mod tests {
 
     #[test]
     fn byte_offsets_are_correct() {
-        // PUSH(0) is 2 bytes; HALT starts at offset 2.
+        // PUSH(0) is 9 bytes (opcode + 8-byte BE i64); HALT starts at offset 9.
         let buf = assemble(&[Instruction::Push { imm: 0 }, Instruction::Halt {}]);
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("0x0000"), "missing 0x0000 in:\n{text}");
-        assert!(text.contains("0x0002"), "missing 0x0002 in:\n{text}");
+        assert!(text.contains("0x0009"), "missing 0x0009 in:\n{text}");
     }
 
     #[test]
     fn backward_jump_gets_label() {
-        // PUSH(5) (2 bytes, offset 0) + GT (1 byte, offset 2) = offset 3 for JUMPI.
-        // JUMPI offset = -3  ->  target = 3 + (-3) = 0  -> L0 at offset 0.
+        // PUSH(5) (9 bytes, offset 0) + GT (1 byte, offset 9) = offset 10 for JUMPI.
+        // JUMPI offset = -10  ->  target = 10 + (-10) = 0  -> L0 at offset 0.
         let buf = assemble(&[
             Instruction::Push { imm: 5 },
             Instruction::Gt {},
-            Instruction::JumpI { offset: -3i16 },
+            Instruction::JumpI { offset: -10i16 },
             Instruction::Halt {},
         ]);
         let text = Disassembly::new(&buf).to_string();
