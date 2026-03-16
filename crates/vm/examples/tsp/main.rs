@@ -49,6 +49,7 @@ use aglais_xqvm_asm::assemble_source;
 use aglais_xqvm_vm::model::{Domain, XqmxModel};
 use aglais_xqvm_vm::value::RegVal;
 use aglais_xqvm_vm::vm::Vm;
+use miette::{IntoDiagnostic, Result, WrapErr, bail, ensure};
 
 const ENCODER_ASM: &str = include_str!("encoder.xqasm");
 const VERIFIER_ASM: &str = include_str!("verifier.xqasm");
@@ -58,7 +59,7 @@ const DECODER_ASM: &str = include_str!("decoder.xqasm");
 // Example driver
 // ---------------------------------------------------------------------------
 
-fn main() {
+fn main() -> Result<()> {
     // 4-city ring: distance i<->j = min(|i-j|, 4-|i-j|).
     // Row-major flat distance matrix (symmetric, zeros on diagonal).
     let n: usize = 4;
@@ -72,14 +73,21 @@ fn main() {
 
     // -- Step 1: encode the TSP as a QUBO model ---------------------------------
 
-    let encoder_bc = assemble_source(ENCODER_ASM).expect("encoder assembly failed");
+    let encoder_bc = assemble_source(ENCODER_ASM)
+        .into_diagnostic()
+        .wrap_err("encoder assembly failed")?;
 
     let mut vm = Vm::new();
     vm.set_calldata(vec![RegVal::Int(n as i64), RegVal::VecInt(distances)]);
     vm.set_output_slots(1);
-    vm.run(&encoder_bc).expect("encoder run failed");
+    vm.run(&encoder_bc)
+        .into_diagnostic()
+        .wrap_err("encoder run failed")?;
 
-    let qubo = vm.outputs()[0].clone();
+    let qubo = match vm.outputs().first() {
+        Some(v) => v.clone(),
+        None => bail!("encoder produced no output"),
+    };
 
     if let RegVal::Model(ref m) = qubo {
         println!(
@@ -106,34 +114,45 @@ fn main() {
 
     // -- Step 3: verify the sample ----------------------------------------------
 
-    let verifier_bc = assemble_source(VERIFIER_ASM).expect("verifier assembly failed");
+    let verifier_bc = assemble_source(VERIFIER_ASM)
+        .into_diagnostic()
+        .wrap_err("verifier assembly failed")?;
 
     let mut vm = Vm::new();
     vm.set_calldata(vec![qubo, sample_val.clone(), RegVal::Int(n as i64)]);
     vm.set_output_slots(2);
-    vm.run(&verifier_bc).expect("verifier run failed");
+    vm.run(&verifier_bc)
+        .into_diagnostic()
+        .wrap_err("verifier run failed")?;
 
-    let energy = match vm.outputs()[0] {
-        RegVal::Int(v) => v,
-        ref other => panic!("expected Int for energy, got {other:?}"),
+    let energy = match vm.outputs().first() {
+        Some(RegVal::Int(v)) => *v,
+        Some(other) => bail!("expected Int for energy output, got {other:?}"),
+        None => bail!("verifier produced no output at slot 0"),
     };
-    let is_valid = match vm.outputs()[1] {
-        RegVal::Int(v) => v != 0,
-        ref other => panic!("expected Int for valid flag, got {other:?}"),
+    let is_valid = match vm.outputs().get(1) {
+        Some(RegVal::Int(v)) => *v != 0,
+        Some(other) => bail!("expected Int for valid flag output, got {other:?}"),
+        None => bail!("verifier produced no output at slot 1"),
     };
 
     // -- Step 4: decode the sample into an ordered tour -------------------------
 
-    let decoder_bc = assemble_source(DECODER_ASM).expect("decoder assembly failed");
+    let decoder_bc = assemble_source(DECODER_ASM)
+        .into_diagnostic()
+        .wrap_err("decoder assembly failed")?;
 
     let mut vm = Vm::new();
     vm.set_calldata(vec![sample_val, RegVal::Int(n as i64)]);
     vm.set_output_slots(1);
-    vm.run(&decoder_bc).expect("decoder run failed");
+    vm.run(&decoder_bc)
+        .into_diagnostic()
+        .wrap_err("decoder run failed")?;
 
-    let tour = match vm.outputs()[0] {
-        RegVal::VecInt(ref v) => v.clone(),
-        ref other => panic!("expected VecInt for tour, got {other:?}"),
+    let tour = match vm.outputs().first() {
+        Some(RegVal::VecInt(v)) => v.clone(),
+        Some(other) => bail!("expected VecInt for tour output, got {other:?}"),
+        None => bail!("decoder produced no output"),
     };
 
     // -- Print results ----------------------------------------------------------
@@ -148,14 +167,18 @@ fn main() {
     // H_one_hot (linear) = 4 cities * 2 constraints * (-100) = -800
     // H_one_hot (quadratic) = 0 (one variable selected per row and column)
     // Total = 6 - 800 = -794
-    assert!(
+    ensure!(
         is_valid,
         "identity tour must satisfy all one-hot constraints"
     );
-    assert_eq!(energy, -794, "energy mismatch for identity tour");
-    assert_eq!(
-        tour,
-        vec![0, 1, 2, 3],
-        "identity tour should decode to [0,1,2,3]"
+    ensure!(
+        energy == -794,
+        "energy mismatch for identity tour: expected -794, got {energy}"
     );
+    ensure!(
+        tour == vec![0, 1, 2, 3],
+        "identity tour should decode to [0,1,2,3], got {tour:?}"
+    );
+
+    Ok(())
 }
