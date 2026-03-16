@@ -1,0 +1,160 @@
+; Copyright (C) 2026 Postquant Labs Incorporated
+;
+; This program is free software: you can redistribute it and/or modify
+; it under the terms of the GNU Affero General Public License as published by
+; the Free Software Foundation, either version 3 of the License, or
+; (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU Affero General Public License for more details.
+;
+; You should have received a copy of the GNU Affero General Public License
+; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+;
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; TSP encoder: formulates the Travelling Salesman Problem as a QUBO.
+;
+; Input slots:  [0] = N (Int), [1] = distances (VecInt, N*N row-major flat)
+; Output slots: [0] = BQMX model
+
+PUSH 0
+INPUT r0
+PUSH 1
+INPUT r1
+
+LOAD r0
+DUPL
+MUL
+STOW r2
+LOAD r2
+BQMX r4
+LOAD r0
+LOAD r0
+RESIZE r4
+
+PUSH 100
+STOW r3
+
+PUSH 0
+LOAD r0
+RANGE
+  LVAL r5
+  PUSH 0
+  LOAD r0
+  RANGE
+    LVAL r6
+    LOAD r5
+    LOAD r6
+    LT
+    NOT
+    JUMPI skip_dist
+    LOAD r5
+    LOAD r0
+    MUL
+    LOAD r6
+    ADD
+    VECGET r1
+    STOW r7
+    PUSH 0
+    LOAD r0
+    RANGE
+      LVAL r8
+      LOAD r8
+      PUSH 1
+      ADD
+      LOAD r0
+      MOD
+      STOW r9
+      LOAD r5
+      LOAD r0
+      MUL
+      LOAD r8
+      ADD
+      LOAD r6
+      LOAD r0
+      MUL
+      LOAD r9
+      ADD
+      LOAD r7
+      ADDQUAD r4
+      LOAD r6
+      LOAD r0
+      MUL
+      LOAD r8
+      ADD
+      LOAD r5
+      LOAD r0
+      MUL
+      LOAD r9
+      ADD
+      LOAD r7
+      ADDQUAD r4
+    NEXT
+    skip_dist:
+  NEXT
+NEXT
+
+PUSH 0
+LOAD r0
+RANGE
+  LVAL r5
+  LOAD r5
+  LOAD r3
+  ONEHOT r4
+NEXT
+
+PUSH 0
+LOAD r0
+RANGE
+  LVAL r5
+  PUSH 0
+  LOAD r0
+  RANGE
+    LVAL r6
+    LOAD r6
+    LOAD r0
+    MUL
+    LOAD r5
+    ADD
+    LOAD r3
+    NEG
+    ADDLINE r4
+  NEXT
+  PUSH 0
+  LOAD r0
+  RANGE
+    LVAL r6
+    PUSH 0
+    LOAD r0
+    RANGE
+      LVAL r7
+      LOAD r6
+      LOAD r7
+      LT
+      NOT
+      JUMPI skip_col
+      LOAD r6
+      LOAD r0
+      MUL
+      LOAD r5
+      ADD
+      LOAD r7
+      LOAD r0
+      MUL
+      LOAD r5
+      ADD
+      PUSH 2
+      LOAD r3
+      MUL
+      ADDQUAD r4
+      skip_col:
+    NEXT
+  NEXT
+NEXT
+
+PUSH 0
+OUTPUT r4
+HALT
