@@ -34,8 +34,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_asm::assembler::assemble;
-//! use aglais_xqvm_asm::ast::{AsmLine, Operand, ParsedInstr};
+//! use aglais_xqvm_asm::{assemble, AsmLine, Operand, ParsedInstr};
 //!
 //! let src = "PUSH 0\nHALT";
 //! let lines = vec![
@@ -63,11 +62,8 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use aglais_xqvm_bytecode::builder::InstructionBuilder;
-use aglais_xqvm_bytecode::builder::LabelId;
-use aglais_xqvm_bytecode::program::Program;
-use aglais_xqvm_bytecode::types::{Instruction, Register};
-use aglais_xqvm_bytecode::{builder, opcodes};
+use aglais_xqvm_bytecode::error::BuilderError;
+use aglais_xqvm_bytecode::{Instruction, InstructionBuilder, LabelId, Program, Register, opcodes};
 
 use crate::ast::{AsmLine, Operand, ParsedInstr};
 use crate::error::{AssembleError, Source, make_span, make_src};
@@ -109,8 +105,7 @@ type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_asm::parser::parse;
-/// use aglais_xqvm_asm::assembler::assemble;
+/// use aglais_xqvm_asm::{parse, assemble};
 ///
 /// let src = "PUSH 5\nPUSH 3\nADD\nHALT";
 /// let lines = parse(src, "<test>").unwrap();
@@ -351,13 +346,13 @@ fn assemble_push(
 // ---------------------------------------------------------------------------
 
 fn convert_build_error(
-    e: builder::Error,
+    e: BuilderError,
     label_names: &[String],
     first_ref: &HashMap<String, usize>,
     src: Source<'_>,
 ) -> AssembleError {
     match e {
-        builder::Error::UnplacedLabel { id } => {
+        BuilderError::UnplacedLabel { id } => {
             let label = label_names.get(id).cloned().unwrap_or_default();
             let offset = first_ref.get(&label).copied().unwrap_or(0);
             AssembleError::UndefinedLabel {
@@ -366,7 +361,7 @@ fn convert_build_error(
                 span: make_span(offset, label.len()),
             }
         }
-        builder::Error::OffsetOverflow {
+        BuilderError::OffsetOverflow {
             label: id, delta, ..
         } => {
             let label = label_names.get(id).cloned().unwrap_or_default();
@@ -378,7 +373,7 @@ fn convert_build_error(
                 span: make_span(offset, label.len()),
             }
         }
-        builder::Error::PoolOverflow => AssembleError::PoolOverflow { src: make_src(src) },
+        BuilderError::PoolOverflow => AssembleError::PoolOverflow { src: make_src(src) },
     }
 }
 
@@ -566,8 +561,7 @@ opcodes!(impl_build_instr);
 mod tests {
     use super::*;
     use crate::parser::parse;
-    use aglais_xqvm_bytecode::stream::InstructionStream;
-    use aglais_xqvm_bytecode::types::Instruction;
+    use aglais_xqvm_bytecode::{Instruction, InstructionStream};
 
     fn decode_all(buf: &[u8]) -> Vec<Instruction> {
         InstructionStream::new(buf).map(|r| r.unwrap().2).collect()

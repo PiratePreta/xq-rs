@@ -49,31 +49,40 @@
 //! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
 //! ```
 //!
-//! For finer control, use [`parser::parse`] and [`assembler::assemble`]
-//! separately.
+//! For finer control, use [`parse`] and [`assemble`] separately.
 
 // Error types carry NamedSource<Arc<str>> for miette source snippets.
 // The extra size is acceptable on error paths in an assembler.
 #![allow(clippy::result_large_err)]
+// Private modules have doc tests that are only visible to maintainers.
+#![allow(rustdoc::private_doc_tests)]
 
-pub mod assembler;
-pub mod ast;
-pub mod error;
-pub mod parser;
+mod assembler;
+mod ast;
+mod error;
+mod parser;
+
+// ---------------------------------------------------------------------------
+// Public API re-exports
+// ---------------------------------------------------------------------------
+
+pub use assembler::assemble;
+pub use ast::{AsmLine, Operand, ParsedInstr};
+pub use error::{AssembleError, Error, ParseError};
+pub use parser::parse;
 
 // ---------------------------------------------------------------------------
 // Convenience entry point
 // ---------------------------------------------------------------------------
 
-/// Parse and assemble `source` into a [`aglais_xqvm_bytecode::program::Program`] in one step.
+/// Parse and assemble `source` into a [`aglais_xqvm_bytecode::Program`] in one step.
 ///
-/// This is a convenience wrapper around [`parser::parse`] followed by
-/// [`assembler::assemble`].
+/// This is a convenience wrapper around [`parse`] followed by [`assemble`].
 ///
 /// # Errors
 ///
-/// Returns [`error::Error`] on any parse or assembly failure.  The error
-/// message includes the source line and column where the problem was detected.
+/// Returns [`Error`] on any parse or assembly failure.  The error message
+/// includes the source line and column where the problem was detected.
 ///
 /// # Examples
 ///
@@ -84,10 +93,8 @@ pub mod parser;
 /// let program = assemble_source("PUSH 5\nPUSH 3\nADD\nHALT").unwrap();
 /// assert!(!program.code().is_empty());
 /// ```
-pub fn assemble_source(
-    source: &str,
-) -> Result<aglais_xqvm_bytecode::program::Program, error::Error> {
-    let lines = parser::parse(source, "<input>")?;
-    let program = assembler::assemble(&lines, source, "<input>")?;
+pub fn assemble_source(source: &str) -> Result<aglais_xqvm_bytecode::Program, Error> {
+    let lines = parse(source, "<input>")?;
+    let program = assemble(&lines, source, "<input>")?;
     Ok(program)
 }

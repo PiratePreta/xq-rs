@@ -24,9 +24,9 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_asm::ast::{AsmLine, Operand};
+//! use aglais_xqvm_asm::{AsmLine, Operand, ParsedInstr};
 //!
-//! let line = AsmLine::Instruction(aglais_xqvm_asm::ast::ParsedInstr {
+//! let line = AsmLine::Instruction(ParsedInstr {
 //!     mnemonic: "PUSH".to_string(),
 //!     operands: vec![Operand::Integer(42)],
 //!     offset: 0,

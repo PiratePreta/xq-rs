@@ -25,8 +25,8 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_vm::error::Error;
-//! use aglais_xqvm_bytecode::builder::InstructionBuilder;
+//! use aglais_xqvm_vm::Error;
+//! use aglais_xqvm_bytecode::InstructionBuilder;
 //!
 //! let program = InstructionBuilder::new()
 //!     .push(0)
@@ -42,8 +42,8 @@
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 
-use aglais_xqvm_bytecode::program::Program;
-use aglais_xqvm_disasm::display::Disassembly;
+use aglais_xqvm_bytecode::Program;
+use aglais_xqvm_disasm::Disassembly;
 
 /// Errors that can occur during XQVM bytecode execution.
 #[derive(Debug, Error)]
@@ -133,8 +133,8 @@ impl Error {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_vm::vm::Vm;
-    /// use aglais_xqvm_bytecode::builder::InstructionBuilder;
+    /// use aglais_xqvm_vm::Vm;
+    /// use aglais_xqvm_bytecode::InstructionBuilder;
     ///
     /// fn run() -> miette::Result<()> {
     ///     let mut b = InstructionBuilder::new();
@@ -181,9 +181,9 @@ impl Error {
     }
 }
 
-impl From<aglais_xqvm_bytecode::stream::Error> for Error {
-    fn from(e: aglais_xqvm_bytecode::stream::Error) -> Self {
-        use aglais_xqvm_bytecode::stream::Error as SE;
+impl From<aglais_xqvm_bytecode::error::StreamError> for Error {
+    fn from(e: aglais_xqvm_bytecode::error::StreamError) -> Self {
+        use aglais_xqvm_bytecode::error::StreamError as SE;
         match e {
             SE::UnknownOpcode { offset, byte } => Self::BadOpcode { pos: offset, byte },
             SE::TruncatedInstruction { offset } => Self::TruncatedInstruction { pos: offset },
@@ -207,8 +207,8 @@ impl From<aglais_xqvm_bytecode::stream::Error> for Error {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_vm::vm::Vm;
-/// use aglais_xqvm_bytecode::builder::InstructionBuilder;
+/// use aglais_xqvm_vm::Vm;
+/// use aglais_xqvm_bytecode::InstructionBuilder;
 ///
 /// fn run() -> miette::Result<()> {
 ///     let mut b = InstructionBuilder::new();

@@ -33,9 +33,8 @@ use clap::Parser;
 use miette::{IntoDiagnostic, Result, WrapErr};
 
 use aglais_xqvm_asm::assemble_source;
-use aglais_xqvm_bytecode::program::Program;
-use aglais_xqvm_vm::value::RegVal;
-use aglais_xqvm_vm::vm::Vm;
+use aglais_xqvm_bytecode::Program;
+use aglais_xqvm_vm::{RegVal, Vm};
 
 /// Interpret XQVM bytecode.
 ///

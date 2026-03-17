@@ -30,9 +30,8 @@
 
 use std::io;
 
-use aglais_xqvm_bytecode::builder::InstructionBuilder;
-use aglais_xqvm_bytecode::types::Register;
-use aglais_xqvm_disasm::display::Disassembly;
+use aglais_xqvm_bytecode::{InstructionBuilder, Register};
+use aglais_xqvm_disasm::Disassembly;
 
 fn main() {
     let mut b = InstructionBuilder::new();

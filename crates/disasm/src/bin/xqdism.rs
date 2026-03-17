@@ -36,8 +36,8 @@ use std::path::PathBuf;
 use clap::Parser;
 use miette::{IntoDiagnostic, Result, WrapErr};
 
-use aglais_xqvm_bytecode::program::Program;
-use aglais_xqvm_disasm::display::Disassembly;
+use aglais_xqvm_bytecode::Program;
+use aglais_xqvm_disasm::Disassembly;
 
 /// Disassemble XQVM bytecode.
 ///

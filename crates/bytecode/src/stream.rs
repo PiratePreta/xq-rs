@@ -40,8 +40,8 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::types::Instruction;
-//! use aglais_xqvm_bytecode::{codec, stream::InstructionStream};
+//! use aglais_xqvm_bytecode::Instruction;
+//! use aglais_xqvm_bytecode::{codec, InstructionStream};
 //!
 //! let program = [
 //!     Instruction::Push { imm: 1 },
@@ -111,8 +111,7 @@ pub enum Error {
     },
 }
 
-/// Convenience alias for `std::result::Result<T, `[`enum@Error`]`>`.
-pub type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, Error>;
 
 // ---------------------------------------------------------------------------
 // Label collection (single pre-pass over the raw bytes)
@@ -175,8 +174,8 @@ pub(crate) fn collect_labels(bytes: &[u8]) -> BTreeMap<usize, String> {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::types::Instruction;
-/// use aglais_xqvm_bytecode::{codec, stream::InstructionStream};
+/// use aglais_xqvm_bytecode::Instruction;
+/// use aglais_xqvm_bytecode::{codec, InstructionStream};
 ///
 /// // Build a short loop: PUSH 3 / JUMPI -9 (back to PUSH at offset 0).
 /// let program = [
@@ -235,8 +234,8 @@ impl<'a> InstructionStream<'a> {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::pool::ConstantPool;
-    /// use aglais_xqvm_bytecode::stream::InstructionStream;
+    /// use aglais_xqvm_bytecode::ConstantPool;
+    /// use aglais_xqvm_bytecode::InstructionStream;
     ///
     /// let mut pool = ConstantPool::new();
     /// let _idx = pool.intern(42).unwrap();
@@ -263,10 +262,10 @@ impl<'a> InstructionStream<'a> {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::pool::ConstantPool;
-    /// use aglais_xqvm_bytecode::program::Program;
-    /// use aglais_xqvm_bytecode::stream::InstructionStream;
-    /// use aglais_xqvm_bytecode::types::Instruction;
+    /// use aglais_xqvm_bytecode::ConstantPool;
+    /// use aglais_xqvm_bytecode::Program;
+    /// use aglais_xqvm_bytecode::InstructionStream;
+    /// use aglais_xqvm_bytecode::Instruction;
     ///
     /// let mut pool = ConstantPool::new();
     /// let _idx = pool.intern(99).unwrap();
@@ -319,9 +318,9 @@ impl<'a> InstructionStream<'a> {
     /// Use this to resolve `PUSHC` indices encountered during iteration:
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::pool::ConstantPool;
-    /// use aglais_xqvm_bytecode::stream::InstructionStream;
-    /// use aglais_xqvm_bytecode::types::Instruction;
+    /// use aglais_xqvm_bytecode::ConstantPool;
+    /// use aglais_xqvm_bytecode::InstructionStream;
+    /// use aglais_xqvm_bytecode::Instruction;
     /// use aglais_xqvm_bytecode::codec;
     ///
     /// let mut pool = ConstantPool::new();
@@ -348,8 +347,9 @@ impl<'a> InstructionStream<'a> {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::types::Instruction;
-    /// use aglais_xqvm_bytecode::{codec, stream::{Error, InstructionStream}};
+    /// use aglais_xqvm_bytecode::Instruction;
+    /// use aglais_xqvm_bytecode::{InstructionStream, codec};
+    /// use aglais_xqvm_bytecode::error::StreamError as Error;
     ///
     /// let buf = codec::encode(&Instruction::Nop {});
     /// let mut stream = InstructionStream::new(&buf);
@@ -386,8 +386,9 @@ impl<'a> InstructionStream<'a> {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::types::Instruction;
-    /// use aglais_xqvm_bytecode::{codec, stream::{Error, InstructionStream}};
+    /// use aglais_xqvm_bytecode::Instruction;
+    /// use aglais_xqvm_bytecode::{InstructionStream, codec};
+    /// use aglais_xqvm_bytecode::error::StreamError as Error;
     ///
     /// // Valid instruction followed by an unknown byte.
     /// // 0x08 is a gap opcode (not assigned).

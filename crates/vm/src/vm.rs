@@ -23,8 +23,8 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_vm::vm::Vm;
-//! use aglais_xqvm_bytecode::builder::InstructionBuilder;
+//! use aglais_xqvm_vm::Vm;
+//! use aglais_xqvm_bytecode::InstructionBuilder;
 //!
 //! // Build: PUSH 3 + PUSH 4 = 7; HALT.
 //! let mut b = InstructionBuilder::new();
@@ -37,10 +37,7 @@
 //! ```
 
 use aglais_xqvm_bytecode::opcodes;
-use aglais_xqvm_bytecode::pool::ConstantPool;
-use aglais_xqvm_bytecode::program::Program;
-use aglais_xqvm_bytecode::stream::InstructionStream;
-use aglais_xqvm_bytecode::types::{Instruction, Register};
+use aglais_xqvm_bytecode::{ConstantPool, Instruction, InstructionStream, Program, Register};
 
 use crate::error::Error;
 use crate::model::{Domain, XqmxModel, XqmxSample};
@@ -98,8 +95,8 @@ const DEFAULT_STEP_LIMIT: u64 = 10_000_000;
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_vm::vm::Vm;
-/// use aglais_xqvm_bytecode::builder::InstructionBuilder;
+/// use aglais_xqvm_vm::Vm;
+/// use aglais_xqvm_bytecode::InstructionBuilder;
 ///
 /// let mut b = InstructionBuilder::new();
 /// b.push(6).push(7).mul().halt();
@@ -153,10 +150,9 @@ impl Vm {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_vm::vm::Vm;
-    /// use aglais_xqvm_vm::value::RegVal;
-    /// use aglais_xqvm_bytecode::builder::InstructionBuilder;
-    /// use aglais_xqvm_bytecode::types::Register;
+    /// use aglais_xqvm_vm::Vm;
+    /// use aglais_xqvm_vm::RegVal;
+    /// use aglais_xqvm_bytecode::{InstructionBuilder, Register};
     ///
     /// let mut vm = Vm::new();
     /// vm.set_calldata(vec![RegVal::Int(7)]);
@@ -213,15 +209,15 @@ impl Vm {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_vm::vm::Vm;
-    /// use aglais_xqvm_vm::value::RegVal;
-    /// use aglais_xqvm_bytecode::builder::InstructionBuilder;
+    /// use aglais_xqvm_vm::Vm;
+    /// use aglais_xqvm_vm::RegVal;
+    /// use aglais_xqvm_bytecode::InstructionBuilder;
     ///
     /// let mut vm = Vm::new();
     /// vm.set_register(0, RegVal::Int(42));
     ///
     /// let mut b = InstructionBuilder::new();
-    /// b.load(aglais_xqvm_bytecode::types::Register(0)).halt();
+    /// b.load(aglais_xqvm_bytecode::Register(0)).halt();
     /// let program = b.build().unwrap();
     /// vm.run(&program).unwrap();
     /// assert_eq!(vm.stack(), &[42]);

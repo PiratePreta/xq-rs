@@ -15,17 +15,19 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+// Private modules have doc tests that are only visible to maintainers.
+#![allow(rustdoc::private_doc_tests)]
+
 //! Disassembler for the Aglais X-Quadratic Virtual Machine (XQVM).
 //!
 //! This crate converts raw XQVM bytecode buffers into human-readable listings.
-//! The only public API is [`display::Disassembly`].
+//! The only public API is [`Disassembly`].
 //!
 //! # Quick start
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::types::Instruction;
-//! use aglais_xqvm_bytecode::codec;
-//! use aglais_xqvm_disasm::display::Disassembly;
+//! use aglais_xqvm_bytecode::{Instruction, codec};
+//! use aglais_xqvm_disasm::Disassembly;
 //!
 //! let program = [
 //!     Instruction::Push { imm: 5 },
@@ -40,4 +42,6 @@
 //! assert!(listing.contains("HALT"));
 //! ```
 
-pub mod display;
+mod display;
+
+pub use display::Disassembly;

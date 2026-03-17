@@ -24,8 +24,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_asm::parser::parse;
-//! use aglais_xqvm_asm::ast::{AsmLine, Operand};
+//! use aglais_xqvm_asm::{parse, AsmLine, Operand};
 //!
 //! let lines = parse("PUSH 42\nHALT", "<test>").unwrap();
 //! assert_eq!(lines.len(), 2);
@@ -75,8 +74,7 @@ use generated::Rule;
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_asm::parser::parse;
-/// use aglais_xqvm_asm::ast::{AsmLine, Operand};
+/// use aglais_xqvm_asm::{parse, AsmLine, Operand};
 ///
 /// let lines = parse("loop:\n  JUMPI loop", "<test>").unwrap();
 /// assert!(matches!(lines[0], AsmLine::LabelDef { .. }));

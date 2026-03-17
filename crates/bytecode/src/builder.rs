@@ -31,7 +31,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::builder::InstructionBuilder;
+//! use aglais_xqvm_bytecode::InstructionBuilder;
 //!
 //! // Counted loop: push 3, decrement until zero.
 //! let mut b = InstructionBuilder::new();
@@ -53,7 +53,7 @@
 //! Forward references work equally well:
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::builder::InstructionBuilder;
+//! use aglais_xqvm_bytecode::InstructionBuilder;
 //!
 //! let mut b = InstructionBuilder::new();
 //! let done = b.label();
@@ -109,8 +109,7 @@ pub enum Error {
     PoolOverflow,
 }
 
-/// Convenience alias for `std::result::Result<T, `[`enum@Error`]`>`.
-pub type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, Error>;
 
 // ---------------------------------------------------------------------------
 // LabelId
@@ -154,8 +153,8 @@ struct Fixup {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::builder::InstructionBuilder;
-/// use aglais_xqvm_bytecode::types::{Instruction, Register};
+/// use aglais_xqvm_bytecode::InstructionBuilder;
+/// use aglais_xqvm_bytecode::{Instruction, Register};
 ///
 /// let mut b = InstructionBuilder::new();
 /// let skip = b.label();
@@ -260,7 +259,7 @@ impl InstructionBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::builder::InstructionBuilder;
+    /// use aglais_xqvm_bytecode::InstructionBuilder;
     ///
     /// let mut b = InstructionBuilder::new();
     /// let top = b.label();
@@ -371,8 +370,8 @@ impl InstructionBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::builder::InstructionBuilder;
-    /// use aglais_xqvm_bytecode::types::Instruction;
+    /// use aglais_xqvm_bytecode::InstructionBuilder;
+    /// use aglais_xqvm_bytecode::Instruction;
     ///
     /// let mut b = InstructionBuilder::new();
     /// b.push_const(42).push_const(42).halt(); // two refs, one pool entry
@@ -431,8 +430,8 @@ impl InstructionBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::{builder::InstructionBuilder, stream::InstructionStream};
-    /// use aglais_xqvm_bytecode::types::Instruction;
+    /// use aglais_xqvm_bytecode::{InstructionBuilder, InstructionStream};
+    /// use aglais_xqvm_bytecode::Instruction;
     ///
     /// let mut b = InstructionBuilder::new();
     /// let done = b.label();

@@ -23,17 +23,17 @@
 //!
 //! | Item | Description |
 //! |---|---|
-//! | [`vm::Vm`] | The interpreter -- stack, registers, loop stack |
-//! | [`error::Error`] | Runtime fault variants |
-//! | [`model::XqmxModel`] | QUBO/Ising/discrete optimization model |
-//! | [`model::XqmxSample`] | Candidate solution for an XQMX model |
-//! | [`value::RegVal`] | Register value type |
+//! | [`Vm`] | The interpreter -- stack, registers, loop stack |
+//! | [`Error`] | Runtime fault variants |
+//! | [`XqmxModel`] | QUBO/Ising/discrete optimization model |
+//! | [`XqmxSample`] | Candidate solution for an XQMX model |
+//! | [`RegVal`] | Register value type |
 //!
 //! # Quick start
 //!
 //! ```rust
-//! use aglais_xqvm_vm::vm::Vm;
-//! use aglais_xqvm_bytecode::builder::InstructionBuilder;
+//! use aglais_xqvm_vm::Vm;
+//! use aglais_xqvm_bytecode::InstructionBuilder;
 //!
 //! let mut b = InstructionBuilder::new();
 //! b.push(10).push(32).add().halt();
@@ -44,7 +44,19 @@
 //! assert_eq!(vm.stack(), &[42]);
 //! ```
 
-pub mod error;
-pub mod model;
-pub mod value;
-pub mod vm;
+// Private modules have doc tests that are only visible to maintainers.
+#![allow(rustdoc::private_doc_tests)]
+
+mod error;
+mod model;
+mod value;
+mod vm;
+
+// ---------------------------------------------------------------------------
+// Public API re-exports
+// ---------------------------------------------------------------------------
+
+pub use error::{Error, RuntimeDiagnostic};
+pub use model::{Domain, XqmxModel, XqmxSample};
+pub use value::RegVal;
+pub use vm::Vm;

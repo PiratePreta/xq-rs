@@ -23,8 +23,7 @@
 #![allow(clippy::indexing_slicing)]
 
 use aglais_xqvm_asm::assemble_source;
-use aglais_xqvm_bytecode::stream::InstructionStream;
-use aglais_xqvm_bytecode::types::{Instruction, Register};
+use aglais_xqvm_bytecode::{Instruction, InstructionStream, Register};
 
 // ---------------------------------------------------------------------------
 // Helpers

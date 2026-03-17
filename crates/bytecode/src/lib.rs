@@ -23,14 +23,15 @@
 //! | Item | Description |
 //! |---|---|
 //! | [`opcodes!`] | X-macro -- the single source of truth for the opcode table |
-//! | [`types::Opcode`] | `#[repr(u8)]` enum and [`types::DecodeError`] |
-//! | [`types::Instruction`] | Fully decoded instruction with operands |
-//! | [`types::Register`] | 8-bit register slot operand |
-//! | [`pool`] | [`pool::ConstantPool`] -- interned `i64` constant table |
-//! | [`program`] | [`program::Program`] -- constant pool + instruction bytes |
-//! | [`builder`] | [`builder::InstructionBuilder`] -- fluent bytecode assembler |
+//! | [`Opcode`] | `#[repr(u8)]` enum |
+//! | [`Instruction`] | Fully decoded instruction with operands |
+//! | [`Register`] | 8-bit register slot operand |
+//! | [`ConstantPool`] | Interned `i64` constant table |
+//! | [`Program`] | Complete program: constant pool + instruction bytes |
+//! | [`InstructionBuilder`] | Fluent bytecode assembler |
+//! | [`InstructionStream`] | Incremental seekable reader |
 //! | [`codec`] | [`codec::encode`] / [`codec::decode`] -- binary wire format |
-//! | [`stream`] | [`stream::InstructionStream`] -- incremental seekable reader |
+//! | [`error`] | All public error types |
 //!
 //! # The x-macro pattern
 //!
@@ -54,7 +55,7 @@
 //! # Quick start
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::types::{Instruction, Opcode, Register};
+//! use aglais_xqvm_bytecode::{Instruction, Opcode, Register};
 //!
 //! let program: &[Instruction] = &[
 //!     Instruction::Push   { imm: 0 },
@@ -75,12 +76,26 @@
 //! assert_eq!(program[0].mnemonic(), "PUSH");
 //! ```
 
+// Private modules have doc tests that are only visible to maintainers.
+#![allow(rustdoc::private_doc_tests)]
+
 // `opcodes!` is defined inside `types::table` with `#[macro_export]`, so it
 // lands at the crate root automatically.
 #[macro_use]
-pub mod types;
-pub mod builder;
+mod types;
+mod builder;
 pub mod codec;
-pub mod pool;
-pub mod program;
-pub mod stream;
+pub mod error;
+mod pool;
+mod program;
+mod stream;
+
+// ---------------------------------------------------------------------------
+// Public API re-exports
+// ---------------------------------------------------------------------------
+
+pub use builder::{InstructionBuilder, LabelId};
+pub use pool::ConstantPool;
+pub use program::Program;
+pub use stream::InstructionStream;
+pub use types::{Instruction, Opcode, Register};

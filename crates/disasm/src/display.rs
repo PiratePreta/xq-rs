@@ -53,9 +53,8 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::types::Instruction;
-//! use aglais_xqvm_bytecode::codec;
-//! use aglais_xqvm_disasm::display::Disassembly;
+//! use aglais_xqvm_bytecode::{Instruction, codec};
+//! use aglais_xqvm_disasm::Disassembly;
 //!
 //! // No jumps -- label column is suppressed entirely.
 //! let program = [
@@ -76,11 +75,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
 
-use aglais_xqvm_bytecode::opcodes;
-use aglais_xqvm_bytecode::pool::ConstantPool;
-use aglais_xqvm_bytecode::program::Program;
-use aglais_xqvm_bytecode::stream::{self, InstructionStream};
-use aglais_xqvm_bytecode::types::{Instruction, Register};
+use aglais_xqvm_bytecode::error::StreamError;
+use aglais_xqvm_bytecode::{
+    ConstantPool, Instruction, InstructionStream, Program, Register, opcodes,
+};
 
 // ---------------------------------------------------------------------------
 // Operand display
@@ -207,9 +205,8 @@ opcodes!(impl_fmt_instruction);
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::types::{Instruction, Register};
-/// use aglais_xqvm_bytecode::codec;
-/// use aglais_xqvm_disasm::display::Disassembly;
+/// use aglais_xqvm_bytecode::{Instruction, Register, codec};
+/// use aglais_xqvm_disasm::Disassembly;
 ///
 /// // Build a trivial counted-down loop.
 /// let program = [
@@ -272,9 +269,8 @@ impl<'a> Disassembly<'a> {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::types::Instruction;
-    /// use aglais_xqvm_bytecode::codec;
-    /// use aglais_xqvm_disasm::display::Disassembly;
+    /// use aglais_xqvm_bytecode::{Instruction, codec};
+    /// use aglais_xqvm_disasm::Disassembly;
     ///
     /// let program = [Instruction::Push { imm: 1 }, Instruction::Halt {}];
     /// let buf: Vec<u8> = program.iter().flat_map(codec::encode).collect();
@@ -344,14 +340,14 @@ impl<'a> Disassembly<'a> {
                 }
                 Err(ref e) => {
                     let (offset, byte) = match e {
-                        stream::Error::UnknownOpcode { offset, byte } => (*offset, *byte),
-                        stream::Error::TruncatedInstruction { offset } => {
+                        StreamError::UnknownOpcode { offset, byte } => (*offset, *byte),
+                        StreamError::TruncatedInstruction { offset } => {
                             let byte = *self.stream.bytes().get(*offset).unwrap_or_else(|| {
                                 unreachable!("TruncatedInstruction offset within buffer")
                             });
                             (*offset, byte)
                         }
-                        stream::Error::SeekOutOfBounds { .. } => {
+                        StreamError::SeekOutOfBounds { .. } => {
                             unreachable!("stream never seeks internally")
                         }
                     };
@@ -387,10 +383,7 @@ impl fmt::Display for Disassembly<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aglais_xqvm_bytecode::codec;
-    use aglais_xqvm_bytecode::pool::ConstantPool;
-    use aglais_xqvm_bytecode::program::Program;
-    use aglais_xqvm_bytecode::types::{Instruction, Register};
+    use aglais_xqvm_bytecode::{ConstantPool, Instruction, Program, Register, codec};
 
     fn assemble(program: &[Instruction]) -> Vec<u8> {
         program.iter().flat_map(codec::encode).collect()

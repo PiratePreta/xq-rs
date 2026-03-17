@@ -31,7 +31,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::pool::ConstantPool;
+//! use aglais_xqvm_bytecode::ConstantPool;
 //!
 //! let mut pool = ConstantPool::new();
 //! let a = pool.intern(42).unwrap();
@@ -75,7 +75,7 @@ pub struct PoolOverflow;
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::pool::ConstantPool;
+/// use aglais_xqvm_bytecode::ConstantPool;
 ///
 /// let mut pool = ConstantPool::new();
 /// assert!(pool.is_empty());
@@ -111,7 +111,7 @@ impl ConstantPool {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::pool::ConstantPool;
+    /// use aglais_xqvm_bytecode::ConstantPool;
     ///
     /// let mut pool = ConstantPool::new();
     /// let i0 = pool.intern(10).unwrap();
@@ -139,7 +139,7 @@ impl ConstantPool {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::pool::ConstantPool;
+    /// use aglais_xqvm_bytecode::ConstantPool;
     ///
     /// let mut pool = ConstantPool::new();
     /// let idx = pool.intern(99).unwrap();
