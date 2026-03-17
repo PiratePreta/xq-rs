@@ -20,6 +20,8 @@
 //! These tests assemble complete programs and verify the decoded instruction
 //! stream, exercising the full parse -> assemble -> decode pipeline.
 
+#![allow(clippy::indexing_slicing)]
+
 use aglais_xqvm_asm::assemble_source;
 use aglais_xqvm_bytecode::stream::InstructionStream;
 use aglais_xqvm_bytecode::types::{Instruction, Register};

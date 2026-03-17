@@ -62,7 +62,7 @@ fn main() -> miette::Result<()> {
     } else {
         let out_path = args.output.unwrap_or_else(|| {
             let mut p = args.input.clone();
-            p.set_extension("xqb");
+            let _ = p.set_extension("xqb");
             p
         });
         std::fs::write(&out_path, &encoded)

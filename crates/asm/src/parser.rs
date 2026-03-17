@@ -243,6 +243,7 @@ fn parse_integer(text: &str, offset: usize, src: Source<'_>) -> Result<i64, Pars
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::ast::Operand;

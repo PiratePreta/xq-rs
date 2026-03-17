@@ -229,6 +229,7 @@ opcodes!(impl_instruction_serde);
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::types::Register;

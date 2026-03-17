@@ -281,12 +281,16 @@ impl InstructionBuilder {
     /// Panics if `label` was already placed (each label may be placed exactly
     /// once) or if `label` was not created by this builder.
     pub fn place(&mut self, label: LabelId) -> &mut Self {
+        let slot = self
+            .label_positions
+            .get_mut(label.0)
+            .unwrap_or_else(|| panic!("label {} not created by this builder", label.0));
         assert!(
-            self.label_positions[label.0].is_none(),
+            slot.is_none(),
             "label {id} placed more than once",
             id = label.0,
         );
-        self.label_positions[label.0] = Some(self.buf.len());
+        *slot = Some(self.buf.len());
         self
     }
 
@@ -380,7 +384,7 @@ impl InstructionBuilder {
     pub fn push_const(&mut self, imm: i64) -> &mut Self {
         match self.pool.intern(imm) {
             Ok(idx) => {
-                self.emit(Instruction::PushC { idx });
+                let _ = self.emit(Instruction::PushC { idx });
             }
             Err(PoolOverflow) => {
                 // Record overflow; emit a placeholder so the buffer length
@@ -388,7 +392,7 @@ impl InstructionBuilder {
                 if !self.pool_overflow {
                     self.pool_overflow = true;
                 }
-                self.emit(Instruction::PushC { idx: 0 });
+                let _ = self.emit(Instruction::PushC { idx: 0 });
             }
         }
         self
@@ -447,7 +451,11 @@ impl InstructionBuilder {
             return Err(Error::PoolOverflow);
         }
         for fixup in &self.fixups {
-            let label_pos = self.label_positions[fixup.label.0]
+            let label_pos = self
+                .label_positions
+                .get(fixup.label.0)
+                .copied()
+                .flatten()
                 .ok_or(Error::UnplacedLabel { id: fixup.label.0 })?;
 
             let delta = label_pos as i64 - fixup.site as i64;
@@ -463,7 +471,11 @@ impl InstructionBuilder {
                 _ => unreachable!("fixups are emitted only for jumps"),
             };
             let encoded = codec::encode(&instr);
-            self.buf[fixup.site..fixup.site + encoded.len()].copy_from_slice(&encoded);
+            let end = fixup.site + encoded.len();
+            self.buf
+                .get_mut(fixup.site..end)
+                .unwrap_or_else(|| panic!("fixup site {:#06X} out of buffer bounds", fixup.site))
+                .copy_from_slice(&encoded);
         }
         Ok(Program::new(self.pool, self.buf))
     }
@@ -474,7 +486,7 @@ impl InstructionBuilder {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(unused_results)]
+#[allow(unused_results, clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::stream::InstructionStream;

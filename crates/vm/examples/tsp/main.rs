@@ -78,8 +78,8 @@ fn main() -> Result<()> {
         .wrap_err("encoder assembly failed")?;
 
     let mut vm = Vm::new();
-    vm.set_calldata(vec![RegVal::Int(n as i64), RegVal::VecInt(distances)]);
-    vm.set_output_slots(1);
+    let _ = vm.set_calldata(vec![RegVal::Int(n as i64), RegVal::VecInt(distances)]);
+    let _ = vm.set_output_slots(1);
     vm.run(&encoder_bc)
         .into_diagnostic()
         .wrap_err("encoder run failed")?;
@@ -119,8 +119,8 @@ fn main() -> Result<()> {
         .wrap_err("verifier assembly failed")?;
 
     let mut vm = Vm::new();
-    vm.set_calldata(vec![qubo, sample_val.clone(), RegVal::Int(n as i64)]);
-    vm.set_output_slots(2);
+    let _ = vm.set_calldata(vec![qubo, sample_val.clone(), RegVal::Int(n as i64)]);
+    let _ = vm.set_output_slots(2);
     vm.run(&verifier_bc)
         .into_diagnostic()
         .wrap_err("verifier run failed")?;
@@ -143,8 +143,8 @@ fn main() -> Result<()> {
         .wrap_err("decoder assembly failed")?;
 
     let mut vm = Vm::new();
-    vm.set_calldata(vec![sample_val, RegVal::Int(n as i64)]);
-    vm.set_output_slots(1);
+    let _ = vm.set_calldata(vec![sample_val, RegVal::Int(n as i64)]);
+    let _ = vm.set_output_slots(1);
     vm.run(&decoder_bc)
         .into_diagnostic()
         .wrap_err("decoder run failed")?;

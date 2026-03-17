@@ -200,7 +200,9 @@ impl Vm {
 
     /// Return the value of register `r`.
     pub fn register(&self, r: u8) -> &RegVal {
-        &self.regs[r as usize]
+        self.regs
+            .get(usize::from(r))
+            .unwrap_or_else(|| unreachable!("register slot {} always valid in a 256-slot file", r))
     }
 
     /// Write `val` into register `r`.
@@ -225,7 +227,9 @@ impl Vm {
     /// assert_eq!(vm.stack(), &[42]);
     /// ```
     pub fn set_register(&mut self, r: u8, val: RegVal) -> &mut Self {
-        self.regs[r as usize] = val;
+        *self.regs.get_mut(usize::from(r)).unwrap_or_else(|| {
+            unreachable!("register slot {} always valid in a 256-slot file", r)
+        }) = val;
         self
     }
 
@@ -325,11 +329,15 @@ impl Vm {
     }
 
     fn reg(&self, r: Register) -> &RegVal {
-        &self.regs[r.slot() as usize]
+        self.regs.get(usize::from(r.slot())).unwrap_or_else(|| {
+            unreachable!("register slot {} always valid in a 256-slot file", r.slot())
+        })
     }
 
     fn reg_mut(&mut self, r: Register) -> &mut RegVal {
-        &mut self.regs[r.slot() as usize]
+        self.regs.get_mut(usize::from(r.slot())).unwrap_or_else(|| {
+            unreachable!("register slot {} always valid in a 256-slot file", r.slot())
+        })
     }
 
     fn jump_target(pos: usize, offset: i16) -> Result<usize, Error> {
@@ -377,7 +385,11 @@ impl Vm {
                     (looping, frame.body_start)
                 }
                 LoopKind::Iter { reg, index } => {
-                    let len = match &self.regs[*reg as usize] {
+                    let len = match self
+                        .regs
+                        .get(usize::from(*reg))
+                        .unwrap_or_else(|| unreachable!("register slot {} always valid", reg))
+                    {
                         RegVal::VecInt(v) => v.len(),
                         RegVal::VecXqmx(v) => v.len(),
                         other => {
@@ -398,7 +410,7 @@ impl Vm {
         if should_loop {
             Ok(StepResult::Jump(body_start))
         } else {
-            self.loop_stack.pop();
+            let _ = self.loop_stack.pop();
             Ok(StepResult::Continue)
         }
     }
@@ -407,12 +419,20 @@ impl Vm {
         let frame = self.loop_stack.last().ok_or(Error::NoActiveLoop { pos })?;
         match &frame.kind {
             LoopKind::Range { current, .. } => {
-                self.regs[reg.slot() as usize] = RegVal::Int(*current);
+                *self
+                    .regs
+                    .get_mut(usize::from(reg.slot()))
+                    .unwrap_or_else(|| unreachable!("register slot always valid")) =
+                    RegVal::Int(*current);
             }
             LoopKind::Iter { reg: src, index } => {
                 let src_reg = *src;
                 let idx = *index;
-                let val = match &self.regs[src_reg as usize] {
+                let val = match self
+                    .regs
+                    .get(usize::from(src_reg))
+                    .unwrap_or_else(|| unreachable!("register slot {} always valid", src_reg))
+                {
                     RegVal::VecInt(v) => {
                         RegVal::Int(*v.get(idx).ok_or(Error::IndexOutOfBounds {
                             pos,
@@ -437,7 +457,10 @@ impl Vm {
                         });
                     }
                 };
-                self.regs[reg.slot() as usize] = val;
+                *self
+                    .regs
+                    .get_mut(usize::from(reg.slot()))
+                    .unwrap_or_else(|| unreachable!("register slot always valid")) = val;
             }
         }
         Ok(StepResult::Continue)
@@ -495,7 +518,7 @@ impl Vm {
     }
 
     fn exec_pop(&mut self, pos: usize) -> Result<StepResult, Error> {
-        self.pop(pos)?;
+        let _ = self.pop(pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -526,7 +549,7 @@ impl Vm {
 
     fn exec_stow(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let v = self.pop(pos)?;
-        self.regs[reg.slot() as usize] = RegVal::Int(v);
+        *self.reg_mut(reg) = RegVal::Int(v);
         Ok(StepResult::Continue)
     }
 
@@ -539,8 +562,12 @@ impl Vm {
                 index: idx,
                 len: self.calldata.len(),
             })?;
-        let val = self.calldata[usize_idx].clone();
-        self.regs[reg.slot() as usize] = val;
+        let val = self
+            .calldata
+            .get(usize_idx)
+            .unwrap_or_else(|| unreachable!("usize_idx < calldata.len() checked above"))
+            .clone();
+        *self.reg_mut(reg) = val;
         Ok(StepResult::Continue)
     }
 
@@ -553,8 +580,11 @@ impl Vm {
                 index: idx,
                 len: self.outputs.len(),
             })?;
-        let val = self.regs[reg.slot() as usize].clone();
-        self.outputs[usize_idx] = val;
+        let val = self.reg(reg).clone();
+        *self
+            .outputs
+            .get_mut(usize_idx)
+            .unwrap_or_else(|| unreachable!("usize_idx < outputs.len() checked above")) = val;
         Ok(StepResult::Continue)
     }
 
@@ -727,42 +757,39 @@ impl Vm {
 
     fn exec_bqmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
-        self.regs[reg.slot() as usize] = RegVal::Model(XqmxModel::new(Domain::Binary, size));
+        *self.reg_mut(reg) = RegVal::Model(XqmxModel::new(Domain::Binary, size));
         Ok(StepResult::Continue)
     }
 
     fn exec_sqmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
-        self.regs[reg.slot() as usize] = RegVal::Model(XqmxModel::new(Domain::Spin, size));
+        *self.reg_mut(reg) = RegVal::Model(XqmxModel::new(Domain::Spin, size));
         Ok(StepResult::Continue)
     }
 
     fn exec_xqmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let k = self.pop(pos)?;
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
-        self.regs[reg.slot() as usize] = RegVal::Model(XqmxModel::new(Domain::Discrete(k), size));
+        *self.reg_mut(reg) = RegVal::Model(XqmxModel::new(Domain::Discrete(k), size));
         Ok(StepResult::Continue)
     }
 
     fn exec_bsmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
-        self.regs[reg.slot() as usize] =
-            RegVal::Sample(XqmxSample::new(Domain::Binary, vec![0; size]));
+        *self.reg_mut(reg) = RegVal::Sample(XqmxSample::new(Domain::Binary, vec![0; size]));
         Ok(StepResult::Continue)
     }
 
     fn exec_ssmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
-        self.regs[reg.slot() as usize] =
-            RegVal::Sample(XqmxSample::new(Domain::Spin, vec![-1; size]));
+        *self.reg_mut(reg) = RegVal::Sample(XqmxSample::new(Domain::Spin, vec![-1; size]));
         Ok(StepResult::Continue)
     }
 
     fn exec_xsmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let k = self.pop(pos)?;
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
-        self.regs[reg.slot() as usize] =
-            RegVal::Sample(XqmxSample::new(Domain::Discrete(k), vec![0; size]));
+        *self.reg_mut(reg) = RegVal::Sample(XqmxSample::new(Domain::Discrete(k), vec![0; size]));
         Ok(StepResult::Continue)
     }
 
@@ -770,17 +797,17 @@ impl Vm {
 
     fn exec_vec(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
         // Untyped vec -- becomes VecInt (integer vec is the default untyped container).
-        self.regs[reg.slot() as usize] = RegVal::VecInt(Vec::new());
+        *self.reg_mut(reg) = RegVal::VecInt(Vec::new());
         Ok(StepResult::Continue)
     }
 
     fn exec_vec_i(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
-        self.regs[reg.slot() as usize] = RegVal::VecInt(Vec::new());
+        *self.reg_mut(reg) = RegVal::VecInt(Vec::new());
         Ok(StepResult::Continue)
     }
 
     fn exec_vec_x(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
-        self.regs[reg.slot() as usize] = RegVal::VecXqmx(Vec::new());
+        *self.reg_mut(reg) = RegVal::VecXqmx(Vec::new());
         Ok(StepResult::Continue)
     }
 
@@ -817,7 +844,10 @@ impl Vm {
                 len: vec.len(),
             },
         )?;
-        self.push_val(vec[usize_idx]);
+        self.push_val(
+            *vec.get(usize_idx)
+                .unwrap_or_else(|| unreachable!("usize_idx < vec.len() checked above")),
+        );
         Ok(StepResult::Continue)
     }
 
@@ -839,7 +869,8 @@ impl Vm {
                 len: vec.len(),
             },
         )?;
-        vec[usize_idx] = val;
+        *vec.get_mut(usize_idx)
+            .unwrap_or_else(|| unreachable!("usize_idx < vec.len() checked above")) = val;
         Ok(StepResult::Continue)
     }
 
@@ -1141,7 +1172,7 @@ impl Vm {
         // independently.  A RegVal::Model sample stores variable assignments
         // as sparse linear terms (linear[i] = x_i); a RegVal::Sample stores
         // them directly as a dense Vec<i64>.
-        let sample_values: Vec<i64> = match &self.regs[sample.slot() as usize] {
+        let sample_values: Vec<i64> = match self.reg(sample) {
             RegVal::Sample(s) => s.values.clone(),
             RegVal::Model(s) => {
                 let size = s.size;
@@ -1155,7 +1186,7 @@ impl Vm {
                 });
             }
         };
-        let m = match &self.regs[model.slot() as usize] {
+        let m = match self.reg(model) {
             RegVal::Model(m) => m,
             other => {
                 return Err(Error::RegisterType {

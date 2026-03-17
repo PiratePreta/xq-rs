@@ -125,7 +125,11 @@ pub(crate) fn collect_labels(bytes: &[u8]) -> BTreeMap<usize, String> {
     let mut targets: Vec<usize> = Vec::new();
 
     while pos < bytes.len() {
-        match codec::decode(&bytes[pos..]) {
+        match codec::decode(
+            bytes
+                .get(pos..)
+                .unwrap_or_else(|| unreachable!("pos < bytes.len() loop invariant")),
+        ) {
             Ok((instr, consumed)) => {
                 let rel = match &instr {
                     Instruction::Jump { offset: r } | Instruction::JumpI { offset: r } => *r,
@@ -410,7 +414,11 @@ impl<'a> InstructionStream<'a> {
         let offset = self.pos;
         let label = self.labels.get(&offset).cloned();
 
-        match codec::decode(&self.bytes[offset..]) {
+        match codec::decode(
+            self.bytes
+                .get(offset..)
+                .unwrap_or_else(|| unreachable!("offset < bytes.len() checked above")),
+        ) {
             Ok((instr, consumed)) => {
                 self.pos += consumed;
                 Some(Ok((offset, label, instr)))
@@ -418,7 +426,14 @@ impl<'a> InstructionStream<'a> {
             Err(e) => {
                 // Always advance by one so the stream makes progress.
                 self.pos += 1;
-                Some(Err(map_decode_error(e, offset, self.bytes[offset])))
+                Some(Err(map_decode_error(
+                    e,
+                    offset,
+                    *self
+                        .bytes
+                        .get(offset)
+                        .unwrap_or_else(|| unreachable!("offset < bytes.len() checked above")),
+                )))
             }
         }
     }
@@ -458,6 +473,7 @@ fn map_decode_error(_err: oxicode::Error, offset: usize, byte: u8) -> Error {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(unused_results, clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::types::{Instruction, Register};

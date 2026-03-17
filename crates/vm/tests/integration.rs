@@ -17,6 +17,8 @@
 
 //! Integration tests for the XQVM bytecode interpreter.
 
+#![allow(unused_results, clippy::indexing_slicing)]
+
 use aglais_xqvm_bytecode::builder::InstructionBuilder;
 use aglais_xqvm_bytecode::types::Register;
 use aglais_xqvm_vm::error::Error;

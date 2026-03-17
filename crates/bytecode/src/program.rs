@@ -183,7 +183,11 @@ impl Program {
                 available: bytes.len(),
             });
         }
-        let count = u16::from_be_bytes([bytes[0], bytes[1]]) as usize;
+        let count_bytes: [u8; 2] = bytes
+            .get(..2)
+            .and_then(|s| s.try_into().ok())
+            .unwrap_or_else(|| unreachable!("bytes.len() >= 2 checked above"));
+        let count = u16::from_be_bytes(count_bytes) as usize;
         let pool_end = 2 + count * 8;
         if bytes.len() < pool_end {
             return Err(DecodeError::PoolTruncated {
@@ -194,16 +198,21 @@ impl Program {
         let mut pool = ConstantPool::new();
         for i in 0..count {
             let off = 2 + i * 8;
-            let arr: [u8; 8] = bytes[off..off + 8]
-                .try_into()
-                .unwrap_or_else(|_| unreachable!());
+            let arr: [u8; 8] = bytes
+                .get(off..off + 8)
+                .and_then(|s| s.try_into().ok())
+                .unwrap_or_else(|| unreachable!("off + 8 <= pool_end <= bytes.len()"));
             let val = i64::from_be_bytes(arr);
             // SAFETY: `count` came from a u16, so at most 65535 iterations --
             // exactly the capacity of ConstantPool. intern() cannot overflow.
-            pool.intern(val)
+            let _ = pool
+                .intern(val)
                 .unwrap_or_else(|_| unreachable!("pool overflow during decode"));
         }
-        let code = bytes[pool_end..].to_vec();
+        let code = bytes
+            .get(pool_end..)
+            .unwrap_or_else(|| unreachable!("pool_end <= bytes.len() checked above"))
+            .to_vec();
         Ok(Self::new(pool, code))
     }
 }
@@ -213,6 +222,7 @@ impl Program {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(unused_results)]
 mod tests {
     use super::*;
 

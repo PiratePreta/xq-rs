@@ -150,11 +150,11 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
                     Entry::Vacant(e) => {
                         label_names.push(label_name.clone());
                         let id = b.label();
-                        e.insert((id, Some(*def_offset)));
+                        let _ = e.insert((id, Some(*def_offset)));
                         id
                     }
                 };
-                b.place(id);
+                let _ = b.place(id);
             }
             AsmLine::Instruction(instr) => match instr.mnemonic.as_str() {
                 "JUMP" | "JUMPI" => {
@@ -174,7 +174,7 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
                     assemble_push(instr, &mut b, src)?;
                 }
                 _ => {
-                    b.emit(build_instr(instr, src)?);
+                    let _ = b.emit(build_instr(instr, src)?);
                 }
             },
         }
@@ -238,19 +238,23 @@ fn assemble_jump(
 
     check_operand_count(instr, 1, src)?;
 
-    match &instr.operands[0] {
+    match instr
+        .operands
+        .first()
+        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
+    {
         Operand::LabelRef(label) => {
             let id = match label_map.entry(label.clone()) {
                 Entry::Occupied(e) => e.get().0,
                 Entry::Vacant(e) => {
                     label_names.push(label.clone());
                     let id = b.label();
-                    e.insert((id, None));
+                    let _ = e.insert((id, None));
                     id
                 }
             };
-            first_ref.entry(label.clone()).or_insert(instr.offset);
-            match instr.mnemonic.as_str() {
+            let _ = first_ref.entry(label.clone()).or_insert(instr.offset);
+            let _ = match instr.mnemonic.as_str() {
                 "JUMPI" => b.jump_if(id),
                 _ => b.jump(id),
             };
@@ -264,7 +268,7 @@ fn assemble_jump(
                 src: make_src(src),
                 span: mnem_span,
             })?;
-            match instr.mnemonic.as_str() {
+            let _ = match instr.mnemonic.as_str() {
                 "JUMPI" => b.emit(Instruction::JumpI { offset }),
                 _ => b.emit(Instruction::Jump { offset }),
             };
@@ -296,9 +300,13 @@ fn assemble_pushc(
 ) -> Result<(), AssembleError> {
     check_operand_count(instr, 1, src)?;
 
-    match &instr.operands[0] {
+    match instr
+        .operands
+        .first()
+        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
+    {
         Operand::Integer(imm) => {
-            b.push_const(*imm);
+            let _ = b.push_const(*imm);
         }
         _ => {
             return Err(err_wrong_kind(instr, "imm", "integer literal", src));
@@ -322,9 +330,13 @@ fn assemble_push(
 ) -> Result<(), AssembleError> {
     check_operand_count(instr, 1, src)?;
 
-    match &instr.operands[0] {
+    match instr
+        .operands
+        .first()
+        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
+    {
         Operand::Integer(imm) => {
-            b.push(*imm);
+            let _ = b.push(*imm);
         }
         _ => {
             return Err(err_wrong_kind(instr, "imm", "integer literal", src));
@@ -550,6 +562,7 @@ opcodes!(impl_build_instr);
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::parser::parse;

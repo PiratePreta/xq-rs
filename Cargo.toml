@@ -26,9 +26,8 @@ thiserror = "2"
 
 [workspace.lints.clippy]
 dbg-macro             = "warn"
-index_refutable_slice = "warn"
+indexing-slicing      = "warn"
 manual-string-new     = "warn"
-octal-escapes         = "allow"
 redundant-clone       = "warn"
 uninlined-format-args = "warn"
 use-self              = "warn"
@@ -39,10 +38,12 @@ nonstandard-style     = "warn"
 redundant-lifetimes   = "warn"
 rust-2018-idioms      = "deny"
 unreachable-pub       = "warn"
+unsafe-code           = "deny"
 unused-extern-crates  = "warn"
 unused-imports        = "warn"
 unused-must-use       = "warn"
 unused-qualifications = "warn"
+unused-results        = "warn"
 
 [workspace.lints.rustdoc]
 all = "warn"
