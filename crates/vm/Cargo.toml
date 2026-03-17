@@ -1,0 +1,23 @@
+[package]
+name                 = "aglais-xqvm-vm"
+description          = "Interpreter for Aglais XQVM"
+version              = "0.1.0"
+license.workspace    = true
+repository.workspace = true
+edition              = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+aglais-xqvm-asm      = { workspace = true }
+aglais-xqvm-bytecode = { workspace = true }
+aglais-xqvm-disasm   = { workspace = true }
+clap.workspace       = true
+miette.workspace     = true
+pastey.workspace     = true
+thiserror.workspace  = true
+
+[[bin]]
+name = "xqvm"
+path = "src/bin/xqvm.rs"

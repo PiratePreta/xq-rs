@@ -1,0 +1,65 @@
+; Copyright (C) 2026 Postquant Labs Incorporated
+;
+; This program is free software: you can redistribute it and/or modify
+; it under the terms of the GNU Affero General Public License as published by
+; the Free Software Foundation, either version 3 of the License, or
+; (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU Affero General Public License for more details.
+;
+; You should have received a copy of the GNU Affero General Public License
+; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+;
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; TSP verifier: checks one-hot constraints and computes energy for a sample.
+;
+; Input slots:  [0] = model (Model), [1] = sample (Model NxN), [2] = N (Int)
+; Output slots: [0] = energy (Int), [1] = is_valid (Int, 1 = valid)
+
+PUSH 0
+INPUT r0
+PUSH 1
+INPUT r1
+PUSH 2
+INPUT r3
+
+PUSH 1
+STOW r4
+
+PUSH 0
+LOAD r3
+RANGE
+  LVAL r10
+  LOAD r10
+  ROWSUM r1
+  PUSH 1
+  EQ
+  LOAD r4
+  AND
+  STOW r4
+NEXT
+
+PUSH 0
+LOAD r3
+RANGE
+  LVAL r10
+  LOAD r10
+  COLSUM r1
+  PUSH 1
+  EQ
+  LOAD r4
+  AND
+  STOW r4
+NEXT
+
+ENERGY r0 r1
+STOW r5
+PUSH 0
+OUTPUT r5
+PUSH 1
+OUTPUT r4
+HALT

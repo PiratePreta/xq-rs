@@ -60,15 +60,16 @@ make test-integration # cargo nextest --test '*'
 make test-miri        # cargo +nightly miri test (requires make deps-miri)
 ```
 
-## Commit Messages
+## Commits
 
 - Subject line: 50 characters or fewer, written in the imperative mood ("Add feature", not "Added feature")
 - Separate subject from body with a blank line
 - Body: wrap at 72 characters; explain *what* and *why*, not *how*
 - Reference issues at the end of the body where applicable:
-  - `Fixes #number` — closes a bug report
-  - `Implements #number` — closes a feature request
-  - `Reverts #number` — references a revert
+  - `Fixes QUI-NNN` — closes a bug report
+  - `Implements QUI-NNN` — closes a feature request
+  - `Reverts QUI-NNN` — references a revert
+- Each commit is a logical cohesive change, which should pass tests and lints.
 
 Example:
 
@@ -79,7 +80,7 @@ Introduce the initial set of single-qubit gate opcodes to the bytecode
 definition. Each opcode maps to a standard gate identifier and carries
 a target qubit operand.
 
-Implements #12
+Implements QUI-12
 ```
 
 ## Semver Compliance

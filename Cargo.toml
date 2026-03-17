@@ -4,6 +4,7 @@ members = [
     "crates/bytecode",
     "crates/asm",
     "crates/disasm",
+    "crates/vm",
 ]
 
 [workspace.package]

@@ -51,6 +51,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aglais-xqvm-vm"
+version = "0.1.0"
+dependencies = [
+ "aglais-xqvm-asm",
+ "aglais-xqvm-bytecode",
+ "aglais-xqvm-disasm",
+ "clap",
+ "miette",
+ "pastey",
+ "thiserror",
+]
+
+[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
