@@ -22,10 +22,11 @@ use thiserror::Error;
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::types::{DecodeError, Opcode};
+/// use aglais_xqvm_bytecode::Opcode;
+/// use aglais_xqvm_bytecode::error::OpcodeDecodeError;
 ///
 /// let err = Opcode::try_from(0xFFu8).unwrap_err();
-/// assert_eq!(err, DecodeError(0xFF));
+/// assert_eq!(err, OpcodeDecodeError(0xFF));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("unknown opcode byte 0x{0:02X}")]
@@ -49,7 +50,7 @@ macro_rules! impl_opcode {
         /// # Examples
         ///
         /// ```rust
-        /// use aglais_xqvm_bytecode::types::Opcode;
+        /// use aglais_xqvm_bytecode::Opcode;
         ///
         /// assert_eq!(Opcode::Push as u8, 0x10);
         /// assert_eq!(Opcode::try_from(0x10u8).unwrap(), Opcode::Push);
@@ -80,7 +81,7 @@ macro_rules! impl_opcode {
             /// # Examples
             ///
             /// ```rust
-            /// use aglais_xqvm_bytecode::types::Opcode;
+            /// use aglais_xqvm_bytecode::Opcode;
             ///
             /// assert_eq!(Opcode::Energy.mnemonic(), "ENERGY");
             /// assert_eq!(Opcode::Nop.mnemonic(), "NOP");

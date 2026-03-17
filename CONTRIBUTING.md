@@ -105,7 +105,7 @@ make test-miri
 
 - All public items must be documented (`missing-docs` is enforced).
 - Follow standard Rust naming conventions (`nonstandard-style = "deny"`).
-- Run `cargo fmt` and `taplo fmt` before committing — formatting is checked in CI.
+- Run `make fmt` before committing — formatting is checked in CI.
 
 ## Licensing
 

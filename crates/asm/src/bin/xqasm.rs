@@ -49,8 +49,8 @@ fn main() -> miette::Result<()> {
         .wrap_err_with(|| format!("failed to read '{}'", args.input.display()))?;
 
     let name = args.input.display().to_string();
-    let lines = aglais_xqvm_asm::parser::parse(&source, &name)?;
-    let program = aglais_xqvm_asm::assembler::assemble(&lines, &source, &name)?;
+    let lines = aglais_xqvm_asm::parse(&source, &name)?;
+    let program = aglais_xqvm_asm::assemble(&lines, &source, &name)?;
     let encoded = program.encode();
 
     if args.stdout {
@@ -81,7 +81,7 @@ fn main() -> miette::Result<()> {
 
 /// Estimate the number of instructions by decoding the buffer.
 fn instruction_count(buf: &[u8]) -> usize {
-    aglais_xqvm_bytecode::stream::InstructionStream::new(buf)
+    aglais_xqvm_bytecode::InstructionStream::new(buf)
         .filter(|r| r.is_ok())
         .count()
 }

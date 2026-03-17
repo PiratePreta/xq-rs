@@ -38,8 +38,8 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::pool::ConstantPool;
-//! use aglais_xqvm_bytecode::program::Program;
+//! use aglais_xqvm_bytecode::ConstantPool;
+//! use aglais_xqvm_bytecode::Program;
 //!
 //! let mut pool = ConstantPool::new();
 //! let _idx = pool.intern(1_000_000_000i64).unwrap();
@@ -93,8 +93,8 @@ pub enum DecodeError {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::pool::ConstantPool;
-/// use aglais_xqvm_bytecode::program::Program;
+/// use aglais_xqvm_bytecode::ConstantPool;
+/// use aglais_xqvm_bytecode::Program;
 ///
 /// let program = Program::new(ConstantPool::new(), vec![0x0Fu8]); // HALT
 /// let bytes = program.encode();
@@ -133,8 +133,8 @@ impl Program {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::pool::ConstantPool;
-    /// use aglais_xqvm_bytecode::program::Program;
+    /// use aglais_xqvm_bytecode::ConstantPool;
+    /// use aglais_xqvm_bytecode::Program;
     ///
     /// // Empty pool: first two bytes are 0x00 0x00.
     /// let prog = Program::new(ConstantPool::new(), vec![0x0F]);
@@ -168,7 +168,7 @@ impl Program {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::program::{DecodeError, Program};
+    /// use aglais_xqvm_bytecode::{Program, error::ProgramDecodeError as DecodeError};
     ///
     /// // A slice with only 1 byte cannot hold the 2-byte pool count.
     /// assert!(matches!(

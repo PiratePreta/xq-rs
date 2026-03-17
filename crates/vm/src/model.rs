@@ -40,7 +40,7 @@ pub enum Domain {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_vm::model::{XqmxModel, Domain};
+/// use aglais_xqvm_vm::{XqmxModel, Domain};
 ///
 /// let mut m = XqmxModel::new(Domain::Binary, 4);
 /// m.set_linear(0, -1);
@@ -132,7 +132,7 @@ impl XqmxModel {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_vm::model::{XqmxModel, Domain};
+    /// use aglais_xqvm_vm::{XqmxModel, Domain};
     ///
     /// let mut m = XqmxModel::new(Domain::Binary, 4);
     /// m.set_linear(0, 1);
@@ -148,7 +148,7 @@ impl XqmxModel {
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_vm::model::{XqmxModel, Domain};
+    /// use aglais_xqvm_vm::{XqmxModel, Domain};
     ///
     /// let mut m = XqmxModel::new(Domain::Binary, 4);
     /// m.set_quad(0, 1, 2);
@@ -196,7 +196,7 @@ impl XqmxModel {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_vm::model::{XqmxSample, Domain};
+/// use aglais_xqvm_vm::{XqmxSample, Domain};
 ///
 /// let s = XqmxSample::new(Domain::Binary, vec![0, 1, 0, 1]);
 /// assert_eq!(s.values[1], 1);

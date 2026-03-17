@@ -63,7 +63,7 @@ pub(crate) fn make_span(offset: usize, len: usize) -> SourceSpan {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_asm::parser::parse;
+/// use aglais_xqvm_asm::parse;
 ///
 /// let err = parse("@@@", "<test>").unwrap_err();
 /// assert!(err.to_string().contains("error"));

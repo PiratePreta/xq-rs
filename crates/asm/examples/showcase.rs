@@ -25,8 +25,7 @@
 //! ```
 
 use aglais_xqvm_asm::assemble_source;
-use aglais_xqvm_bytecode::stream::InstructionStream;
-use aglais_xqvm_bytecode::types::Instruction;
+use aglais_xqvm_bytecode::{Instruction, InstructionStream};
 use miette::{IntoDiagnostic, WrapErr};
 
 fn main() -> miette::Result<()> {

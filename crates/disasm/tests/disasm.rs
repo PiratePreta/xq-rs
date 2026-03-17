@@ -22,9 +22,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use aglais_xqvm_bytecode::builder::InstructionBuilder;
-use aglais_xqvm_bytecode::codec;
-use aglais_xqvm_bytecode::types::{Instruction, Register};
+use aglais_xqvm_bytecode::{Instruction, InstructionBuilder, Register, codec};
 
 // ---------------------------------------------------------------------------
 // Helpers

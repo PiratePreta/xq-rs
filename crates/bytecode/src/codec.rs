@@ -29,7 +29,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::types::{Instruction, Register};
+//! use aglais_xqvm_bytecode::{Instruction, Register};
 //! use aglais_xqvm_bytecode::codec;
 //!
 //! let instr = Instruction::Push { imm: 42 };
@@ -74,7 +74,7 @@ const CODEC_CONFIG: oxicode::config::Configuration<
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::types::Instruction;
+/// use aglais_xqvm_bytecode::Instruction;
 /// use aglais_xqvm_bytecode::codec;
 ///
 /// assert_eq!(codec::encode(&Instruction::Halt {}), [0x0F]);
@@ -99,7 +99,7 @@ pub fn encode(instr: &Instruction) -> Vec<u8> {
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::types::{Instruction, Register};
+/// use aglais_xqvm_bytecode::{Instruction, Register};
 /// use aglais_xqvm_bytecode::codec;
 ///
 /// // LOAD r3 -> [0x14, 0x03]

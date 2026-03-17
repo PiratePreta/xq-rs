@@ -46,9 +46,7 @@
 //!    ordered tour; writes it to output slot 0.
 
 use aglais_xqvm_asm::assemble_source;
-use aglais_xqvm_vm::model::{Domain, XqmxModel};
-use aglais_xqvm_vm::value::RegVal;
-use aglais_xqvm_vm::vm::Vm;
+use aglais_xqvm_vm::{Domain, RegVal, Vm, XqmxModel};
 use miette::{IntoDiagnostic, Result, WrapErr, bail, ensure};
 
 const ENCODER_ASM: &str = include_str!("encoder.xqasm");
