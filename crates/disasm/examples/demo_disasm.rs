@@ -40,7 +40,8 @@ fn main() {
     let done = b.label();
 
     // Count down from 5 to 0.
-    b.push(5)
+    let _ = b
+        .push(5)
         .place(loop_top)
         .dupl()
         .jump_if(done) // exit when counter reaches 0
@@ -52,7 +53,8 @@ fn main() {
 
     // Allocate a 4-variable QUBO model into r0 and a binary sample into r1,
     // then compute the Hamiltonian energy of the sample against the model.
-    b.push(4)
+    let _ = b
+        .push(4)
         .bqmx(Register(0))
         .push(4)
         .bsmx(Register(1))

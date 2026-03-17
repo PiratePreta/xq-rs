@@ -130,7 +130,7 @@ impl ConstantPool {
         // SAFETY: len < u16::MAX (65535) so the cast is lossless.
         let idx = self.entries.len() as u16;
         self.entries.push(value);
-        self.index.insert(value, idx);
+        let _ = self.index.insert(value, idx);
         Ok(idx)
     }
 
@@ -173,6 +173,7 @@ impl ConstantPool {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(unused_results)]
 mod tests {
     use super::*;
 

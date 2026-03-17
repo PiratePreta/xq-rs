@@ -85,9 +85,9 @@ impl XqmxModel {
     /// Set the linear coefficient for variable `i`.
     pub fn set_linear(&mut self, i: usize, val: i64) {
         if val == 0 {
-            self.linear.remove(&i);
+            let _ = self.linear.remove(&i);
         } else {
-            self.linear.insert(i, val);
+            let _ = self.linear.insert(i, val);
         }
     }
 
@@ -96,7 +96,7 @@ impl XqmxModel {
         let v = self.linear.entry(i).or_insert(0);
         *v += delta;
         if *v == 0 {
-            self.linear.remove(&i);
+            let _ = self.linear.remove(&i);
         }
     }
 
@@ -111,9 +111,9 @@ impl XqmxModel {
     pub fn set_quad(&mut self, i: usize, j: usize, val: i64) {
         let key = if i <= j { (i, j) } else { (j, i) };
         if val == 0 {
-            self.quadratic.remove(&key);
+            let _ = self.quadratic.remove(&key);
         } else {
-            self.quadratic.insert(key, val);
+            let _ = self.quadratic.insert(key, val);
         }
     }
 
@@ -123,7 +123,7 @@ impl XqmxModel {
         let v = self.quadratic.entry(key).or_insert(0);
         *v += delta;
         if *v == 0 {
-            self.quadratic.remove(&key);
+            let _ = self.quadratic.remove(&key);
         }
     }
 
@@ -173,10 +173,19 @@ impl XqmxModel {
         }
         let mut h: i64 = 0;
         for (&i, &coeff) in &self.linear {
-            h = h.wrapping_add(coeff.wrapping_mul(sample[i]));
+            let xi = *sample.get(i).unwrap_or_else(|| {
+                unreachable!("linear index {} < size {} == sample.len()", i, self.size)
+            });
+            h = h.wrapping_add(coeff.wrapping_mul(xi));
         }
         for (&(i, j), &coeff) in &self.quadratic {
-            h = h.wrapping_add(coeff.wrapping_mul(sample[i]).wrapping_mul(sample[j]));
+            let xi = *sample.get(i).unwrap_or_else(|| {
+                unreachable!("quadratic index {} < size {} == sample.len()", i, self.size)
+            });
+            let xj = *sample.get(j).unwrap_or_else(|| {
+                unreachable!("quadratic index {} < size {} == sample.len()", j, self.size)
+            });
+            h = h.wrapping_add(coeff.wrapping_mul(xi).wrapping_mul(xj));
         }
         Ok(h)
     }

@@ -87,9 +87,9 @@ fn main() -> Result<()> {
     let calldata: Vec<RegVal> = args.calldata.into_iter().map(RegVal::Int).collect();
 
     let mut vm = Vm::new();
-    vm.set_calldata(calldata).set_output_slots(args.outputs);
+    let _ = vm.set_calldata(calldata).set_output_slots(args.outputs);
     if args.step_limit > 0 {
-        vm.set_step_limit(args.step_limit);
+        let _ = vm.set_step_limit(args.step_limit);
     }
 
     vm.run(&program)

@@ -346,7 +346,10 @@ impl<'a> Disassembly<'a> {
                     let (offset, byte) = match e {
                         stream::Error::UnknownOpcode { offset, byte } => (*offset, *byte),
                         stream::Error::TruncatedInstruction { offset } => {
-                            (*offset, self.stream.bytes()[*offset])
+                            let byte = *self.stream.bytes().get(*offset).unwrap_or_else(|| {
+                                unreachable!("TruncatedInstruction offset within buffer")
+                            });
+                            (*offset, byte)
                         }
                         stream::Error::SeekOutOfBounds { .. } => {
                             unreachable!("stream never seeks internally")
