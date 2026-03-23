@@ -482,7 +482,11 @@ mod tests {
         let (_, label0, _) = stream.next_instruction().unwrap().unwrap();
         let (_, label1, _) = stream.next_instruction().unwrap().unwrap();
 
-        assert_eq!(label0.as_deref(), Some("L0"), "PushC1 at target should be L0");
+        assert_eq!(
+            label0.as_deref(),
+            Some("L0"),
+            "PushC1 at target should be L0"
+        );
         assert_eq!(label1, None, "JUMPI itself has no label");
     }
 

@@ -298,7 +298,9 @@ mod tests {
     #[test]
     fn pushc3_is_four_bytes() {
         assert_eq!(
-            encode(&Instruction::PushC3 { val: [0x01, 0x02, 0x03] }),
+            encode(&Instruction::PushC3 {
+                val: [0x01, 0x02, 0x03]
+            }),
             [0x1A, 0x01, 0x02, 0x03]
         );
     }

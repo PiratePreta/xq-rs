@@ -437,11 +437,21 @@ fn minimal_pushc(val: i64) -> Instruction {
         if (val << shift) >> shift == val {
             return match n {
                 1 => Instruction::PushC1 { val: [be[7]] },
-                2 => Instruction::PushC2 { val: [be[6], be[7]] },
-                3 => Instruction::PushC3 { val: [be[5], be[6], be[7]] },
-                4 => Instruction::PushC4 { val: [be[4], be[5], be[6], be[7]] },
-                5 => Instruction::PushC5 { val: [be[3], be[4], be[5], be[6], be[7]] },
-                6 => Instruction::PushC6 { val: [be[2], be[3], be[4], be[5], be[6], be[7]] },
+                2 => Instruction::PushC2 {
+                    val: [be[6], be[7]],
+                },
+                3 => Instruction::PushC3 {
+                    val: [be[5], be[6], be[7]],
+                },
+                4 => Instruction::PushC4 {
+                    val: [be[4], be[5], be[6], be[7]],
+                },
+                5 => Instruction::PushC5 {
+                    val: [be[3], be[4], be[5], be[6], be[7]],
+                },
+                6 => Instruction::PushC6 {
+                    val: [be[2], be[3], be[4], be[5], be[6], be[7]],
+                },
                 7 => Instruction::PushC7 {
                     val: [be[1], be[2], be[3], be[4], be[5], be[6], be[7]],
                 },
@@ -519,7 +529,12 @@ mod tests {
         let mut b = InstructionBuilder::new();
         b.push(i64::MAX).halt();
         let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs[0], Instruction::PushC8 { val: i64::MAX.to_be_bytes() });
+        assert_eq!(
+            instrs[0],
+            Instruction::PushC8 {
+                val: i64::MAX.to_be_bytes()
+            }
+        );
     }
 
     #[test]
@@ -527,7 +542,12 @@ mod tests {
         let mut b = InstructionBuilder::new();
         b.push(i64::MIN).halt();
         let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs[0], Instruction::PushC8 { val: i64::MIN.to_be_bytes() });
+        assert_eq!(
+            instrs[0],
+            Instruction::PushC8 {
+                val: i64::MIN.to_be_bytes()
+            }
+        );
     }
 
     #[test]

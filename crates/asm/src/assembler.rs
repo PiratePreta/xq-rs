@@ -22,10 +22,9 @@
 //! label-based jumps register fixups that [`InstructionBuilder::build`]
 //! resolves at the end, supporting both forward and backward references.
 //!
-//! `PUSHC` is handled specially: the assembly operand is the constant VALUE
-//! (not a pool index). The assembler calls
-//! [`InstructionBuilder::push_const`] which interns the value and emits the
-//! `PUSHC { idx }` instruction automatically.
+//! `PUSH` is handled specially: the assembly operand is an integer constant.
+//! The assembler calls [`InstructionBuilder::push`] which selects the minimal
+//! inline-constant variant (`PUSHC_0`..`PUSHC_8`) automatically.
 //!
 //! `source` and `name` are used solely for diagnostic output: they are
 //! embedded in any [`AssembleError`] so that miette can render a source

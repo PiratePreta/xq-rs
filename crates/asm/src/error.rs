@@ -227,7 +227,6 @@ pub enum AssembleError {
         #[label("offset too large")]
         span: SourceSpan,
     },
-
 }
 
 // ---------------------------------------------------------------------------

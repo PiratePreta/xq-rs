@@ -433,10 +433,11 @@ mod tests {
         let buf = assemble(&[
             Instruction::JumpI { offset: -3i16 }, // offset 0; target = 0+(-3) = -3 -> OOB
             Instruction::Jump { offset: 4i16 },   // offset 3; target = 3+4 = 7
-            Instruction::PushC8 {               // offset 6 (9 bytes: 6-14)
+            Instruction::PushC8 {
+                // offset 6 (9 bytes: 6-14)
                 val: [0, 0, 0, 0, 0, 0, 0, 0],
             },
-            Instruction::Halt {},               // offset 15
+            Instruction::Halt {}, // offset 15
         ]);
         // target of JUMP is offset 7 = inside PUSHC_8 (starts at 6, 9 bytes), target of
         // JUMPI is -3 (out of bounds). L0 appears at offset 0 (JUMPI's own address).
@@ -482,7 +483,10 @@ mod tests {
     #[test]
     fn pushc2_displays_value() {
         // PUSHC_2 with 0x0007 encodes the value 7.
-        let buf = assemble(&[Instruction::PushC2 { val: [0x00, 0x07] }, Instruction::Halt {}]);
+        let buf = assemble(&[
+            Instruction::PushC2 { val: [0x00, 0x07] },
+            Instruction::Halt {},
+        ]);
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("PUSHC_2"), "missing PUSHC_2 in:\n{text}");
         assert!(text.contains('7'), "missing value 7 in:\n{text}");
@@ -492,7 +496,9 @@ mod tests {
     fn pushc3_displays_large_value() {
         // 100000 = 0x0001_86A0 fits in PUSHC_3.
         let buf = assemble(&[
-            Instruction::PushC3 { val: [0x01, 0x86, 0xA0] },
+            Instruction::PushC3 {
+                val: [0x01, 0x86, 0xA0],
+            },
             Instruction::Halt {},
         ]);
         let text = Disassembly::new(&buf).to_string();

@@ -111,7 +111,6 @@ pub enum Error {
     /// The RESIZE instruction received non-positive dimensions.
     #[error("invalid grid dimensions {rows}x{cols} at byte {pos:#06x}")]
     InvalidGridDimensions { pos: usize, rows: i64, cols: i64 },
-
 }
 
 impl Error {

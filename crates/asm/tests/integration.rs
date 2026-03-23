@@ -282,7 +282,12 @@ fn push_large_value_encodes_inline() {
     // 100000 = 0x0001_86A0 encodes inline as PUSHC_3 -- no constant pool needed.
     let program = assemble_source("PUSH 100000\nHALT").expect("assemble failed");
     let instrs = decode_all(program.code());
-    assert_eq!(instrs[0], Instruction::PushC3 { val: [0x01, 0x86, 0xA0] });
+    assert_eq!(
+        instrs[0],
+        Instruction::PushC3 {
+            val: [0x01, 0x86, 0xA0]
+        }
+    );
     assert_eq!(instrs[1], Instruction::Halt {});
 }
 

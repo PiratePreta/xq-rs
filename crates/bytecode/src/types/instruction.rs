@@ -173,5 +173,4 @@ mod tests {
             panic!("pattern match failed");
         }
     }
-
 }
