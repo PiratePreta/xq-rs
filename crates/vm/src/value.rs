@@ -17,6 +17,9 @@
 
 //! Register value types for the XQVM interpreter.
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use crate::model::{XqmxModel, XqmxSample};
 
 /// A value that can be stored in an XQVM register.

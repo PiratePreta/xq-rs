@@ -20,7 +20,10 @@
 //! XQMX models represent quadratic optimization problems (QUBO/Ising).
 //! Samples represent candidate solutions.
 
-use std::collections::HashMap;
+#[cfg(not(feature = "std"))]
+use alloc::{collections::BTreeMap, vec::Vec};
+#[cfg(feature = "std")]
+use std::collections::BTreeMap;
 
 /// Variable domain for an XQMX model or sample.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,9 +58,9 @@ pub struct XqmxModel {
     /// Number of variables.
     pub size: usize,
     /// Sparse linear (bias) terms.
-    pub(crate) linear: HashMap<usize, i64>,
+    pub(crate) linear: BTreeMap<usize, i64>,
     /// Sparse quadratic (coupling) terms, keyed by (i, j) with i <= j.
-    pub(crate) quadratic: HashMap<(usize, usize), i64>,
+    pub(crate) quadratic: BTreeMap<(usize, usize), i64>,
     /// Grid rows (set by RESIZE).
     pub rows: usize,
     /// Grid columns (set by RESIZE).
@@ -70,8 +73,8 @@ impl XqmxModel {
         Self {
             domain,
             size,
-            linear: HashMap::new(),
-            quadratic: HashMap::new(),
+            linear: BTreeMap::new(),
+            quadratic: BTreeMap::new(),
             rows: 0,
             cols: 0,
         }

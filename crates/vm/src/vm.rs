@@ -38,6 +38,9 @@
 //! assert_eq!(vm.stack(), &[7]);
 //! ```
 
+#[cfg(not(feature = "std"))]
+use alloc::{vec, vec::Vec};
+
 use aglais_xqvm_bytecode::opcodes;
 use aglais_xqvm_bytecode::{Instruction, InstructionStream, Program, Register};
 

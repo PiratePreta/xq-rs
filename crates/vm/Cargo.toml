@@ -9,15 +9,32 @@ edition              = "2024"
 [lints]
 workspace = true
 
+[features]
+default = [ "std" ]
+std = [
+    "aglais-xqvm-asm",
+    "aglais-xqvm-bytecode/std",
+    "aglais-xqvm-disasm",
+    "clap",
+    "miette",
+    "thiserror/std",
+]
+
 [dependencies]
-aglais-xqvm-asm      = { workspace = true }
-aglais-xqvm-bytecode = { workspace = true }
-aglais-xqvm-disasm   = { workspace = true }
-clap.workspace       = true
-miette.workspace     = true
+# Always available -- no_std-compatible.
+# Direct path reference (not workspace) so we can set default-features = false
+# independently from the workspace entry that other std-requiring crates use.
+aglais-xqvm-bytecode = { path = "../bytecode", default-features = false }
 pastey.workspace     = true
 thiserror.workspace  = true
 
+# std-only optional dependencies (activated by the `std` feature above)
+aglais-xqvm-asm    = { workspace = true, optional = true }
+aglais-xqvm-disasm = { workspace = true, optional = true }
+clap               = { workspace = true, optional = true }
+miette             = { workspace = true, optional = true }
+
 [[bin]]
-name = "xqvm"
-path = "src/bin/xqvm.rs"
+name              = "xqvm"
+path              = "src/bin/xqvm.rs"
+required-features = [ "std" ]

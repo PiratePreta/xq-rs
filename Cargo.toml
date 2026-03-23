@@ -16,13 +16,14 @@ license    = "AGPL-3.0-or-later"
 aglais-xqvm-asm      = { path = "./crates/asm" }
 aglais-xqvm-bytecode = { path = "./crates/bytecode" }
 aglais-xqvm-disasm   = { path = "./crates/disasm" }
+aglais-xqvm-vm       = { path = "./crates/vm" }
 
 ### Common dependencies ###
 clap      = { version = "4", features = [ "derive" ] }
 miette    = { version = "7", features = [ "fancy", "derive" ] }
 pastey    = "0.2.1"
 serde     = { version = "1", default-features = false }
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 
 [workspace.lints.clippy]
 dbg-macro             = "warn"

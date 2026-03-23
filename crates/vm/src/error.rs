@@ -18,9 +18,9 @@
 //! Runtime error types for the XQVM interpreter.
 //!
 //! [`enum@Error`] describes every fault that can occur during bytecode execution.
-//! For rich terminal diagnostics, convert it to a [`RuntimeDiagnostic`] via
-//! [`Error::into_diagnostic`], which disassembles the bytecode and points a
-//! miette caret at the failing instruction.
+//! For rich terminal diagnostics (requires the `std` feature), convert it to a
+//! [`RuntimeDiagnostic`] via [`Error::into_diagnostic`], which disassembles the
+//! bytecode and points a miette caret at the failing instruction.
 //!
 //! # Examples
 //!
@@ -35,14 +35,18 @@
 //!     .unwrap();
 //!
 //! let err = Error::DivisionByZero { pos: 0 };
-//! let diag = err.into_diagnostic(&program, "prog.xqbc");
+//! # #[cfg(feature = "std")]
+//! let _diag = err.into_diagnostic(&program, "prog.xqbc");
 //! // diag implements miette::Diagnostic and can be returned from main()
 //! ```
 
+#[cfg(feature = "std")]
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 
+#[cfg(feature = "std")]
 use aglais_xqvm_bytecode::Program;
+#[cfg(feature = "std")]
 use aglais_xqvm_disasm::Disassembly;
 
 /// Errors that can occur during XQVM bytecode execution.
@@ -113,6 +117,8 @@ pub enum Error {
     InvalidGridDimensions { pos: usize, rows: i64, cols: i64 },
 }
 
+// `into_diagnostic` and `byte_pos` require the disassembler (std-only).
+#[cfg(feature = "std")]
 impl Error {
     /// Convert this error into a [`RuntimeDiagnostic`] with a disassembly
     /// listing as source context.
@@ -188,7 +194,7 @@ impl From<aglais_xqvm_bytecode::error::StreamError> for Error {
 }
 
 // ---------------------------------------------------------------------------
-// RuntimeDiagnostic
+// RuntimeDiagnostic (std-only -- requires miette and the disassembler)
 // ---------------------------------------------------------------------------
 
 /// A runtime [`enum@Error`] enriched with a disassembly listing as source context.
@@ -198,6 +204,8 @@ impl From<aglais_xqvm_bytecode::error::StreamError> for Error {
 ///
 /// `RuntimeDiagnostic` implements [`miette::Diagnostic`] so it can be
 /// returned directly from a `fn main() -> miette::Result<()>`.
+///
+/// This type is only available when the `std` feature is enabled.
 ///
 /// # Examples
 ///
@@ -216,6 +224,7 @@ impl From<aglais_xqvm_bytecode::error::StreamError> for Error {
 ///     Ok(())
 /// }
 /// ```
+#[cfg(feature = "std")]
 #[derive(Debug, Error, Diagnostic)]
 #[error("{inner}")]
 #[diagnostic(code(xqvm::runtime_error))]
@@ -228,7 +237,7 @@ pub struct RuntimeDiagnostic {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers (std-only)
 // ---------------------------------------------------------------------------
 
 /// Find the byte range of the disassembly line that starts at `byte_pos`.
@@ -236,6 +245,7 @@ pub struct RuntimeDiagnostic {
 /// Each disassembly line has the form `  0x{offset:04X}:  ...`, so we search
 /// for `"0x{byte_pos:04X}:"` and extend the span to cover the whole line.
 /// Returns `None` when no matching line is found.
+#[cfg(feature = "std")]
 fn find_line_span(text: &str, byte_pos: usize) -> Option<SourceSpan> {
     let needle = format!("0x{byte_pos:04X}:");
     let match_start = text.find(&needle)?;
