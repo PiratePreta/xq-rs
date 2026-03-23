@@ -9,16 +9,18 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > unstable and will change without notice until a stable release is tagged.
 > Production use is not recommended at this time.
 
-Aglais XQVM is a hardware-agnostic virtual machine for quantum computing. A
-problem is expressed once in XQVM bytecode and executed on any supported
-quantum backend -- quantum annealers, gate-based chips, or other architectures.
+Aglais is a hardware-agnostic virtual machine for quantum computing. XQVM is
+the module within Aglais responsible for expressing binary optimization models
+and objective functions. The current scope targets X-quadratic models for
+quantum annealers (QUBO/Ising formulations).
+
 Think of it as LLVM for quantum computing.
 
 ## Goals
 
 - **Hardware-agnostic** -- write a problem once, run it on any supported backend.
-- **Unified bytecode** -- a common intermediate representation decoupled from
-  any specific hardware model.
+- **Unified bytecode** -- a common intermediate representation for binary
+  optimization problems targeting quantum annealers.
 - **Embeddable** -- the core VM and bytecode crates support `no_std + alloc`,
   enabling deployment in WASM runtimes and bare-metal environments.
 
@@ -83,9 +85,10 @@ xqasm add.xqasm -o add.xqbc && xqvm add.xqbc
 
 ## Architecture
 
-XQVM is a stack-based interpreter with a 256-slot register file. Registers hold
-typed values -- integers, integer vectors, QUBO/Ising models (`XqmxModel`), and
-candidate solutions (`XqmxSample`). A dedicated loop stack drives `RANGE`/`ITER`
+Aglais is a stack-based interpreter with a 256-slot register file. XQVM is the
+module that handles X-quadratic model construction: registers hold typed values
+-- integers, integer vectors, QUBO/Ising models (`XqmxModel`), and candidate
+solutions (`XqmxSample`). A dedicated loop stack drives `RANGE`/`ITER`
 iteration.
 
 The opcode table (`opcodes!` x-macro in `crates/bytecode/src/types/table.rs`) is
