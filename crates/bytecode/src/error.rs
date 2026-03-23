@@ -24,7 +24,6 @@
 //! |---|---|
 //! | [`BuilderError`] | [`InstructionBuilder::build`](crate::InstructionBuilder::build) |
 //! | [`StreamError`] | [`InstructionStream`](crate::InstructionStream) iteration / seek |
-//! | [`ProgramDecodeError`] | [`Program::decode`](crate::Program::decode) |
 
 /// Error returned by [`InstructionBuilder::build`](crate::InstructionBuilder::build).
 ///
@@ -36,15 +35,7 @@ pub use crate::builder::Error as BuilderError;
 /// See [`StreamError`] for variant documentation.
 pub use crate::stream::Error as StreamError;
 
-/// Error returned by [`Program::decode`](crate::Program::decode).
-///
-/// See [`ProgramDecodeError`] for variant documentation.
-pub use crate::program::DecodeError as ProgramDecodeError;
-
 /// Error returned when an unknown byte is decoded as an [`Opcode`](crate::Opcode).
 ///
 /// The inner `u8` is the unrecognised byte value.
 pub use crate::types::DecodeError as OpcodeDecodeError;
-
-/// Error returned when [`ConstantPool::intern`](crate::ConstantPool::intern) is called on a full pool.
-pub use crate::pool::PoolOverflow;

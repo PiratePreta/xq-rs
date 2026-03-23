@@ -43,9 +43,9 @@ macro_rules! impl_instruction {
         /// use aglais_xqvm_bytecode::types::Register;
         /// use aglais_xqvm_bytecode::types::Opcode;
         ///
-        /// let instr = Instruction::Push { imm: -7 };
-        /// assert_eq!(instr.opcode(), Opcode::Push);
-        /// assert_eq!(instr.mnemonic(), "PUSH");
+        /// let instr = Instruction::PushC0 {};
+        /// assert_eq!(instr.opcode(), Opcode::PushC0);
+        /// assert_eq!(instr.mnemonic(), "PUSHC_0");
         ///
         /// let instr = Instruction::Energy {
         ///     model:  Register(0),
@@ -155,8 +155,8 @@ mod tests {
     }
 
     #[test]
-    fn instruction_count_is_69() {
-        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 69);
+    fn instruction_count_is_76() {
+        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 76);
     }
 
     #[test]
@@ -174,14 +174,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn push_imm_field() {
-        let p = Instruction::Push { imm: i16::MIN };
-        assert_eq!(p.opcode(), Opcode::Push);
-        if let Instruction::Push { imm } = p {
-            assert_eq!(imm, i16::MIN);
-        } else {
-            panic!("pattern match failed");
-        }
-    }
 }

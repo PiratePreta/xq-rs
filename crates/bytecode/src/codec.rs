@@ -23,7 +23,7 @@
 //! * **Binary format** (oxicode BE fixint): opcode as one raw byte, then
 //!   operand fields in declaration order, each at its natural width in
 //!   big-endian byte order -- `i16` as 2 bytes, `i64` as 8 bytes, `u8`/[`Register`]
-//!   as 1 byte.  No varints, no length prefixes.
+//!   as 1 byte, `[u8; N]` as N consecutive bytes.  No varints, no length prefixes.
 //! * **Sequence-based formats** (JSON arrays, ...): `[opcode, val, ...]`.
 //!
 //! # Examples
@@ -32,13 +32,18 @@
 //! use aglais_xqvm_bytecode::{Instruction, Register};
 //! use aglais_xqvm_bytecode::codec;
 //!
-//! let instr = Instruction::Push { imm: 42 };
+//! let instr = Instruction::PushC0 {};
 //! let bytes = codec::encode(&instr);
-//! assert_eq!(bytes[0], 0x10); // PUSH opcode byte
+//! assert_eq!(bytes[0], 0x10); // PUSHC_0 opcode byte
+//! assert_eq!(bytes.len(), 1);
 //!
-//! let (decoded, consumed) = codec::decode(&bytes).unwrap();
-//! assert_eq!(decoded, instr);
-//! assert_eq!(consumed, bytes.len());
+//! let instr2 = Instruction::PushC1 { val: [42] };
+//! let bytes2 = codec::encode(&instr2);
+//! assert_eq!(bytes2, [0x18, 42]);
+//!
+//! let (decoded, consumed) = codec::decode(&bytes2).unwrap();
+//! assert_eq!(decoded, instr2);
+//! assert_eq!(consumed, bytes2.len());
 //! ```
 
 use std::fmt;
@@ -70,6 +75,7 @@ const CODEC_CONFIG: oxicode::config::Configuration<
 ///
 /// Integer operands are encoded big-endian at their natural width (`i16` = 2
 /// bytes, `i64` = 8 bytes).  Register operands are a single byte.
+/// `[u8; N]` operands are encoded as N consecutive bytes.
 ///
 /// # Examples
 ///
@@ -79,6 +85,8 @@ const CODEC_CONFIG: oxicode::config::Configuration<
 ///
 /// assert_eq!(codec::encode(&Instruction::Halt {}), [0x0F]);
 /// assert_eq!(codec::encode(&Instruction::Nop {}),  [0x00]);
+/// assert_eq!(codec::encode(&Instruction::PushC0 {}), [0x10]);
+/// assert_eq!(codec::encode(&Instruction::PushC1 { val: [42] }), [0x18, 42]);
 /// ```
 pub fn encode(instr: &Instruction) -> Vec<u8> {
     // SAFETY: oxicode serialization of a statically-known Rust type with a
@@ -246,7 +254,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn encode_decode_roundtrip_all_69() {
+    fn encode_decode_roundtrip_all_76() {
         for instr in opcodes!(all_instructions) {
             let bytes = encode(&instr);
             let (decoded, consumed) = decode(&bytes).expect("decode failed");
@@ -270,21 +278,38 @@ mod tests {
     }
 
     #[test]
-    fn push_zero_is_three_bytes() {
-        // opcode 0x10, i16(0) in BE = 2 zero bytes
-        assert_eq!(encode(&Instruction::Push { imm: 0 }), [0x10, 0x00, 0x00]);
+    fn pushc0_is_one_byte() {
+        assert_eq!(encode(&Instruction::PushC0 {}), [0x10]);
     }
 
     #[test]
-    fn push_positive_fixint_be() {
-        // i16(1) in BE = [0x00, 0x01]
-        assert_eq!(encode(&Instruction::Push { imm: 1 }), [0x10, 0x00, 0x01]);
+    fn pushc1_is_two_bytes() {
+        assert_eq!(encode(&Instruction::PushC1 { val: [42] }), [0x18, 42]);
     }
 
     #[test]
-    fn push_negative_fixint_be() {
-        // i16(-1) in BE = [0xFF, 0xFF]
-        assert_eq!(encode(&Instruction::Push { imm: -1 }), [0x10, 0xFF, 0xFF]);
+    fn pushc2_is_three_bytes() {
+        assert_eq!(
+            encode(&Instruction::PushC2 { val: [0x00, 0x80] }),
+            [0x19, 0x00, 0x80]
+        );
+    }
+
+    #[test]
+    fn pushc3_is_four_bytes() {
+        assert_eq!(
+            encode(&Instruction::PushC3 { val: [0x01, 0x02, 0x03] }),
+            [0x1A, 0x01, 0x02, 0x03]
+        );
+    }
+
+    #[test]
+    fn pushc8_is_nine_bytes() {
+        let v = 1_000_000_000_000i64.to_be_bytes();
+        let mut expected = [0u8; 9];
+        expected[0] = 0x1F;
+        expected[1..].copy_from_slice(&v);
+        assert_eq!(encode(&Instruction::PushC8 { val: v }), expected);
     }
 
     #[test]
@@ -312,15 +337,15 @@ mod tests {
 
     #[test]
     fn truncated_input_returns_error() {
-        // PUSH opcode without the required 2 operand bytes
-        assert!(decode(&[0x10u8]).is_err());
+        // PushC8 opcode (0x1F) without the required 8 operand bytes -- truncated.
+        assert!(decode(&[0x1Fu8]).is_err());
     }
 
     #[test]
     fn encode_sequence_then_decode_each() {
         let program = [
-            Instruction::Push { imm: 5 },
-            Instruction::Push { imm: 3 },
+            Instruction::PushC1 { val: [5] },
+            Instruction::PushC1 { val: [3] },
             Instruction::Add {},
             Instruction::Halt {},
         ];
@@ -353,11 +378,11 @@ mod tests {
     }
 
     #[test]
-    fn json_roundtrip_push() {
-        // Push: opcode 0x10=16, imm -> [16, -99]
-        let instr = Instruction::Push { imm: -99 };
+    fn json_roundtrip_pushc0() {
+        // PushC0: opcode 0x10=16, no operands -> [16]
+        let instr = Instruction::PushC0 {};
         let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[16,-99]");
+        assert_eq!(json, "[16]");
         assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
     }
 
@@ -392,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn json_roundtrip_all_68() {
+    fn json_roundtrip_all_76() {
         for instr in opcodes!(all_instructions) {
             let json = serde_json::to_string(&instr)
                 .unwrap_or_else(|e| panic!("serialize failed for {instr:?}: {e}"));
