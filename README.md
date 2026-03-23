@@ -30,7 +30,7 @@ Think of it as LLVM for quantum computing.
 |---|---|---|
 | `aglais-xqvm-bytecode` | -- | Opcode table, instruction types, builder, binary codec, stream reader |
 | `aglais-xqvm-asm` | `xqasm` | Text assembler: `.xqasm` source -> bytecode |
-| `aglais-xqvm-disasm` | `xqdasm` | Bytecode -> human-readable listing |
+| `aglais-xqvm-disasm` | `xqdism` | Bytecode -> human-readable listing |
 | `aglais-xqvm-vm` | `xqvm` | Bytecode interpreter: stack, register file, QUBO/Ising model execution |
 
 ## Getting Started
@@ -51,7 +51,7 @@ make deps
 cargo build --release
 ```
 
-The binaries are placed at `target/release/xqasm`, `target/release/xqdasm`,
+The binaries are placed at `target/release/xqasm`, `target/release/xqdism`,
 and `target/release/xqvm`.
 
 ### Run an example
@@ -61,7 +61,7 @@ and `target/release/xqvm`.
 xqasm program.xqasm -o program.xqbc
 
 # Disassemble to inspect the encoding
-xqdasm program.xqbc
+xqdism program.xqbc
 
 # Execute
 xqvm program.xqbc
@@ -71,8 +71,8 @@ xqvm program.xqbc
 
 ```asm
 ; push two integers and add them
-PUSHC_1 10
-PUSHC_1 32
+PUSH 10
+PUSH 32
 ADD
 HALT
 ```
