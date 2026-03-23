@@ -44,8 +44,8 @@
 //! use aglais_xqvm_bytecode::{codec, InstructionStream};
 //!
 //! let program = [
-//!     Instruction::Push { imm: 1 },
-//!     Instruction::Push { imm: 2 },
+//!     Instruction::PushC1 { val: [1] },
+//!     Instruction::PushC1 { val: [2] },
 //!     Instruction::Add  {},
 //!     Instruction::Halt {},
 //! ];
@@ -57,7 +57,7 @@
 //!     .unwrap();
 //!
 //! assert_eq!(decoded.len(), 4);
-//! assert_eq!(decoded[0].2, Instruction::Push { imm: 1 });
+//! assert_eq!(decoded[0].2, Instruction::PushC1 { val: [1] });
 //! assert_eq!(decoded[3].2, Instruction::Halt {});
 //! assert!(decoded.iter().all(|(_, label, _)| label.is_none()));
 //! ```
@@ -67,7 +67,6 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::codec;
-use crate::pool::ConstantPool;
 use crate::program::Program;
 use crate::types::{Instruction, Opcode};
 
@@ -177,26 +176,26 @@ pub(crate) fn collect_labels(bytes: &[u8]) -> BTreeMap<usize, String> {
 /// use aglais_xqvm_bytecode::Instruction;
 /// use aglais_xqvm_bytecode::{codec, InstructionStream};
 ///
-/// // Build a short loop: PUSH 3 / JUMPI -9 (back to PUSH at offset 0).
+/// // Build a short loop: PUSHC_1 3 / JUMPI -2 (back to PUSHC_1 at offset 0).
 /// let program = [
-///     Instruction::Push  { imm: 3  },        // offset 0 (9 bytes), target of JUMPI -> label L0
-///     Instruction::JumpI { offset: -9i16 },  // offset 9; target = 9 + (-9) = 0
+///     Instruction::PushC1 { val: [3] },       // offset 0 (2 bytes), target of JUMPI -> label L0
+///     Instruction::JumpI  { offset: -2i16 },  // offset 2; target = 2 + (-2) = 0
 /// ];
 /// let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
 ///
 /// let mut stream = InstructionStream::new(&buf);
 ///
-/// // PUSH at offset 0 is the jump target, so it carries label "L0".
+/// // PUSHC_1 at offset 0 is the jump target, so it carries label "L0".
 /// let (off0, label0, instr0) = stream.next_instruction().unwrap().unwrap();
 /// assert_eq!(off0, 0);
 /// assert_eq!(label0.as_deref(), Some("L0"));
-/// assert_eq!(instr0, Instruction::Push { imm: 3 });
+/// assert_eq!(instr0, Instruction::PushC1 { val: [3] });
 ///
 /// // JUMPI has no label at its own address.
 /// let (off1, label1, instr1) = stream.next_instruction().unwrap().unwrap();
-/// assert_eq!(off1, 9);
+/// assert_eq!(off1, 2);
 /// assert_eq!(label1, None);
-/// assert_eq!(instr1, Instruction::JumpI { offset: -9i16 });
+/// assert_eq!(instr1, Instruction::JumpI { offset: -2i16 });
 ///
 /// // Execute the jump: seek back to the label address.
 /// stream.seek(off0).unwrap();
@@ -207,77 +206,42 @@ pub struct InstructionStream<'a> {
     bytes: &'a [u8],
     pos: usize,
     labels: BTreeMap<usize, String>,
-    pool: ConstantPool,
 }
 
 impl<'a> InstructionStream<'a> {
-    /// Create a new stream positioned at the start of `bytes` with an empty
-    /// constant pool.
+    /// Create a new stream positioned at the start of `bytes`.
     ///
     /// The constructor performs a single scan of `bytes` to collect all
     /// `JUMP`/`JUMPI` targets and assign label names before any instruction
     /// is returned.
-    ///
-    /// If the instruction stream contains [`PUSHC`](crate::types::Instruction::PushC)
-    /// instructions, use [`with_pool`](Self::with_pool) or
-    /// [`from_program`](Self::from_program) so that pool indices can be
-    /// resolved via [`pool`](Self::pool).
     pub fn new(bytes: &'a [u8]) -> Self {
-        Self::with_pool(bytes, ConstantPool::new())
-    }
-
-    /// Create a new stream with an associated constant pool.
-    ///
-    /// Equivalent to [`new`](Self::new) but attaches `pool` so that callers
-    /// can resolve `PUSHC` indices via [`pool`](Self::pool).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use aglais_xqvm_bytecode::ConstantPool;
-    /// use aglais_xqvm_bytecode::InstructionStream;
-    ///
-    /// let mut pool = ConstantPool::new();
-    /// let _idx = pool.intern(42).unwrap();
-    ///
-    /// let stream = InstructionStream::with_pool(&[], pool);
-    /// assert_eq!(stream.pool().get(0), Some(42));
-    /// ```
-    pub fn with_pool(bytes: &'a [u8], pool: ConstantPool) -> Self {
         let labels = collect_labels(bytes);
         Self {
             bytes,
             pos: 0,
             labels,
-            pool,
         }
     }
 
-    /// Create a stream from a [`Program`], binding both its instruction bytes
-    /// and its constant pool.
+    /// Create a stream from a [`Program`], borrowing its instruction bytes.
     ///
-    /// The stream borrows the program's code bytes for its lifetime `'a` and
-    /// clones the pool so both can be used independently after construction.
+    /// The stream borrows the program's code bytes for its lifetime `'a`.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// use aglais_xqvm_bytecode::ConstantPool;
     /// use aglais_xqvm_bytecode::Program;
     /// use aglais_xqvm_bytecode::InstructionStream;
     /// use aglais_xqvm_bytecode::Instruction;
     ///
-    /// let mut pool = ConstantPool::new();
-    /// let _idx = pool.intern(99).unwrap();
-    /// let program = Program::new(pool, vec![0x0Fu8]); // HALT
+    /// let program = Program::new(vec![0x0Fu8]); // HALT
     ///
     /// let mut stream = InstructionStream::from_program(&program);
-    /// assert_eq!(stream.pool().get(0), Some(99));
     /// let (_, _, instr) = stream.next_instruction().unwrap().unwrap();
     /// assert_eq!(instr, Instruction::Halt {});
     /// ```
     pub fn from_program(program: &'a Program) -> Self {
-        Self::with_pool(program.code(), program.pool().clone())
+        Self::new(program.code())
     }
 
     /// Current cursor position (byte offset into the buffer).
@@ -307,31 +271,6 @@ impl<'a> InstructionStream<'a> {
     /// exclusively from `JUMP`/`JUMPI` targets.
     pub fn labels(&self) -> &BTreeMap<usize, String> {
         &self.labels
-    }
-
-    /// The constant pool associated with this stream.
-    ///
-    /// Returns a reference to the pool supplied via
-    /// [`with_pool`](Self::with_pool) or [`from_program`](Self::from_program).
-    /// When the stream was created with [`new`](Self::new), the pool is empty.
-    ///
-    /// Use this to resolve `PUSHC` indices encountered during iteration:
-    ///
-    /// ```rust
-    /// use aglais_xqvm_bytecode::ConstantPool;
-    /// use aglais_xqvm_bytecode::InstructionStream;
-    /// use aglais_xqvm_bytecode::Instruction;
-    /// use aglais_xqvm_bytecode::codec;
-    ///
-    /// let mut pool = ConstantPool::new();
-    /// let idx = pool.intern(7).unwrap();
-    /// let buf = codec::encode(&Instruction::PushC { idx });
-    ///
-    /// let stream = InstructionStream::with_pool(&buf, pool);
-    /// assert_eq!(stream.pool().get(0), Some(7));
-    /// ```
-    pub fn pool(&self) -> &ConstantPool {
-        &self.pool
     }
 
     /// Seek to absolute byte offset `pos`.
@@ -502,22 +441,22 @@ mod tests {
 
     #[test]
     fn offsets_advance_correctly() {
-        // PUSH(0) (3 bytes) at 0, HALT (1 byte) at 3.
-        let buf = assemble(&[Instruction::Push { imm: 0 }, Instruction::Halt {}]);
+        // PushC0 (1 byte) at 0, HALT (1 byte) at 1.
+        let buf = assemble(&[Instruction::PushC0 {}, Instruction::Halt {}]);
         let mut stream = InstructionStream::new(&buf);
 
         let (off0, _, _) = stream.next_instruction().unwrap().unwrap();
         let (off1, _, _) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(off0, 0);
-        assert_eq!(off1, 3);
+        assert_eq!(off1, 1);
         assert_eq!(stream.next_instruction(), None);
     }
 
     #[test]
     fn iterator_collects_all_instructions() {
         let program = [
-            Instruction::Push { imm: 5 },
-            Instruction::Push { imm: 3 },
+            Instruction::PushC1 { val: [5] },
+            Instruction::PushC1 { val: [3] },
             Instruction::Add {},
             Instruction::Halt {},
         ];
@@ -533,23 +472,27 @@ mod tests {
 
     #[test]
     fn jump_target_instruction_carries_label() {
-        // PUSH(3) (3 bytes) at 0, JUMPI (3 bytes) at 3; target = 3 + (-3) = 0 -> L0.
+        // PushC1 { val: [3] } (2 bytes) at 0, JUMPI (3 bytes) at 2; target = 2 + (-2) = 0 -> L0.
         let buf = assemble(&[
-            Instruction::Push { imm: 3 },
-            Instruction::JumpI { offset: -3i16 },
+            Instruction::PushC1 { val: [3] },
+            Instruction::JumpI { offset: -2i16 },
         ]);
         let mut stream = InstructionStream::new(&buf);
 
         let (_, label0, _) = stream.next_instruction().unwrap().unwrap();
         let (_, label1, _) = stream.next_instruction().unwrap().unwrap();
 
-        assert_eq!(label0.as_deref(), Some("L0"), "PUSH at target should be L0");
+        assert_eq!(
+            label0.as_deref(),
+            Some("L0"),
+            "PushC1 at target should be L0"
+        );
         assert_eq!(label1, None, "JUMPI itself has no label");
     }
 
     #[test]
     fn no_labels_when_no_jumps() {
-        let buf = assemble(&[Instruction::Push { imm: 1 }, Instruction::Halt {}]);
+        let buf = assemble(&[Instruction::PushC1 { val: [1] }, Instruction::Halt {}]);
         let stream = InstructionStream::new(&buf);
         assert!(stream.labels().is_empty());
     }
@@ -572,17 +515,17 @@ mod tests {
 
     #[test]
     fn seek_to_second_instruction_skips_first() {
-        // PUSH(0) (3 bytes) at 0, NOP (1 byte) at 3, HALT (1 byte) at 4.
+        // PushC0 (1 byte) at 0, NOP (1 byte) at 1, HALT (1 byte) at 2.
         let buf = assemble(&[
-            Instruction::Push { imm: 0 },
+            Instruction::PushC0 {},
             Instruction::Nop {},
             Instruction::Halt {},
         ]);
         let mut stream = InstructionStream::new(&buf);
 
-        stream.seek(3).unwrap();
+        stream.seek(1).unwrap();
         let (off, _, instr) = stream.next_instruction().unwrap().unwrap();
-        assert_eq!(off, 3);
+        assert_eq!(off, 1);
         assert_eq!(instr, Instruction::Nop {});
     }
 
@@ -611,10 +554,10 @@ mod tests {
 
     #[test]
     fn seek_back_simulates_jump() {
-        // PUSH(3) (3 bytes) at 0, JUMPI (3 bytes) at 3; target = 3 + (-3) = 0.
+        // PushC1 { val: [3] } (2 bytes) at 0, JUMPI (3 bytes) at 2; target = 2 + (-2) = 0.
         let buf = assemble(&[
-            Instruction::Push { imm: 3 },
-            Instruction::JumpI { offset: -3i16 },
+            Instruction::PushC1 { val: [3] },
+            Instruction::JumpI { offset: -2i16 },
         ]);
         let mut stream = InstructionStream::new(&buf);
 
@@ -632,7 +575,7 @@ mod tests {
         let (off, label, instr) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(off, 0);
         assert_eq!(label.as_deref(), Some("L0"));
-        assert_eq!(instr, Instruction::Push { imm: 3 });
+        assert_eq!(instr, Instruction::PushC1 { val: [3] });
     }
 
     #[test]
@@ -657,8 +600,8 @@ mod tests {
 
     #[test]
     fn truncated_instruction_returns_error_and_advances() {
-        // PUSH opcode only, no operand bytes -- truncated.
-        let buf = [0x10u8];
+        // PushC8 (0x1F) needs 8 operand bytes -- feeding just the opcode truncates it.
+        let buf: Vec<u8> = vec![0x1Fu8];
         let mut stream = InstructionStream::new(&buf);
 
         assert_eq!(
@@ -687,34 +630,5 @@ mod tests {
         let mut stream = InstructionStream::new(&buf);
         let (_, _, instr) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(instr, Instruction::Load { reg: Register(7) });
-    }
-
-    #[test]
-    fn new_stream_has_empty_pool() {
-        let stream = InstructionStream::new(&[]);
-        assert!(stream.pool().is_empty());
-    }
-
-    #[test]
-    fn with_pool_carries_pool() {
-        let mut pool = ConstantPool::new();
-        pool.intern(42).unwrap();
-        let stream = InstructionStream::with_pool(&[], pool);
-        assert_eq!(stream.pool().get(0), Some(42));
-    }
-
-    #[test]
-    fn from_program_binds_code_and_pool() {
-        use crate::program::Program;
-
-        let mut pool = ConstantPool::new();
-        let idx = pool.intern(7).unwrap();
-        let buf = codec::encode(&Instruction::PushC { idx });
-        let program = Program::new(pool, buf);
-
-        let mut stream = InstructionStream::from_program(&program);
-        assert_eq!(stream.pool().get(0), Some(7));
-        let (_, _, instr) = stream.next_instruction().unwrap().unwrap();
-        assert_eq!(instr, Instruction::PushC { idx: 0 });
     }
 }

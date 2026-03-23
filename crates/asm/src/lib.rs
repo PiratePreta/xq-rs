@@ -45,7 +45,7 @@
 //! use aglais_xqvm_asm::assemble_source;
 //!
 //! let program = assemble_source("PUSH 42\nHALT").unwrap();
-//! assert_eq!(program.code()[0], 0x10); // PUSH opcode
+//! assert_eq!(program.code()[0], 0x18); // PUSHC_1 opcode
 //! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
 //! ```
 //!

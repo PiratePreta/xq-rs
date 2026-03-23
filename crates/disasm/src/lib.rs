@@ -30,15 +30,15 @@
 //! use aglais_xqvm_disasm::Disassembly;
 //!
 //! let program = [
-//!     Instruction::Push { imm: 5 },
-//!     Instruction::Push { imm: -1 },
+//!     Instruction::PushC1 { val: [5] },
+//!     Instruction::PushC1 { val: [0xFF] }, // -1 as i8
 //!     Instruction::Add  {},
 //!     Instruction::Halt {},
 //! ];
 //! let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
 //!
 //! let listing = Disassembly::new(&buf).to_string();
-//! assert!(listing.contains("PUSH"));
+//! assert!(listing.contains("PUSHC_1"));
 //! assert!(listing.contains("HALT"));
 //! ```
 

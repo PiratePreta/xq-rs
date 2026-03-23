@@ -52,8 +52,8 @@ macro_rules! impl_opcode {
         /// ```rust
         /// use aglais_xqvm_bytecode::Opcode;
         ///
-        /// assert_eq!(Opcode::Push as u8, 0x10);
-        /// assert_eq!(Opcode::try_from(0x10u8).unwrap(), Opcode::Push);
+        /// assert_eq!(Opcode::PushC0 as u8, 0x10);
+        /// assert_eq!(Opcode::try_from(0x10u8).unwrap(), Opcode::PushC0);
         /// ```
         #[repr(u8)]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -137,8 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn opcode_count_is_69() {
-        assert_eq!(opcodes!(all_opcodes_array).len(), 69);
+    fn opcode_count_is_76() {
+        assert_eq!(opcodes!(all_opcodes_array).len(), 76);
     }
 
     #[test]
@@ -156,7 +156,7 @@ mod tests {
     fn spot_check_discriminants() {
         assert_eq!(Opcode::Nop as u8, 0x00);
         assert_eq!(Opcode::Halt as u8, 0x0F);
-        assert_eq!(Opcode::Push as u8, 0x10);
+        assert_eq!(Opcode::PushC0 as u8, 0x10);
         assert_eq!(Opcode::Add as u8, 0x20);
         assert_eq!(Opcode::Not as u8, 0x30);
         assert_eq!(Opcode::Bqmx as u8, 0x40);

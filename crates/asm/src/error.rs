@@ -227,15 +227,6 @@ pub enum AssembleError {
         #[label("offset too large")]
         span: SourceSpan,
     },
-
-    /// The constant pool exceeded its maximum capacity of 65535 entries.
-    #[error("constant pool exceeded the maximum capacity of 65535 entries")]
-    #[diagnostic(code(xqasm::pool_overflow))]
-    PoolOverflow {
-        /// Source text for diagnostic rendering.
-        #[source_code]
-        src: NamedSource<Arc<str>>,
-    },
 }
 
 // ---------------------------------------------------------------------------

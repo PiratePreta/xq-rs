@@ -19,6 +19,8 @@
 //!
 //! [`Vm`] executes XQVM bytecode programs. It maintains an integer stack,
 //! a 256-slot register file, a loop stack, and optional calldata / output slots.
+//! Constants are encoded inline in `PUSH_C0`..`PUSH_C8` instructions; no
+//! separate constant pool is required.
 //!
 //! # Examples
 //!
@@ -37,7 +39,7 @@
 //! ```
 
 use aglais_xqvm_bytecode::opcodes;
-use aglais_xqvm_bytecode::{ConstantPool, Instruction, InstructionStream, Program, Register};
+use aglais_xqvm_bytecode::{Instruction, InstructionStream, Program, Register};
 
 use crate::error::Error;
 use crate::model::{Domain, XqmxModel, XqmxSample};
@@ -84,6 +86,21 @@ pub(crate) enum StepResult {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Sign-extend a big-endian byte slice (1..=8 bytes) to `i64`.
+fn sign_extend_be(bytes: &[u8]) -> i64 {
+    debug_assert!(!bytes.is_empty() && bytes.len() <= 8);
+    let mut v = 0i64;
+    for &b in bytes {
+        v = (v << 8) | i64::from(b);
+    }
+    let shift = 64u32 - (bytes.len() * 8) as u32;
+    (v << shift) >> shift
+}
+
+// ---------------------------------------------------------------------------
 // VM struct
 // ---------------------------------------------------------------------------
 
@@ -114,7 +131,6 @@ pub struct Vm {
     calldata: Vec<RegVal>,
     outputs: Vec<RegVal>,
     step_limit: u64,
-    pool: ConstantPool,
 }
 
 impl Default for Vm {
@@ -137,7 +153,6 @@ impl Vm {
             calldata: Vec::new(),
             outputs: Vec::new(),
             step_limit: DEFAULT_STEP_LIMIT,
-            pool: ConstantPool::new(),
         }
     }
 
@@ -234,20 +249,18 @@ impl Vm {
         self.stack.clear();
         self.regs.iter_mut().for_each(|r| *r = RegVal::default());
         self.loop_stack.clear();
-        self.pool = ConstantPool::new();
     }
 
     /// Execute a [`Program`].
     ///
-    /// Loads the constant pool from `program` and then executes the instruction
-    /// stream. The pool is replaced on each call, so `PUSHC` instructions in the
-    /// new program always see the correct constants.
+    /// Executes the instruction stream of `program`. Inline constants are
+    /// encoded directly in `PUSH_C0`..`PUSH_C8` instructions -- no separate
+    /// constant pool is needed.
     ///
     /// # Errors
     ///
     /// Returns [`Error`] on any runtime fault (stack underflow, bad jump, etc.).
     pub fn run(&mut self, program: &Program) -> Result<(), Error> {
-        self.pool = program.pool().clone();
         let mut stream = InstructionStream::from_program(program);
         let mut steps: u64 = 0;
 
@@ -499,17 +512,48 @@ impl Vm {
 
     // -- Stack & register I/O --
 
-    fn exec_push(&mut self, _pos: usize, imm: i16) -> Result<StepResult, Error> {
-        self.push_val(i64::from(imm));
+    fn exec_push_c0(&mut self, _pos: usize) -> Result<StepResult, Error> {
+        self.push_val(0);
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c(&mut self, pos: usize, idx: u16) -> Result<StepResult, Error> {
-        let val = self
-            .pool
-            .get(idx)
-            .ok_or(Error::PoolIndexOutOfRange { pos, idx })?;
-        self.push_val(val);
+    fn exec_push_c1(&mut self, _pos: usize, val: [u8; 1]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c2(&mut self, _pos: usize, val: [u8; 2]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c3(&mut self, _pos: usize, val: [u8; 3]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c4(&mut self, _pos: usize, val: [u8; 4]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c5(&mut self, _pos: usize, val: [u8; 5]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c6(&mut self, _pos: usize, val: [u8; 6]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c7(&mut self, _pos: usize, val: [u8; 7]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push_c8(&mut self, _pos: usize, val: [u8; 8]) -> Result<StepResult, Error> {
+        self.push_val(sign_extend_be(&val));
         Ok(StepResult::Continue)
     }
 

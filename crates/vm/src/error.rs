@@ -111,10 +111,6 @@ pub enum Error {
     /// The RESIZE instruction received non-positive dimensions.
     #[error("invalid grid dimensions {rows}x{cols} at byte {pos:#06x}")]
     InvalidGridDimensions { pos: usize, rows: i64, cols: i64 },
-
-    /// PUSHC referenced a pool index that is out of range.
-    #[error("constant pool index {idx} out of range at byte {pos:#06x}")]
-    PoolIndexOutOfRange { pos: usize, idx: u16 },
 }
 
 impl Error {
@@ -170,8 +166,7 @@ impl Error {
             | Self::InvalidShift { pos, .. }
             | Self::InvalidGridDimensions { pos, .. }
             | Self::BadJumpTarget { pos, .. }
-            | Self::IndexOutOfBounds { pos, .. }
-            | Self::PoolIndexOutOfRange { pos, .. } => Some(*pos),
+            | Self::IndexOutOfBounds { pos, .. } => Some(*pos),
             Self::RegisterType { .. }
             | Self::CallDataIndex { .. }
             | Self::OutputIndex { .. }

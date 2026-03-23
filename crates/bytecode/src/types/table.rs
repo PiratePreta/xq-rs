@@ -17,7 +17,7 @@
 
 /// Invoke `$mac!` with the complete XQVM opcode table.
 ///
-/// The callback macro receives the full comma-separated list of 69 opcode
+/// The callback macro receives the full comma-separated list of 76 opcode
 /// entries. Each entry has the form:
 ///
 /// ```text
@@ -73,8 +73,8 @@ macro_rules! opcodes {
             // ---------------------------------------------------------------
             // Stack & Register I/O
             // ---------------------------------------------------------------
-            (0x10, Push,    "PUSH",     "Push a signed 16-bit integer literal onto the stack.",
-             {imm: i16}),
+            (0x10, PushC0,  "PUSHC_0",  "Push the constant 0 (zero-byte immediate).",
+             {}),
             (0x11, Pop,     "POP",      "Discard the top of the stack.",
              {}),
             (0x12, Dupl,    "DUPL",     "Duplicate the top of the stack.",
@@ -89,8 +89,22 @@ macro_rules! opcodes {
              {reg: $crate::Register}),
             (0x17, Output,  "OUTPUT",   "Pop an output slot index and write the register to it.",
              {reg: $crate::Register}),
-            (0x18, PushC,   "PUSHC",    "Push the i64 constant at pool index idx onto the stack.",
-             {idx: u16}),
+            (0x18, PushC1,  "PUSHC_1",  "Push a 1-byte big-endian signed constant, sign-extended to i64.",
+             {val: [u8; 1]}),
+            (0x19, PushC2,  "PUSHC_2",  "Push a 2-byte big-endian signed constant, sign-extended to i64.",
+             {val: [u8; 2]}),
+            (0x1A, PushC3,  "PUSHC_3",  "Push a 3-byte big-endian signed constant, sign-extended to i64.",
+             {val: [u8; 3]}),
+            (0x1B, PushC4,  "PUSHC_4",  "Push a 4-byte big-endian signed constant, sign-extended to i64.",
+             {val: [u8; 4]}),
+            (0x1C, PushC5,  "PUSHC_5",  "Push a 5-byte big-endian signed constant, sign-extended to i64.",
+             {val: [u8; 5]}),
+            (0x1D, PushC6,  "PUSHC_6",  "Push a 6-byte big-endian signed constant, sign-extended to i64.",
+             {val: [u8; 6]}),
+            (0x1E, PushC7,  "PUSHC_7",  "Push a 7-byte big-endian signed constant, sign-extended to i64.",
+             {val: [u8; 7]}),
+            (0x1F, PushC8,  "PUSHC_8",  "Push a full 8-byte big-endian signed constant (i64).",
+             {val: [u8; 8]}),
             // ---------------------------------------------------------------
             // Arithmetic
             // ---------------------------------------------------------------

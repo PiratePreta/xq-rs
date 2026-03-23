@@ -26,8 +26,7 @@
 //! | [`Opcode`] | `#[repr(u8)]` enum |
 //! | [`Instruction`] | Fully decoded instruction with operands |
 //! | [`Register`] | 8-bit register slot operand |
-//! | [`ConstantPool`] | Interned `i64` constant table |
-//! | [`Program`] | Complete program: constant pool + instruction bytes |
+//! | [`Program`] | Complete program: raw instruction bytes |
 //! | [`InstructionBuilder`] | Fluent bytecode assembler |
 //! | [`InstructionStream`] | Incremental seekable reader |
 //! | [`codec`] | [`codec::encode`] / [`codec::decode`] -- binary wire format |
@@ -37,7 +36,7 @@
 //!
 //! All data types are derived from the [`opcodes!`] callback macro. Pass the
 //! name of any `macro_rules!` you define as the argument; it will be invoked
-//! with the full 69-entry opcode table:
+//! with the full 76-entry opcode table:
 //!
 //! ```rust
 //! macro_rules! list_mnemonics {
@@ -47,9 +46,9 @@
 //! }
 //!
 //! let mnemonics = aglais_xqvm_bytecode::opcodes!(list_mnemonics);
-//! assert_eq!(mnemonics.len(), 69);
+//! assert_eq!(mnemonics.len(), 76);
 //! assert!(mnemonics.contains(&"ENERGY"));
-//! assert!(mnemonics.contains(&"PUSHC"));
+//! assert!(mnemonics.contains(&"PUSHC_0"));
 //! ```
 //!
 //! # Quick start
@@ -58,12 +57,12 @@
 //! use aglais_xqvm_bytecode::{Instruction, Opcode, Register};
 //!
 //! let program: &[Instruction] = &[
-//!     Instruction::Push   { imm: 0 },
-//!     Instruction::Push   { imm: 10 },
+//!     Instruction::PushC0 {},
+//!     Instruction::PushC1 { val: [10] },
 //!     Instruction::Range  {},
 //!     Instruction::LVal   { reg: Register(0) },
 //!     Instruction::Load   { reg: Register(0) },
-//!     Instruction::Push   { imm: 5 },
+//!     Instruction::PushC1 { val: [5] },
 //!     Instruction::Gt     {},
 //!     Instruction::JumpI  { offset: 1i16 },
 //!     Instruction::Next   {},
@@ -71,9 +70,9 @@
 //!     Instruction::Halt   {},
 //! ];
 //!
-//! assert_eq!(program[0].opcode(), Opcode::Push);
+//! assert_eq!(program[0].opcode(), Opcode::PushC0);
 //! assert_eq!(program[0].opcode() as u8, 0x10);
-//! assert_eq!(program[0].mnemonic(), "PUSH");
+//! assert_eq!(program[0].mnemonic(), "PUSHC_0");
 //! ```
 
 // Private modules have doc tests that are only visible to maintainers.
@@ -86,7 +85,6 @@ mod types;
 mod builder;
 pub mod codec;
 pub mod error;
-mod pool;
 mod program;
 mod stream;
 
@@ -95,7 +93,6 @@ mod stream;
 // ---------------------------------------------------------------------------
 
 pub use builder::{InstructionBuilder, LabelId};
-pub use pool::ConstantPool;
 pub use program::Program;
 pub use stream::InstructionStream;
 pub use types::{Instruction, Opcode, Register};

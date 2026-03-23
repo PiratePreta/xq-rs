@@ -23,10 +23,8 @@
 //! assigned sequential labels (`L0`, `L1`, ...) and rendered both at the
 //! destination and as the operand of the originating `JUMP`/`JUMPI`.
 //!
-//! When a [`Program`] is provided via
-//! [`Disassembly::from_program`], the constant pool is printed as a header
-//! section before the instruction listing. `PUSHC` operands are rendered as
-//! the resolved constant value rather than the raw pool index.
+//! `PUSHC_1`..`PUSHC_8` operands are rendered as their sign-extended decimal
+//! value.
 //!
 //! Unknown bytes (invalid opcodes or truncated operands) are displayed as
 //! `.byte 0xXX` pseudo-instructions so no information is silently dropped.
@@ -41,10 +39,7 @@
 //! label is present at an address the column is left blank so columns align:
 //!
 //! ```text
-//! ; constant pool (1 entries):
-//! ;   [0]  12345
-//! ;
-//!   0x0000:  L0:  PUSHC    12345  ; [0]
+//!   0x0000:  L0:  PUSHC_2  12345
 //!   0x0003:       GT
 //!   0x0004:       JUMPI    L0
 //!   0x0007:       HALT
@@ -58,15 +53,15 @@
 //!
 //! // No jumps -- label column is suppressed entirely.
 //! let program = [
-//!     Instruction::Push { imm: 1 },
-//!     Instruction::Push { imm: 2 },
+//!     Instruction::PushC1 { val: [1] },
+//!     Instruction::PushC1 { val: [2] },
 //!     Instruction::Add  {},
 //!     Instruction::Halt {},
 //! ];
 //! let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
 //!
 //! let text = Disassembly::new(&buf).to_string();
-//! assert!(text.contains("PUSH"));
+//! assert!(text.contains("PUSHC_1"));
 //! assert!(text.contains("ADD"));
 //! assert!(text.contains("HALT"));
 //! ```
@@ -76,9 +71,22 @@ use std::fmt;
 use std::io;
 
 use aglais_xqvm_bytecode::error::StreamError;
-use aglais_xqvm_bytecode::{
-    ConstantPool, Instruction, InstructionStream, Program, Register, opcodes,
-};
+use aglais_xqvm_bytecode::{Instruction, InstructionStream, Program, Register, opcodes};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Sign-extend a big-endian byte slice (1..=8 bytes) to `i64`.
+fn sign_extend_be(bytes: &[u8]) -> i64 {
+    debug_assert!(!bytes.is_empty() && bytes.len() <= 8);
+    let mut v = 0i64;
+    for &b in bytes {
+        v = (v << 8) | i64::from(b);
+    }
+    let shift = 64u32 - (bytes.len() * 8) as u32;
+    (v << shift) >> shift
+}
 
 // ---------------------------------------------------------------------------
 // Operand display
@@ -119,16 +127,26 @@ impl FmtOperand for i64 {
     }
 }
 
-impl FmtOperand for u16 {
-    fn fmt_operand(
-        &self,
-        f: &mut dyn io::Write,
-        _labels: &BTreeMap<usize, String>,
-        _instr_offset: usize,
-    ) -> io::Result<()> {
-        write!(f, "{self}")
-    }
+/// `[u8; N]` fields appear on `PUSHC_1`..`PUSHC_8` -- render as a decimal
+/// by sign-extending the bytes to `i64`.
+macro_rules! impl_fmt_operand_byte_array {
+    ($($n:literal),+) => {
+        $(
+            impl FmtOperand for [u8; $n] {
+                fn fmt_operand(
+                    &self,
+                    f: &mut dyn io::Write,
+                    _labels: &BTreeMap<usize, String>,
+                    _instr_offset: usize,
+                ) -> io::Result<()> {
+                    write!(f, "{}", sign_extend_be(self))
+                }
+            }
+        )+
+    };
 }
+
+impl_fmt_operand_byte_array!(1, 2, 3, 4, 5, 6, 7, 8);
 
 impl FmtOperand for i16 {
     /// Resolve the offset to a label name when possible; fall back to `+N`.
@@ -197,10 +215,7 @@ opcodes!(impl_fmt_instruction);
 /// byte offset and the mnemonic. When no label exists at an address the
 /// column is left blank so all columns align. `JUMP`/`JUMPI` operands are
 /// replaced by the label name when the target is within the same buffer.
-///
-/// When constructed via [`from_program`](Self::from_program), the constant
-/// pool is printed as a header section and `PUSHC` operands are rendered as
-/// the resolved constant value rather than the raw pool index.
+/// `PUSHC_1`..`PUSHC_8` operands are sign-extended and rendered as decimals.
 ///
 /// # Examples
 ///
@@ -210,14 +225,14 @@ opcodes!(impl_fmt_instruction);
 ///
 /// // Build a trivial counted-down loop.
 /// let program = [
-///     Instruction::Push  { imm: 5 },          // push counter
-///     Instruction::Push  { imm: -1 },          // push decrement
-///     Instruction::Target{},                   // loop target
-///     Instruction::Add   {},                   // counter--
-///     Instruction::Dupl  {},                   // check without consuming
-///     Instruction::JumpI { offset: -4i16 },    // loop back if non-zero
-///     Instruction::Pop   {},
-///     Instruction::Halt  {},
+///     Instruction::PushC1 { val: [5] },        // push counter
+///     Instruction::PushC1 { val: [0xFF] },     // push decrement (-1)
+///     Instruction::Target {},                   // loop target
+///     Instruction::Add    {},                   // counter--
+///     Instruction::Dupl   {},                   // check without consuming
+///     Instruction::JumpI  { offset: -4i16 },   // loop back if non-zero
+///     Instruction::Pop    {},
+///     Instruction::Halt   {},
 /// ];
 /// let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
 /// print!("{}", Disassembly::new(&buf));
@@ -225,7 +240,6 @@ opcodes!(impl_fmt_instruction);
 #[derive(Debug, Clone)]
 pub struct Disassembly<'a> {
     stream: InstructionStream<'a>,
-    pool: ConstantPool,
 }
 
 impl<'a> Disassembly<'a> {
@@ -233,24 +247,17 @@ impl<'a> Disassembly<'a> {
     ///
     /// Constructs an [`InstructionStream`] immediately, performing the label
     /// pre-pass so that repeated calls to [`write_to`](Self::write_to)
-    /// reuse the already-computed label map. No constant pool is attached;
-    /// `PUSHC` operands are displayed as raw indices without value annotation.
+    /// reuse the already-computed label map.
     pub fn new(bytes: &'a [u8]) -> Self {
         Self {
             stream: InstructionStream::new(bytes),
-            pool: ConstantPool::new(),
         }
     }
 
     /// Wrap a [`Program`] for display.
-    ///
-    /// If the program has a non-empty constant pool, pool entries are printed
-    /// as a header section and `PUSHC` operands are annotated with their
-    /// resolved values.
     pub fn from_program(program: &'a Program) -> Self {
         Self {
             stream: InstructionStream::from_program(program),
-            pool: program.pool().clone(),
         }
     }
 
@@ -272,25 +279,16 @@ impl<'a> Disassembly<'a> {
     /// use aglais_xqvm_bytecode::{Instruction, codec};
     /// use aglais_xqvm_disasm::Disassembly;
     ///
-    /// let program = [Instruction::Push { imm: 1 }, Instruction::Halt {}];
+    /// let program = [Instruction::PushC1 { val: [1] }, Instruction::Halt {}];
     /// let buf: Vec<u8> = program.iter().flat_map(codec::encode).collect();
     ///
     /// let mut out = Vec::new();
     /// Disassembly::new(&buf).write_to(&mut out).unwrap();
     /// let text = String::from_utf8(out).unwrap();
-    /// assert!(text.contains("PUSH"));
+    /// assert!(text.contains("PUSHC_1"));
     /// assert!(text.contains("HALT"));
     /// ```
     pub fn write_to(&self, out: &mut impl io::Write) -> io::Result<()> {
-        // Print constant pool header if the pool is non-empty.
-        if !self.pool.is_empty() {
-            writeln!(out, "; constant pool ({} entries):", self.pool.len())?;
-            for (i, &val) in self.pool.entries().iter().enumerate() {
-                writeln!(out, ";   [{i}]  {val}")?;
-            }
-            writeln!(out, ";")?;
-        }
-
         // Width of the label column: longest "Lx:" string, or 0 when there
         // are no labels so the column is omitted entirely.
         let label_col = self
@@ -314,28 +312,7 @@ impl<'a> Disassembly<'a> {
                     if label_col > 0 {
                         write!(out, "{label_str:<label_col$}  ")?;
                     }
-                    // For PUSHC with a known pool value, render the constant
-                    // directly as the operand and annotate with the pool index.
-                    match instr {
-                        Instruction::PushC { idx } => {
-                            if let Some(val) = self.pool.get(idx) {
-                                write!(out, "{:<8}{val}  ; [{idx}]", "PUSHC")?;
-                            } else {
-                                // As this is an utility tool, we can be more
-                                // lenient and just render the opcode without a value.
-                                write!(out, "{:<8}??  ; [{idx}]", "PUSHC")?;
-                            }
-                        }
-                        Instruction::Push { imm } => {
-                            // PUSH carries an i16 immediate; FmtOperand for i16 does
-                            // label resolution (designed for JUMP offsets), so we
-                            // bypass it and render the value as a plain decimal.
-                            write!(out, "{:<8}{imm}", "PUSH")?;
-                        }
-                        _ => {
-                            fmt_instruction(&instr, offset, &labels, out)?;
-                        }
-                    }
+                    fmt_instruction(&instr, offset, &labels, out)?;
                     writeln!(out)?;
                 }
                 Err(ref e) => {
@@ -383,7 +360,7 @@ impl fmt::Display for Disassembly<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aglais_xqvm_bytecode::{ConstantPool, Instruction, Program, Register, codec};
+    use aglais_xqvm_bytecode::{Instruction, Register, codec};
 
     fn assemble(program: &[Instruction]) -> Vec<u8> {
         program.iter().flat_map(codec::encode).collect()
@@ -391,9 +368,9 @@ mod tests {
 
     #[test]
     fn basic_program_contains_mnemonics() {
-        let buf = assemble(&[Instruction::Push { imm: 42 }, Instruction::Halt {}]);
+        let buf = assemble(&[Instruction::PushC1 { val: [42] }, Instruction::Halt {}]);
         let text = Disassembly::new(&buf).to_string();
-        assert!(text.contains("PUSH"), "missing PUSH in:\n{text}");
+        assert!(text.contains("PUSHC_1"), "missing PUSHC_1 in:\n{text}");
         assert!(text.contains("42"), "missing immediate 42 in:\n{text}");
         assert!(text.contains("HALT"), "missing HALT in:\n{text}");
     }
@@ -407,21 +384,21 @@ mod tests {
 
     #[test]
     fn byte_offsets_are_correct() {
-        // PUSH(0) is 3 bytes (opcode + 2-byte BE i16); HALT starts at offset 3.
-        let buf = assemble(&[Instruction::Push { imm: 0 }, Instruction::Halt {}]);
+        // PUSHC_0 is 1 byte (opcode only); HALT starts at offset 1.
+        let buf = assemble(&[Instruction::PushC0 {}, Instruction::Halt {}]);
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("0x0000"), "missing 0x0000 in:\n{text}");
-        assert!(text.contains("0x0003"), "missing 0x0003 in:\n{text}");
+        assert!(text.contains("0x0001"), "missing 0x0001 in:\n{text}");
     }
 
     #[test]
     fn backward_jump_gets_label() {
-        // PUSH(5) (3 bytes, offset 0) + GT (1 byte, offset 3) = offset 4 for JUMPI.
-        // JUMPI offset = -4  ->  target = 4 + (-4) = 0  -> L0 at offset 0.
+        // PUSHC_1 [5] (2 bytes, offset 0) + GT (1 byte, offset 2) = offset 3 for JUMPI.
+        // JUMPI offset = -3  ->  target = 3 + (-3) = 0  -> L0 at offset 0.
         let buf = assemble(&[
-            Instruction::Push { imm: 5 },
+            Instruction::PushC1 { val: [5] },
             Instruction::Gt {},
-            Instruction::JumpI { offset: -4i16 },
+            Instruction::JumpI { offset: -3i16 },
             Instruction::Halt {},
         ]);
         let text = Disassembly::new(&buf).to_string();
@@ -456,13 +433,16 @@ mod tests {
         let buf = assemble(&[
             Instruction::JumpI { offset: -3i16 }, // offset 0; target = 0+(-3) = -3 -> OOB
             Instruction::Jump { offset: 4i16 },   // offset 3; target = 3+4 = 7
-            Instruction::Push { imm: 0 },         // offset 6 (3 bytes: 6-8)
-            Instruction::Halt {},                 // offset 9
+            Instruction::PushC8 {
+                // offset 6 (9 bytes: 6-14)
+                val: [0, 0, 0, 0, 0, 0, 0, 0],
+            },
+            Instruction::Halt {}, // offset 15
         ]);
-        // target of JUMP is offset 7 = middle of PUSH (starts at 6, 3 bytes), target of
-        // JUMPI is -3 (clamped to 0). L0 appears at offset 0 (JUMPI's own address).
-        // L1 is at offset 7, which is inside PUSH -- no instruction starts there, so
-        // "L1:" never appears.
+        // target of JUMP is offset 7 = inside PUSHC_8 (starts at 6, 9 bytes), target of
+        // JUMPI is -3 (out of bounds). L0 appears at offset 0 (JUMPI's own address).
+        // L1 is at offset 7, which is inside PUSHC_8 -- no instruction starts there,
+        // so "L1:" never appears.
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("L0:"), "missing L0 in:\n{text}");
         assert!(!text.contains("L1:"), "unexpected L1 in:\n{text}");
@@ -490,7 +470,7 @@ mod tests {
 
     #[test]
     fn negative_immediate_displays_correctly() {
-        let buf = assemble(&[Instruction::Push { imm: -7 }]);
+        let buf = assemble(&[Instruction::PushC1 { val: [0xF9] }]); // -7 as i8
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("-7"), "expected -7 in:\n{text}");
     }
@@ -501,35 +481,27 @@ mod tests {
     }
 
     #[test]
-    fn pushc_displays_index() {
-        // Raw bytes without a pool -- index shown but no annotation.
-        let buf = assemble(&[Instruction::PushC { idx: 7 }, Instruction::Halt {}]);
+    fn pushc2_displays_value() {
+        // PUSHC_2 with 0x0007 encodes the value 7.
+        let buf = assemble(&[
+            Instruction::PushC2 { val: [0x00, 0x07] },
+            Instruction::Halt {},
+        ]);
         let text = Disassembly::new(&buf).to_string();
-        assert!(text.contains("PUSHC"), "missing PUSHC in:\n{text}");
-        assert!(text.contains('7'), "missing index 7 in:\n{text}");
-        // No pool annotation expected when constructed via `new`.
-        assert!(
-            !text.contains("; ="),
-            "unexpected pool annotation in:\n{text}"
-        );
+        assert!(text.contains("PUSHC_2"), "missing PUSHC_2 in:\n{text}");
+        assert!(text.contains('7'), "missing value 7 in:\n{text}");
     }
 
     #[test]
-    fn pushc_from_program_shows_pool_value() {
-        let mut pool = ConstantPool::new();
-        let idx = pool.intern(99999i64).unwrap();
-        let buf = assemble(&[Instruction::PushC { idx }, Instruction::Halt {}]);
-        let program = Program::new(pool, buf);
-        let text = Disassembly::from_program(&program).to_string();
-        // Pool header must appear.
-        assert!(
-            text.contains("; constant pool"),
-            "missing pool header in:\n{text}"
-        );
-        // PUSHC must render the constant value directly with the index as comment.
-        assert!(
-            text.contains("99999  ; [0]"),
-            "missing resolved PUSHC operand in:\n{text}"
-        );
+    fn pushc3_displays_large_value() {
+        // 100000 = 0x0001_86A0 fits in PUSHC_3.
+        let buf = assemble(&[
+            Instruction::PushC3 {
+                val: [0x01, 0x86, 0xA0],
+            },
+            Instruction::Halt {},
+        ]);
+        let text = Disassembly::new(&buf).to_string();
+        assert!(text.contains("100000"), "missing 100000 in:\n{text}");
     }
 }
