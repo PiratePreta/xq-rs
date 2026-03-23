@@ -69,12 +69,11 @@ fn main() -> Result<()> {
     };
 
     let mut out = Vec::new();
-    match Program::decode(&bytes) {
-        Ok(program) => Disassembly::from_program(&program).write_to(&mut out),
-        Err(_) => Disassembly::new(&bytes).write_to(&mut out),
-    }
-    .into_diagnostic()
-    .wrap_err("failed to write disassembly")?;
+    let program = Program::decode(&bytes);
+    Disassembly::from_program(&program)
+        .write_to(&mut out)
+        .into_diagnostic()
+        .wrap_err("failed to write disassembly")?;
     io::stdout().write_all(&out).into_diagnostic()?;
 
     Ok(())

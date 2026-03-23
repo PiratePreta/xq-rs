@@ -50,7 +50,7 @@
 //!     }),
 //! ];
 //! let program = assemble(&lines, src, "<test>").unwrap();
-//! assert_eq!(program.code()[0], 0x10); // PUSH opcode
+//! assert_eq!(program.code()[0], 0x10); // PUSHC_0 opcode
 //! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
 //! ```
 
@@ -100,7 +100,6 @@ type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
 /// - [`AssembleError::UndefinedLabel`] -- label referenced but not defined.
 /// - [`AssembleError::DuplicateLabel`] -- label defined more than once.
 /// - [`AssembleError::JumpOffsetOverflow`] -- jump distance exceeds `i16`.
-/// - [`AssembleError::PoolOverflow`] -- more than 65535 distinct constants.
 ///
 /// # Examples
 ///
@@ -162,10 +161,7 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
                         src,
                     )?;
                 }
-                "PUSHC" => {
-                    assemble_pushc(instr, &mut b, src)?;
-                }
-                "PUSH" => {
+                "PUSH" | "PUSHC" => {
                     assemble_push(instr, &mut b, src)?;
                 }
                 _ => {
@@ -282,42 +278,11 @@ fn assemble_jump(
 }
 
 // ---------------------------------------------------------------------------
-// PUSHC
+// PUSH / PUSHC
 // ---------------------------------------------------------------------------
 
-/// Handle `PUSHC <imm>`: intern the integer value into the constant pool and
-/// emit a `PUSHC { idx }` instruction. Pool overflow is recorded by
-/// [`InstructionBuilder::push_const`] and surfaced later by `build()`.
-fn assemble_pushc(
-    instr: &ParsedInstr,
-    b: &mut InstructionBuilder,
-    src: Source<'_>,
-) -> Result<(), AssembleError> {
-    check_operand_count(instr, 1, src)?;
-
-    match instr
-        .operands
-        .first()
-        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
-    {
-        Operand::Integer(imm) => {
-            let _ = b.push_const(*imm);
-        }
-        _ => {
-            return Err(err_wrong_kind(instr, "imm", "integer literal", src));
-        }
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// PUSH
-// ---------------------------------------------------------------------------
-
-/// Handle `PUSH <imm>`: emit an inline `Push { imm: i16 }` for values that
-/// fit in 16 bits, or a `PUSHC { idx }` via the constant pool for larger
-/// values. The caller never needs to know which encoding was chosen.
+/// Handle `PUSH <imm>` and `PUSHC <imm>`: encode the integer constant inline
+/// using the minimal `PUSHC_N` encoding chosen by [`InstructionBuilder::push`].
 fn assemble_push(
     instr: &ParsedInstr,
     b: &mut InstructionBuilder,
@@ -373,7 +338,6 @@ fn convert_build_error(
                 span: make_span(offset, label.len()),
             }
         }
-        BuilderError::PoolOverflow => AssembleError::PoolOverflow { src: make_src(src) },
     }
 }
 
@@ -434,36 +398,34 @@ impl FromOperand for i64 {
     }
 }
 
-/// `u16` is used for `PUSHC` pool indices.
-impl FromOperand for u16 {
-    fn from_operand(
-        op: &Operand,
-        field: &str,
-        mnemonic: &str,
-        offset: usize,
-        src: Source<'_>,
-    ) -> Result<Self, AssembleError> {
-        match op {
-            Operand::Integer(n) => {
-                Self::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
-                    value: *n,
-                    target_type: "u16",
-                    field: field.to_string(),
-                    mnemonic: mnemonic.to_string(),
-                    src: make_src(src),
-                    span: make_span(offset, mnemonic.len()),
-                })
+/// `[u8; N]` fields appear on `PUSHC_1`..`PUSHC_8` instructions.
+///
+/// These mnemonics are not user-facing (assembly uses `PUSH`/`PUSHC` which are
+/// handled by `assemble_push` before this path is reached), so this impl is
+/// only present to satisfy the compiler for the `impl_build_instr` macro arms.
+macro_rules! impl_from_operand_byte_array {
+    ($($n:literal),+) => {
+        $(
+            impl FromOperand for [u8; $n] {
+                fn from_operand(
+                    _op: &Operand,
+                    field: &str,
+                    mnemonic: &str,
+                    offset: usize,
+                    src: Source<'_>,
+                ) -> Result<Self, AssembleError> {
+                    Err(AssembleError::UnknownMnemonic {
+                        mnemonic: mnemonic.to_string(),
+                        src: make_src(src),
+                        span: make_span(offset, field.len()),
+                    })
+                }
             }
-            _ => Err(AssembleError::WrongOperandKind {
-                mnemonic: mnemonic.to_string(),
-                field: field.to_string(),
-                expected_kind: "integer literal".to_string(),
-                src: make_src(src),
-                span: make_span(offset, mnemonic.len()),
-            }),
-        }
-    }
+        )+
+    };
 }
+
+impl_from_operand_byte_array!(1, 2, 3, 4, 5, 6, 7, 8);
 
 /// `i16` is used only for `JUMP`/`JUMPI` offsets, which are handled
 /// separately. This impl covers hypothetical non-jump opcodes that take an
@@ -584,14 +546,14 @@ mod tests {
 
     #[test]
     fn push_zero() {
-        // opcode 0x10, i16(0) in BE = 2 zero bytes
-        assert_eq!(asm("PUSH 0"), [0x10, 0x00, 0x00]);
+        // 0 encodes as PUSHC_0 (opcode 0x10, no payload)
+        assert_eq!(asm("PUSH 0"), [0x10]);
     }
 
     #[test]
     fn push_negative() {
-        // i16(-1) in BE = [0xFF, 0xFF]
-        assert_eq!(asm("PUSH -1"), [0x10, 0xFF, 0xFF]);
+        // -1 encodes as PUSHC_1 (opcode 0x18) with 1-byte payload 0xFF
+        assert_eq!(asm("PUSH -1"), [0x18, 0xFF]);
     }
 
     #[test]
@@ -609,8 +571,8 @@ mod tests {
         let src = "PUSH 5\nPUSH 3\nADD\nHALT";
         let buf = asm(src);
         let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::Push { imm: 5 });
-        assert_eq!(instrs[1], Instruction::Push { imm: 3 });
+        assert_eq!(instrs[0], Instruction::PushC1 { val: [5] });
+        assert_eq!(instrs[1], Instruction::PushC1 { val: [3] });
         assert_eq!(instrs[2], Instruction::Add {});
         assert_eq!(instrs[3], Instruction::Halt {});
     }
@@ -633,15 +595,15 @@ mod tests {
     #[test]
     fn backward_jumpi_label() {
         // top:
-        // PUSH -1   (3 bytes at 0)
-        // ADD       (1 byte  at 3)
-        // DUPL      (1 byte  at 4)
-        // JUMPI top (3 bytes at 5)
-        // => delta = 0 - 5 = -5
+        // PUSH -1   (2 bytes at 0: PUSHC_1 0xFF)
+        // ADD       (1 byte  at 2)
+        // DUPL      (1 byte  at 3)
+        // JUMPI top (3 bytes at 4)
+        // => delta = 0 - 4 = -4
         let src = "top:\nPUSH -1\nADD\nDUPL\nJUMPI top";
         let buf = asm(src);
         let instrs = decode_all(&buf);
-        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -5 });
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -4 });
     }
 
     #[test]
@@ -702,7 +664,8 @@ mod tests {
     fn push_hex_literal() {
         let buf = asm("PUSH 0xFF");
         let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::Push { imm: 255 });
+        // 255 fits in 2 bytes (needs sign bit), so PUSHC_2 { val: [0x00, 0xFF] }
+        assert_eq!(instrs[0], Instruction::PushC2 { val: [0x00, 0xFF] });
     }
 
     #[test]
@@ -715,17 +678,14 @@ mod tests {
     }
 
     #[test]
-    fn pushc_assembles_to_pool_and_index() {
+    fn pushc_assembles_inline() {
         let src = "PUSHC 12345";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
-        // Pool should contain exactly one entry with value 12345 at index 0.
-        assert_eq!(program.pool().len(), 1, "expected 1 pool entry");
-        assert_eq!(program.pool().get(0), Some(12345i64));
-        // Instruction stream should decode to PushC { idx: 0 }.
+        // 12345 = 0x3039, fits in 2 bytes, so PUSHC_2 { val: [0x30, 0x39] }.
         let instrs = decode_all(program.code());
         assert_eq!(instrs.len(), 1);
-        assert_eq!(instrs[0], Instruction::PushC { idx: 0 });
+        assert_eq!(instrs[0], Instruction::PushC2 { val: [0x30, 0x39] });
     }
 
     #[test]
