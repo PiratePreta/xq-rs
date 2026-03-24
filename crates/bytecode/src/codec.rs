@@ -46,7 +46,10 @@
 //! assert_eq!(consumed, bytes2.len());
 //! ```
 
-use std::fmt;
+use core::fmt;
+
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec::Vec};
 
 use serde::de::{self, SeqAccess, Visitor};
 use serde::ser::SerializeTuple;

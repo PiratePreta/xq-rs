@@ -44,8 +44,14 @@
 //! assert_eq!(vm.stack(), &[42]);
 //! ```
 
+// No standard library when the `std` feature is disabled (e.g. WASM targets).
+// The `alloc` crate provides heap types (`Vec`, `BTreeMap`, ...).
+#![cfg_attr(not(feature = "std"), no_std)]
 // Private modules have doc tests that are only visible to maintainers.
 #![allow(rustdoc::private_doc_tests)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 mod error;
 mod model;
@@ -56,7 +62,9 @@ mod vm;
 // Public API re-exports
 // ---------------------------------------------------------------------------
 
-pub use error::{Error, RuntimeDiagnostic};
+pub use error::Error;
+#[cfg(feature = "std")]
+pub use error::RuntimeDiagnostic;
 pub use model::{Domain, XqmxModel, XqmxSample};
 pub use value::RegVal;
 pub use vm::Vm;

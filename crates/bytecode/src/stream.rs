@@ -53,7 +53,7 @@
 //!
 //! // No jumps -- every label is None.
 //! let decoded: Vec<_> = InstructionStream::new(&buf)
-//!     .collect::<std::result::Result<Vec<_>, _>>()
+//!     .collect::<Result<Vec<_>>>()
 //!     .unwrap();
 //!
 //! assert_eq!(decoded.len(), 4);
@@ -62,6 +62,9 @@
 //! assert!(decoded.iter().all(|(_, label, _)| label.is_none()));
 //! ```
 
+#[cfg(not(feature = "std"))]
+use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
+#[cfg(feature = "std")]
 use std::collections::BTreeMap;
 
 use thiserror::Error;
@@ -110,7 +113,7 @@ pub enum Error {
     },
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = core::result::Result<T, Error>;
 
 // ---------------------------------------------------------------------------
 // Label collection (single pre-pass over the raw bytes)
@@ -462,7 +465,7 @@ mod tests {
         ];
         let buf = assemble(&program);
         let items: Vec<_> = InstructionStream::new(&buf)
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<Result<Vec<_>>>()
             .unwrap();
         assert_eq!(items.len(), 4);
         for (i, (_, _, instr)) in items.iter().enumerate() {

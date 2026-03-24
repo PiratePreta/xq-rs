@@ -75,8 +75,14 @@
 //! assert_eq!(program[0].mnemonic(), "PUSHC_0");
 //! ```
 
+// No standard library when the `std` feature is disabled (e.g. WASM targets).
+// The `alloc` crate provides heap types (`Vec`, `String`, `BTreeMap`, ...).
+#![cfg_attr(not(feature = "std"), no_std)]
 // Private modules have doc tests that are only visible to maintainers.
 #![allow(rustdoc::private_doc_tests)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 // `opcodes!` is defined inside `types::table` with `#[macro_export]`, so it
 // lands at the crate root automatically.

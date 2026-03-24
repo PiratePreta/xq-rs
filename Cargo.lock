@@ -367,19 +367,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9dd20bb3a9f4c823c74502b65bb83b90e2168277cd6b894cb5fea2ebeec526b"
 dependencies = [
- "oxicode_derive",
  "serde",
-]
-
-[[package]]
-name = "oxicode_derive"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dc762b45eb3b452b1c5b50ea7abef625c8946d645c93fdf964d1a8cdcbd1720"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

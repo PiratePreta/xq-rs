@@ -68,6 +68,9 @@
 //! assert!(!program.code().is_empty());
 //! ```
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use thiserror::Error;
 
 use crate::codec;
@@ -103,7 +106,7 @@ pub enum Error {
     },
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = core::result::Result<T, Error>;
 
 // ---------------------------------------------------------------------------
 // LabelId
@@ -385,7 +388,7 @@ impl InstructionBuilder {
     ///
     /// // Verify the instruction bytes decode cleanly.
     /// let instrs: Vec<_> = InstructionStream::new(program.code())
-    ///     .collect::<std::result::Result<Vec<_>, _>>()
+    ///     .collect::<Result<Vec<_>>>()
     ///     .unwrap();
     /// assert_eq!(instrs.last().unwrap().2, Instruction::Halt {});
     /// ```
