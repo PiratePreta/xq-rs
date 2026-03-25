@@ -42,7 +42,7 @@
 //! b.place(loop_top);
 //! b.push(-1);
 //! b.add();
-//! b.dupl();
+//! b.copy();
 //! b.jump_if(loop_top);  // backward reference
 //! b.pop();
 //! b.halt();
@@ -138,7 +138,7 @@ struct Fixup {
 /// [`emit`](Self::emit), anchor labels with [`place`](Self::place), and
 /// finalise the buffer with [`build`](Self::build).
 ///
-/// Use [`push`](Self::push) to emit the smallest `PUSHC_N` instruction that
+/// Use [`push`](Self::push) to emit the smallest `PushN` instruction that
 /// faithfully represents the given `i64` value.
 ///
 /// # Examples
@@ -191,7 +191,7 @@ macro_rules! impl_builder_methods {
         impl_builder_methods!($($rest)*);
     };
 
-    // Skip PUSHC_1..PUSHC_8 -- `{val: ...}` -- dedicated push() handles them.
+    // Skip PUSH1..PUSH8 -- `{val: ...}` -- dedicated push() handles them.
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
        {val: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
@@ -207,6 +207,13 @@ macro_rules! impl_builder_methods {
                 self.emit(Instruction::$variant {})
             }
         }
+        impl_builder_methods!($($rest)*);
+    };
+
+    // Skip DROP -- `{reg: ...}` for Drop variant only -- hand-written as drop_reg()
+    // to avoid shadowing core::mem::drop.
+    ( ($code:literal, Drop, $mnem:literal, $doc:literal,
+       {reg: $($ftype:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
@@ -320,7 +327,7 @@ impl InstructionBuilder {
     }
 
     // Generated from the opcode table: no-arg and single-register methods.
-    // JUMP, JUMPI, ENERGY, and PUSHC_1..PUSHC_8 are excluded -- they have
+    // JUMP, JUMPI, ENERGY, and PUSH1..PUSH8 are excluded -- they have
     // hand-written methods.
     opcodes!(impl_builder_methods);
 
@@ -328,19 +335,27 @@ impl InstructionBuilder {
     // Stack
     // -----------------------------------------------------------------------
 
-    /// Emit the smallest `PUSHC_N` instruction that faithfully represents `val`.
+    /// Emit the smallest `PushN` instruction that faithfully represents `val`.
     ///
-    /// * `val == 0`  -- [`PushC0`](Instruction::PushC0) (1 byte)
-    /// * fits in i8  -- [`PushC1`](Instruction::PushC1) (2 bytes)
-    /// * fits in i16 -- [`PushC2`](Instruction::PushC2) (3 bytes)
-    /// * fits in i24 -- [`PushC3`](Instruction::PushC3) (4 bytes)
-    /// * fits in i32 -- [`PushC4`](Instruction::PushC4) (5 bytes)
-    /// * fits in i40 -- [`PushC5`](Instruction::PushC5) (6 bytes)
-    /// * fits in i48 -- [`PushC6`](Instruction::PushC6) (7 bytes)
-    /// * fits in i56 -- [`PushC7`](Instruction::PushC7) (8 bytes)
-    /// * any i64     -- [`PushC8`](Instruction::PushC8) (9 bytes)
+    /// * fits in i8  -- [`Push1`](Instruction::Push1) (2 bytes)
+    /// * fits in i16 -- [`Push2`](Instruction::Push2) (3 bytes)
+    /// * fits in i24 -- [`Push3`](Instruction::Push3) (4 bytes)
+    /// * fits in i32 -- [`Push4`](Instruction::Push4) (5 bytes)
+    /// * fits in i40 -- [`Push5`](Instruction::Push5) (6 bytes)
+    /// * fits in i48 -- [`Push6`](Instruction::Push6) (7 bytes)
+    /// * fits in i56 -- [`Push7`](Instruction::Push7) (8 bytes)
+    /// * any i64     -- [`Push8`](Instruction::Push8) (9 bytes)
     pub fn push(&mut self, val: i64) -> &mut Self {
-        self.emit(minimal_pushc(val))
+        self.emit(minimal_push(val))
+    }
+
+    // -----------------------------------------------------------------------
+    // Registers (hand-written to avoid shadowing core::mem::drop)
+    // -----------------------------------------------------------------------
+
+    /// Reset a register to `Int(0)`.
+    pub fn drop_reg(&mut self, reg: Register) -> &mut Self {
+        self.emit(Instruction::Drop { reg })
     }
 
     // -----------------------------------------------------------------------
@@ -454,41 +469,38 @@ impl InstructionBuilder {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Return the smallest `PUSHC_N` instruction that faithfully represents `val`.
-fn minimal_pushc(val: i64) -> Instruction {
-    if val == 0 {
-        return Instruction::PushC0 {};
-    }
+/// Return the smallest `PushN` instruction that faithfully represents `val`.
+fn minimal_push(val: i64) -> Instruction {
     let be = val.to_be_bytes();
     for n in 1usize..=7 {
         let bits = (n * 8) as u32;
         let shift = 64 - bits;
         if (val << shift) >> shift == val {
             return match n {
-                1 => Instruction::PushC1 { val: [be[7]] },
-                2 => Instruction::PushC2 {
+                1 => Instruction::Push1 { val: [be[7]] },
+                2 => Instruction::Push2 {
                     val: [be[6], be[7]],
                 },
-                3 => Instruction::PushC3 {
+                3 => Instruction::Push3 {
                     val: [be[5], be[6], be[7]],
                 },
-                4 => Instruction::PushC4 {
+                4 => Instruction::Push4 {
                     val: [be[4], be[5], be[6], be[7]],
                 },
-                5 => Instruction::PushC5 {
+                5 => Instruction::Push5 {
                     val: [be[3], be[4], be[5], be[6], be[7]],
                 },
-                6 => Instruction::PushC6 {
+                6 => Instruction::Push6 {
                     val: [be[2], be[3], be[4], be[5], be[6], be[7]],
                 },
-                7 => Instruction::PushC7 {
+                7 => Instruction::Push7 {
                     val: [be[1], be[2], be[3], be[4], be[5], be[6], be[7]],
                 },
                 _ => unreachable!(),
             };
         }
     }
-    Instruction::PushC8 { val: be }
+    Instruction::Push8 { val: be }
 }
 
 // ---------------------------------------------------------------------------
@@ -513,67 +525,67 @@ mod tests {
     }
 
     #[test]
-    fn push_zero_emits_pushc0() {
+    fn push_zero_emits_push1() {
         let mut b = InstructionBuilder::new();
         b.push(0).halt();
         let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs[0], Instruction::PushC0 {});
+        assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
     }
 
     #[test]
-    fn push_i8_emits_pushc1() {
+    fn push_i8_emits_push1() {
         let mut b = InstructionBuilder::new();
         b.push(42).halt();
         let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs[0], Instruction::PushC1 { val: [42] });
+        assert_eq!(instrs[0], Instruction::Push1 { val: [42] });
     }
 
     #[test]
-    fn push_minus_one_emits_pushc1() {
+    fn push_minus_one_emits_push1() {
         let mut b = InstructionBuilder::new();
         b.push(-1).halt();
         let instrs = decode_all(b.build().unwrap().code());
         // -1 as i8 = 0xFF
-        assert_eq!(instrs[0], Instruction::PushC1 { val: [0xFF] });
+        assert_eq!(instrs[0], Instruction::Push1 { val: [0xFF] });
     }
 
     #[test]
-    fn push_i8_max_uses_pushc1() {
+    fn push_i8_max_uses_push1() {
         let mut b = InstructionBuilder::new();
         b.push(127).halt();
         let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs[0], Instruction::PushC1 { val: [0x7F] });
+        assert_eq!(instrs[0], Instruction::Push1 { val: [0x7F] });
     }
 
     #[test]
-    fn push_i8_max_plus_one_uses_pushc2() {
+    fn push_i8_max_plus_one_uses_push2() {
         let mut b = InstructionBuilder::new();
         b.push(128).halt();
         let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs[0], Instruction::PushC2 { val: [0x00, 0x80] });
+        assert_eq!(instrs[0], Instruction::Push2 { val: [0x00, 0x80] });
     }
 
     #[test]
-    fn push_i64_max_uses_pushc8() {
+    fn push_i64_max_uses_push8() {
         let mut b = InstructionBuilder::new();
         b.push(i64::MAX).halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(
             instrs[0],
-            Instruction::PushC8 {
+            Instruction::Push8 {
                 val: i64::MAX.to_be_bytes()
             }
         );
     }
 
     #[test]
-    fn push_i64_min_uses_pushc8() {
+    fn push_i64_min_uses_push8() {
         let mut b = InstructionBuilder::new();
         b.push(i64::MIN).halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(
             instrs[0],
-            Instruction::PushC8 {
+            Instruction::Push8 {
                 val: i64::MIN.to_be_bytes()
             }
         );
@@ -581,14 +593,14 @@ mod tests {
 
     #[test]
     fn backward_jump_resolves_correctly() {
-        // PushC0 (1 byte) at 0; JUMPI (3 bytes) at 1; target label = 0.
+        // Push1 (2 bytes) at 0; JUMPI (3 bytes) at 2; target label = 0.
         let mut b = InstructionBuilder::new();
         let top = b.label();
         b.place(top).push(0).jump_if(top);
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[0], Instruction::PushC0 {});
+        assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
         assert_eq!(instrs[1], Instruction::JumpI { label: 0 });
 
         // Jump table entry for label 0 starts at byte 0.
@@ -630,8 +642,8 @@ mod tests {
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
         assert_eq!(*instrs.last().unwrap(), Instruction::Halt {});
-        assert_eq!(instrs[0], Instruction::PushC0 {});
-        assert_eq!(instrs[2], Instruction::PushC0 {});
+        assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
+        assert_eq!(instrs[2], Instruction::Push1 { val: [0x00] });
         assert!(matches!(instrs[1], Instruction::JumpI { label: 0 }));
         assert!(matches!(instrs[3], Instruction::JumpI { label: 0 }));
         assert_eq!(instrs[4], Instruction::Halt {});
@@ -664,9 +676,9 @@ mod tests {
     #[test]
     fn emit_arbitrary_instruction() {
         let mut b = InstructionBuilder::new();
-        b.emit(Instruction::Dupl {}).emit(Instruction::Halt {});
+        b.emit(Instruction::Copy {}).emit(Instruction::Halt {});
         let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs, [Instruction::Dupl {}, Instruction::Halt {}]);
+        assert_eq!(instrs, [Instruction::Copy {}, Instruction::Halt {}]);
     }
 
     #[test]

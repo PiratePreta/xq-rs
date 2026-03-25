@@ -46,9 +46,9 @@
 //! }
 //!
 //! let mnemonics = aglais_xqvm_bytecode::opcodes!(list_mnemonics);
-//! assert_eq!(mnemonics.len(), 76);
+//! assert_eq!(mnemonics.len(), 84);
 //! assert!(mnemonics.contains(&"ENERGY"));
-//! assert!(mnemonics.contains(&"PUSHC_0"));
+//! assert!(mnemonics.contains(&"PUSH1"));
 //! ```
 //!
 //! # Quick start
@@ -57,12 +57,12 @@
 //! use aglais_xqvm_bytecode::{Instruction, Opcode, Register};
 //!
 //! let program: &[Instruction] = &[
-//!     Instruction::PushC0 {},
-//!     Instruction::PushC1 { val: [10] },
+//!     Instruction::Push1  { val: [0] },
+//!     Instruction::Push1  { val: [10] },
 //!     Instruction::Range  {},
 //!     Instruction::LVal   { reg: Register(0) },
 //!     Instruction::Load   { reg: Register(0) },
-//!     Instruction::PushC1 { val: [5] },
+//!     Instruction::Push1  { val: [5] },
 //!     Instruction::Gt     {},
 //!     Instruction::JumpI  { label: 0u16 },
 //!     Instruction::Next   {},
@@ -70,9 +70,9 @@
 //!     Instruction::Halt   {},
 //! ];
 //!
-//! assert_eq!(program[0].opcode(), Opcode::PushC0);
-//! assert_eq!(program[0].opcode() as u8, 0x10);
-//! assert_eq!(program[0].mnemonic(), "PUSHC_0");
+//! assert_eq!(program[0].opcode(), Opcode::Push1);
+//! assert_eq!(program[0].opcode() as u8, 0x11);
+//! assert_eq!(program[0].mnemonic(), "PUSH1");
 //! ```
 
 // No standard library when the `std` feature is disabled (e.g. WASM targets).

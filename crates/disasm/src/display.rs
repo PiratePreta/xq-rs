@@ -23,7 +23,7 @@
 //! with their `.N` label from the jump table, both at the destination and as
 //! the operand of the originating `JUMP`/`JUMPI`.
 //!
-//! `PUSHC_1`..`PUSHC_8` operands are rendered as their sign-extended decimal
+//! `PUSH1`..`PUSHC_8` operands are rendered as their sign-extended decimal
 //! value.
 //!
 //! Unknown bytes (invalid opcodes or truncated operands) are displayed as
@@ -38,7 +38,7 @@
 //! label is present at an address the column is left blank so columns align:
 //!
 //! ```text
-//!   0x0000:  .0:  PUSHC_2  12345
+//!   0x0000:  .0:  PUSH2   12345
 //!   0x0003:       GT
 //!   0x0004:       JUMPI    .0
 //!   0x0007:       HALT
@@ -52,15 +52,15 @@
 //!
 //! // No jumps -- label column is suppressed entirely.
 //! let program = [
-//!     Instruction::PushC1 { val: [1] },
-//!     Instruction::PushC1 { val: [2] },
+//!     Instruction::Push1 { val: [1] },
+//!     Instruction::Push1 { val: [2] },
 //!     Instruction::Add  {},
 //!     Instruction::Halt {},
 //! ];
 //! let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
 //!
 //! let text = Disassembly::new(&buf).to_string();
-//! assert!(text.contains("PUSHC_1"));
+//! assert!(text.contains("PUSH1"));
 //! assert!(text.contains("ADD"));
 //! assert!(text.contains("HALT"));
 //! ```
@@ -126,7 +126,7 @@ impl FmtOperand for i64 {
     }
 }
 
-/// `[u8; N]` fields appear on `PUSHC_1`..`PUSHC_8` -- render as a decimal
+/// `[u8; N]` fields appear on `PUSH1`..`PUSHC_8` -- render as a decimal
 /// by sign-extending the bytes to `i64`.
 macro_rules! impl_fmt_operand_byte_array {
     ($($n:literal),+) => {
@@ -207,7 +207,7 @@ opcodes!(impl_fmt_instruction);
 /// Each label is printed inline between the byte offset and the mnemonic.
 /// When no label exists at an address the column is left blank so all
 /// columns align. `JUMP`/`JUMPI` operands are rendered as `.N` label
-/// references. `PUSHC_1`..`PUSHC_8` operands are sign-extended and
+/// references. `PUSH1`..`PUSH8` operands are sign-extended and
 /// rendered as decimals.
 ///
 /// # Examples
@@ -217,8 +217,8 @@ opcodes!(impl_fmt_instruction);
 /// use aglais_xqvm_disasm::Disassembly;
 ///
 /// let program = [
-///     Instruction::PushC1 { val: [5] },
-///     Instruction::PushC1 { val: [0xFF] },
+///     Instruction::Push1 { val: [5] },
+///     Instruction::Push1 { val: [0xFF] },
 ///     Instruction::Add    {},
 ///     Instruction::Halt   {},
 /// ];
@@ -267,13 +267,13 @@ impl<'a> Disassembly<'a> {
     /// use aglais_xqvm_bytecode::{Instruction, codec};
     /// use aglais_xqvm_disasm::Disassembly;
     ///
-    /// let program = [Instruction::PushC1 { val: [1] }, Instruction::Halt {}];
+    /// let program = [Instruction::Push1 { val: [1] }, Instruction::Halt {}];
     /// let buf: Vec<u8> = program.iter().flat_map(codec::encode).collect();
     ///
     /// let mut out = Vec::new();
     /// Disassembly::new(&buf).write_to(&mut out).unwrap();
     /// let text = String::from_utf8(out).unwrap();
-    /// assert!(text.contains("PUSHC_1"));
+    /// assert!(text.contains("PUSH1"));
     /// assert!(text.contains("HALT"));
     /// ```
     pub fn write_to(&self, out: &mut impl io::Write) -> io::Result<()> {
@@ -356,9 +356,9 @@ mod tests {
 
     #[test]
     fn basic_program_contains_mnemonics() {
-        let buf = assemble(&[Instruction::PushC1 { val: [42] }, Instruction::Halt {}]);
+        let buf = assemble(&[Instruction::Push1 { val: [42] }, Instruction::Halt {}]);
         let text = Disassembly::new(&buf).to_string();
-        assert!(text.contains("PUSHC_1"), "missing PUSHC_1 in:\n{text}");
+        assert!(text.contains("PUSH1"), "missing PUSH1 in:\n{text}");
         assert!(text.contains("42"), "missing immediate 42 in:\n{text}");
         assert!(text.contains("HALT"), "missing HALT in:\n{text}");
     }
@@ -372,8 +372,8 @@ mod tests {
 
     #[test]
     fn byte_offsets_are_correct() {
-        // PUSHC_0 is 1 byte (opcode only); HALT starts at offset 1.
-        let buf = assemble(&[Instruction::PushC0 {}, Instruction::Halt {}]);
+        // POP is 1 byte (opcode only); HALT starts at offset 1.
+        let buf = assemble(&[Instruction::Pop {}, Instruction::Halt {}]);
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("0x0000"), "missing 0x0000 in:\n{text}");
         assert!(text.contains("0x0001"), "missing 0x0001 in:\n{text}");
@@ -383,7 +383,7 @@ mod tests {
     fn backward_jump_gets_label() {
         // Build a program with a jump table entry for label .0 at offset 0.
         let code = assemble(&[
-            Instruction::PushC1 { val: [5] },
+            Instruction::Push1 { val: [5] },
             Instruction::Gt {},
             Instruction::JumpI { label: 0u16 },
             Instruction::Halt {},
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn negative_immediate_displays_correctly() {
-        let buf = assemble(&[Instruction::PushC1 { val: [0xF9] }]); // -7 as i8
+        let buf = assemble(&[Instruction::Push1 { val: [0xF9] }]); // -7 as i8
         let text = Disassembly::new(&buf).to_string();
         assert!(text.contains("-7"), "expected -7 in:\n{text}");
     }
@@ -485,22 +485,22 @@ mod tests {
     }
 
     #[test]
-    fn pushc2_displays_value() {
-        // PUSHC_2 with 0x0007 encodes the value 7.
+    fn push2_displays_value() {
+        // PUSH2 with 0x0007 encodes the value 7.
         let buf = assemble(&[
-            Instruction::PushC2 { val: [0x00, 0x07] },
+            Instruction::Push2 { val: [0x00, 0x07] },
             Instruction::Halt {},
         ]);
         let text = Disassembly::new(&buf).to_string();
-        assert!(text.contains("PUSHC_2"), "missing PUSHC_2 in:\n{text}");
+        assert!(text.contains("PUSH2"), "missing PUSH2 in:\n{text}");
         assert!(text.contains('7'), "missing value 7 in:\n{text}");
     }
 
     #[test]
-    fn pushc3_displays_large_value() {
-        // 100000 = 0x0001_86A0 fits in PUSHC_3.
+    fn push3_displays_large_value() {
+        // 100000 = 0x0001_86A0 fits in PUSH3.
         let buf = assemble(&[
-            Instruction::PushC3 {
+            Instruction::Push3 {
                 val: [0x01, 0x86, 0xA0],
             },
             Instruction::Halt {},

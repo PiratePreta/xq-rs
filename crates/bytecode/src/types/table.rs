@@ -17,7 +17,7 @@
 
 /// Invoke `$mac!` with the complete XQVM opcode table.
 ///
-/// The callback macro receives the full comma-separated list of 76 opcode
+/// The callback macro receives the full comma-separated list of 84 opcode
 /// entries. Each entry has the form:
 ///
 /// ```text
@@ -31,6 +31,9 @@
 /// | `"MNEMONIC"` | `str` literal | Uppercase assembly mnemonic |
 /// | `"doc"` | `str` literal | Single-sentence description |
 /// | `{field: Type, ...}` | named-field list | Zero or more named operand fields |
+///
+/// Codes `0x08` and `0x0D` are unassigned gaps reserved for future use;
+/// the decoder and VM treat them as illegal opcodes.
 ///
 /// # Examples
 ///
@@ -68,43 +71,51 @@ macro_rules! opcodes {
              {}),
             (0x07, Iter,    "ITER",     "Start a vec iteration over a slice of a register's vec.",
              {reg: $crate::Register}),
-            (0x0F, Halt,    "HALT",     "Stop execution.",
+            // 0x08 is reserved (unassigned gap).
+            (0x09, Halt,    "HALT",     "Stop execution.",
              {}),
             // ---------------------------------------------------------------
-            // Stack & Register I/O
+            // Register I/O
             // ---------------------------------------------------------------
-            (0x10, PushC0,  "PUSHC_0",  "Push the constant 0 (zero-byte immediate).",
-             {}),
-            (0x11, Pop,     "POP",      "Discard the top of the stack.",
-             {}),
-            (0x12, Dupl,    "DUPL",     "Duplicate the top of the stack.",
-             {}),
-            (0x13, Swap,    "SWAP",     "Swap the top two stack elements.",
-             {}),
-            (0x14, Load,    "LOAD",     "Push the value of an int register onto the stack.",
+            (0x0A, Load,    "LOAD",     "Push the value of an int register onto the stack.",
              {reg: $crate::Register}),
-            (0x15, Stow,    "STOW",     "Pop the top of the stack into an int register.",
+            (0x0B, Stow,    "STOW",     "Pop the top of the stack into an int register.",
              {reg: $crate::Register}),
-            (0x16, Input,   "INPUT",    "Pop a calldata slot index and load that slot into a register.",
+            (0x0C, Drop,    "DROP",     "Reset a register to Int(0).",
              {reg: $crate::Register}),
-            (0x17, Output,  "OUTPUT",   "Pop an output slot index and write the register to it.",
+            // 0x0D is reserved (unassigned gap).
+            (0x0E, Input,   "INPUT",    "Pop a calldata slot index and load that slot into a register.",
              {reg: $crate::Register}),
-            (0x18, PushC1,  "PUSHC_1",  "Push a 1-byte big-endian signed constant, sign-extended to i64.",
+            (0x0F, Output,  "OUTPUT",   "Pop an output slot index and write the register to it.",
+             {reg: $crate::Register}),
+            // ---------------------------------------------------------------
+            // Stack Manipulation
+            // ---------------------------------------------------------------
+            (0x10, Pop,     "POP",      "Discard the top of the stack.",
+             {}),
+            (0x11, Push1,   "PUSH1",    "Push a 1-byte big-endian signed constant, sign-extended to i64.",
              {val: [u8; 1]}),
-            (0x19, PushC2,  "PUSHC_2",  "Push a 2-byte big-endian signed constant, sign-extended to i64.",
+            (0x12, Push2,   "PUSH2",    "Push a 2-byte big-endian signed constant, sign-extended to i64.",
              {val: [u8; 2]}),
-            (0x1A, PushC3,  "PUSHC_3",  "Push a 3-byte big-endian signed constant, sign-extended to i64.",
+            (0x13, Push3,   "PUSH3",    "Push a 3-byte big-endian signed constant, sign-extended to i64.",
              {val: [u8; 3]}),
-            (0x1B, PushC4,  "PUSHC_4",  "Push a 4-byte big-endian signed constant, sign-extended to i64.",
+            (0x14, Push4,   "PUSH4",    "Push a 4-byte big-endian signed constant, sign-extended to i64.",
              {val: [u8; 4]}),
-            (0x1C, PushC5,  "PUSHC_5",  "Push a 5-byte big-endian signed constant, sign-extended to i64.",
+            (0x15, Push5,   "PUSH5",    "Push a 5-byte big-endian signed constant, sign-extended to i64.",
              {val: [u8; 5]}),
-            (0x1D, PushC6,  "PUSHC_6",  "Push a 6-byte big-endian signed constant, sign-extended to i64.",
+            (0x16, Push6,   "PUSH6",    "Push a 6-byte big-endian signed constant, sign-extended to i64.",
              {val: [u8; 6]}),
-            (0x1E, PushC7,  "PUSHC_7",  "Push a 7-byte big-endian signed constant, sign-extended to i64.",
+            (0x17, Push7,   "PUSH7",    "Push a 7-byte big-endian signed constant, sign-extended to i64.",
              {val: [u8; 7]}),
-            (0x1F, PushC8,  "PUSHC_8",  "Push a full 8-byte big-endian signed constant (i64).",
+            (0x18, Push8,   "PUSH8",    "Push a full 8-byte big-endian signed constant (i64).",
              {val: [u8; 8]}),
+            // 0x19 is a gap.
+            (0x1A, Sclr,    "SCLR",     "Clear the entire value stack.",
+             {}),
+            (0x1B, Swap,    "SWAP",     "Swap the top two stack elements.",
+             {}),
+            (0x1C, Copy,    "COPY",     "Duplicate the top of the stack.",
+             {}),
             // ---------------------------------------------------------------
             // Arithmetic
             // ---------------------------------------------------------------
@@ -118,46 +129,58 @@ macro_rules! opcodes {
              {}),
             (0x24, Modulo,  "MOD",      "Pop b and a; push a % b.",
              {}),
-            (0x25, Neg,     "NEG",      "Pop a; push -a.",
+            (0x25, Sqr,     "SQR",      "Pop a; push a * a.",
+             {}),
+            (0x26, Abs,     "ABS",      "Pop a; push |a|.",
+             {}),
+            (0x27, Neg,     "NEG",      "Pop a; push -a.",
+             {}),
+            (0x28, Min,     "MIN",      "Pop b and a; push min(a, b).",
+             {}),
+            (0x29, Max,     "MAX",      "Pop b and a; push max(a, b).",
+             {}),
+            (0x2A, Inc,     "INC",      "Pop a; push a + 1.",
+             {}),
+            (0x2B, Dec,     "DEC",      "Pop a; push a - 1.",
              {}),
             // ---------------------------------------------------------------
             // Comparison  (result: 1 if true, 0 if false)
             // ---------------------------------------------------------------
-            (0x26, Eq,      "EQ",       "Pop b and a; push 1 if a == b, else 0.",
+            (0x30, Eq,      "EQ",       "Pop b and a; push 1 if a == b, else 0.",
              {}),
-            (0x27, Lt,      "LT",       "Pop b and a; push 1 if a < b, else 0.",
+            (0x31, Lt,      "LT",       "Pop b and a; push 1 if a < b, else 0.",
              {}),
-            (0x28, Gt,      "GT",       "Pop b and a; push 1 if a > b, else 0.",
+            (0x32, Gt,      "GT",       "Pop b and a; push 1 if a > b, else 0.",
              {}),
-            (0x29, Lte,     "LTE",      "Pop b and a; push 1 if a <= b, else 0.",
+            (0x33, Lte,     "LTE",      "Pop b and a; push 1 if a <= b, else 0.",
              {}),
-            (0x2A, Gte,     "GTE",      "Pop b and a; push 1 if a >= b, else 0.",
+            (0x34, Gte,     "GTE",      "Pop b and a; push 1 if a >= b, else 0.",
              {}),
             // ---------------------------------------------------------------
             // Logical Boolean
             // ---------------------------------------------------------------
-            (0x30, Not,     "NOT",      "Pop a; push 1 if a == 0, else 0.",
+            (0x36, Not,     "NOT",      "Pop a; push 1 if a == 0, else 0.",
              {}),
-            (0x31, And,     "AND",      "Pop b and a; push 1 if both are non-zero, else 0.",
+            (0x37, And,     "AND",      "Pop b and a; push 1 if both are non-zero, else 0.",
              {}),
-            (0x32, Or,      "OR",       "Pop b and a; push 1 if either is non-zero, else 0.",
+            (0x38, Or,      "OR",       "Pop b and a; push 1 if either is non-zero, else 0.",
              {}),
-            (0x33, Xor,     "XOR",      "Pop b and a; push 1 if exactly one is non-zero, else 0.",
+            (0x39, Xor,     "XOR",      "Pop b and a; push 1 if exactly one is non-zero, else 0.",
              {}),
             // ---------------------------------------------------------------
             // Bitwise
             // ---------------------------------------------------------------
-            (0x34, BAnd,    "BAND",     "Pop b and a; push a & b.",
+            (0x3A, BAnd,    "BAND",     "Pop b and a; push a & b.",
              {}),
-            (0x35, BOr,     "BOR",      "Pop b and a; push a | b.",
+            (0x3B, BOr,     "BOR",      "Pop b and a; push a | b.",
              {}),
-            (0x36, BXor,    "BXOR",     "Pop b and a; push a ^ b.",
+            (0x3C, BXor,    "BXOR",     "Pop b and a; push a ^ b.",
              {}),
-            (0x37, BNot,    "BNOT",     "Pop a; push ~a.",
+            (0x3D, BNot,    "BNOT",     "Pop a; push ~a.",
              {}),
-            (0x38, Shl,     "SHL",      "Pop b and a; push a << b.",
+            (0x3E, Shl,     "SHL",      "Pop b and a; push a << b.",
              {}),
-            (0x39, Shr,     "SHR",      "Pop b and a; push a >> b (logical right shift).",
+            (0x3F, Shr,     "SHR",      "Pop b and a; push a >> b (logical right shift).",
              {}),
             // ---------------------------------------------------------------
             // Allocators
@@ -232,11 +255,13 @@ macro_rules! opcodes {
             // ---------------------------------------------------------------
             // XQMX High-Level Constraints
             // ---------------------------------------------------------------
-            (0x70, OneHot,  "ONEHOT",   "Pop penalty and row; add a one-hot constraint over the grid row.",
+            (0x70, OneHotR, "ONEHOTR",  "Pop penalty and row; add a one-hot constraint over the grid row.",
              {reg: $crate::Register}),
-            (0x71, Exclude, "EXCLUDE",  "Pop penalty, j, and i; add a mutual-exclusion constraint between variables i and j.",
+            (0x71, OneHotC, "ONEHOTC",  "Pop penalty and col; add a one-hot constraint over the grid column.",
              {reg: $crate::Register}),
-            (0x72, Implies, "IMPLIES",  "Pop penalty, j, and i; add an implication constraint from variable i to variable j.",
+            (0x72, Exclude, "EXCLUDE",  "Pop penalty, j, and i; add a mutual-exclusion constraint between variables i and j.",
+             {reg: $crate::Register}),
+            (0x73, Implies, "IMPLIES",  "Pop penalty, j, and i; add an implication constraint from variable i to variable j.",
              {reg: $crate::Register}),
             (0x7F, Energy,  "ENERGY",   "Compute the Hamiltonian energy of a sample against a model; push the result.",
              {model: $crate::Register, sample: $crate::Register}),

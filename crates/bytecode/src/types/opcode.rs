@@ -52,8 +52,8 @@ macro_rules! impl_opcode {
         /// ```rust
         /// use aglais_xqvm_bytecode::Opcode;
         ///
-        /// assert_eq!(Opcode::PushC0 as u8, 0x10);
-        /// assert_eq!(Opcode::try_from(0x10u8).unwrap(), Opcode::PushC0);
+        /// assert_eq!(Opcode::Pop as u8, 0x10);
+        /// assert_eq!(Opcode::try_from(0x10u8).unwrap(), Opcode::Pop);
         /// ```
         #[repr(u8)]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -137,13 +137,15 @@ mod tests {
     }
 
     #[test]
-    fn opcode_count_is_76() {
-        assert_eq!(opcodes!(all_opcodes_array).len(), 76);
+    fn opcode_count_is_84() {
+        assert_eq!(opcodes!(all_opcodes_array).len(), 84);
     }
 
     #[test]
     fn unknown_opcode_returns_error() {
-        for byte in [0x08u8, 0x0E, 0x46, 0x49, 0x54, 0x59, 0x5C, 0xFE, 0xFF] {
+        for byte in [
+            0x08u8, 0x0D, 0x19, 0x1D, 0x2C, 0x35, 0x46, 0x49, 0x54, 0x59, 0x5C, 0xFE, 0xFF,
+        ] {
             assert_eq!(
                 Opcode::try_from(byte),
                 Err(DecodeError(byte)),
@@ -155,14 +157,15 @@ mod tests {
     #[test]
     fn spot_check_discriminants() {
         assert_eq!(Opcode::Nop as u8, 0x00);
-        assert_eq!(Opcode::Halt as u8, 0x0F);
-        assert_eq!(Opcode::PushC0 as u8, 0x10);
+        assert_eq!(Opcode::Halt as u8, 0x09);
+        assert_eq!(Opcode::Pop as u8, 0x10);
+        assert_eq!(Opcode::Push1 as u8, 0x11);
         assert_eq!(Opcode::Add as u8, 0x20);
-        assert_eq!(Opcode::Not as u8, 0x30);
+        assert_eq!(Opcode::Not as u8, 0x36);
         assert_eq!(Opcode::Bqmx as u8, 0x40);
         assert_eq!(Opcode::VecPush as u8, 0x50);
         assert_eq!(Opcode::GetLine as u8, 0x60);
-        assert_eq!(Opcode::OneHot as u8, 0x70);
+        assert_eq!(Opcode::OneHotR as u8, 0x70);
         assert_eq!(Opcode::Energy as u8, 0x7F);
     }
 }

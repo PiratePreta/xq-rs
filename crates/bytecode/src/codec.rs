@@ -32,7 +32,7 @@
 //! use aglais_xqvm_bytecode::{Instruction, Register};
 //! use aglais_xqvm_bytecode::codec;
 //!
-//! let instr = Instruction::PushC0 {};
+//! let instr = Instruction::Pop {};
 //! let bytes = codec::encode(&instr);
 //! assert_eq!(bytes[0], 0x10); // PUSHC_0 opcode byte
 //! assert_eq!(bytes.len(), 1);
@@ -86,10 +86,10 @@ const CODEC_CONFIG: oxicode::config::Configuration<
 /// use aglais_xqvm_bytecode::Instruction;
 /// use aglais_xqvm_bytecode::codec;
 ///
-/// assert_eq!(codec::encode(&Instruction::Halt {}), [0x0F]);
+/// assert_eq!(codec::encode(&Instruction::Halt {}), [0x09]);
 /// assert_eq!(codec::encode(&Instruction::Nop {}),  [0x00]);
-/// assert_eq!(codec::encode(&Instruction::PushC0 {}), [0x10]);
-/// assert_eq!(codec::encode(&Instruction::PushC1 { val: [42] }), [0x18, 42]);
+/// assert_eq!(codec::encode(&Instruction::Pop {}), [0x10]);
+/// assert_eq!(codec::encode(&Instruction::Push1 { val: [42] }), [0x11, 42]);
 /// ```
 pub fn encode(instr: &Instruction) -> Vec<u8> {
     // SAFETY: oxicode serialization of a statically-known Rust type with a
@@ -113,8 +113,8 @@ pub fn encode(instr: &Instruction) -> Vec<u8> {
 /// use aglais_xqvm_bytecode::{Instruction, Register};
 /// use aglais_xqvm_bytecode::codec;
 ///
-/// // LOAD r3 -> [0x14, 0x03]
-/// let bytes: &[u8] = &[0x14, 0x03];
+/// // LOAD r3 -> [0x0A, 0x03]
+/// let bytes: &[u8] = &[0x0A, 0x03];
 /// let (instr, n) = codec::decode(bytes).unwrap();
 /// assert_eq!(instr, Instruction::Load { reg: Register(3) });
 /// assert_eq!(n, 2);
@@ -257,7 +257,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn encode_decode_roundtrip_all_76() {
+    fn encode_decode_roundtrip_all_84() {
         for instr in opcodes!(all_instructions) {
             let bytes = encode(&instr);
             let (decoded, consumed) = decode(&bytes).expect("decode failed");
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn halt_is_one_byte() {
-        assert_eq!(encode(&Instruction::Halt {}), [0x0F]);
+        assert_eq!(encode(&Instruction::Halt {}), [0x09]);
     }
 
     #[test]
@@ -281,40 +281,40 @@ mod tests {
     }
 
     #[test]
-    fn pushc0_is_one_byte() {
-        assert_eq!(encode(&Instruction::PushC0 {}), [0x10]);
+    fn pop_is_one_byte() {
+        assert_eq!(encode(&Instruction::Pop {}), [0x10]);
     }
 
     #[test]
-    fn pushc1_is_two_bytes() {
-        assert_eq!(encode(&Instruction::PushC1 { val: [42] }), [0x18, 42]);
+    fn push1_is_two_bytes() {
+        assert_eq!(encode(&Instruction::Push1 { val: [42] }), [0x11, 42]);
     }
 
     #[test]
-    fn pushc2_is_three_bytes() {
+    fn push2_is_three_bytes() {
         assert_eq!(
-            encode(&Instruction::PushC2 { val: [0x00, 0x80] }),
-            [0x19, 0x00, 0x80]
+            encode(&Instruction::Push2 { val: [0x00, 0x80] }),
+            [0x12, 0x00, 0x80]
         );
     }
 
     #[test]
-    fn pushc3_is_four_bytes() {
+    fn push3_is_four_bytes() {
         assert_eq!(
-            encode(&Instruction::PushC3 {
+            encode(&Instruction::Push3 {
                 val: [0x01, 0x02, 0x03]
             }),
-            [0x1A, 0x01, 0x02, 0x03]
+            [0x13, 0x01, 0x02, 0x03]
         );
     }
 
     #[test]
-    fn pushc8_is_nine_bytes() {
+    fn push8_is_nine_bytes() {
         let v = 1_000_000_000_000i64.to_be_bytes();
         let mut expected = [0u8; 9];
-        expected[0] = 0x1F;
+        expected[0] = 0x18;
         expected[1..].copy_from_slice(&v);
-        assert_eq!(encode(&Instruction::PushC8 { val: v }), expected);
+        assert_eq!(encode(&Instruction::Push8 { val: v }), expected);
     }
 
     #[test]
@@ -342,15 +342,15 @@ mod tests {
 
     #[test]
     fn truncated_input_returns_error() {
-        // PushC8 opcode (0x1F) without the required 8 operand bytes -- truncated.
-        assert!(decode(&[0x1Fu8]).is_err());
+        // Push8 opcode (0x18) without the required 8 operand bytes -- truncated.
+        assert!(decode(&[0x18u8]).is_err());
     }
 
     #[test]
     fn encode_sequence_then_decode_each() {
         let program = [
-            Instruction::PushC1 { val: [5] },
-            Instruction::PushC1 { val: [3] },
+            Instruction::Push1 { val: [5] },
+            Instruction::Push1 { val: [3] },
             Instruction::Add {},
             Instruction::Halt {},
         ];
@@ -383,9 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn json_roundtrip_pushc0() {
-        // PushC0: opcode 0x10=16, no operands -> [16]
-        let instr = Instruction::PushC0 {};
+    fn json_roundtrip_pop() {
+        // Pop: opcode 0x10=16, no operands -> [16]
+        let instr = Instruction::Pop {};
         let json = serde_json::to_string(&instr).unwrap();
         assert_eq!(json, "[16]");
         assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
@@ -393,10 +393,10 @@ mod tests {
 
     #[test]
     fn json_roundtrip_load() {
-        // Load: opcode 0x14=20, reg -> [20, 7]
+        // Load: opcode 0x0A=10, reg -> [10, 7]
         let instr = Instruction::Load { reg: Register(7) };
         let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[20,7]");
+        assert_eq!(json, "[10,7]");
         assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
     }
 
@@ -422,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn json_roundtrip_all_76() {
+    fn json_roundtrip_all_84() {
         for instr in opcodes!(all_instructions) {
             let json = serde_json::to_string(&instr)
                 .unwrap_or_else(|e| panic!("serialize failed for {instr:?}: {e}"));
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn json_register_out_of_range_returns_error() {
-        // LOAD opcode=20, reg=256 overflows u8
-        assert!(serde_json::from_str::<Instruction>("[20, 256]").is_err());
+        // LOAD opcode=10, reg=256 overflows u8
+        assert!(serde_json::from_str::<Instruction>("[10, 256]").is_err());
     }
 }
