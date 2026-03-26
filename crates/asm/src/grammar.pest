@@ -5,7 +5,7 @@
 // optional comment.  Blank lines and comment-only lines are fully legal.
 //
 // Mnemonics are case-insensitive ASCII (e.g. PUSH, push, pUsH).
-// Label identifiers are lower/mixed case starting with a letter or underscore.
+// Labels use numeric .N syntax (e.g. .0, .1, .255).
 // Registers have the form r<digits> (e.g. r0, r255).
 // Integer literals may be signed decimal or 0x-prefixed hexadecimal.
 // Comments begin with ';' and run to the end of the line.
@@ -28,8 +28,8 @@ integer  = @{ ("-" | "+")? ~ ("0x" ~ ASCII_HEX_DIGIT+ | ASCII_DIGIT+) }
 /// A register operand: lowercase 'r' followed by 1-3 decimal digits.
 register = @{ "r" ~ ASCII_DIGIT{1, 3} }
 
-/// A label identifier: letter or underscore, then alphanumeric or underscore.
-label_id = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+/// A label identifier: dot followed by one or more decimal digits (e.g. .0, .1).
+label_id = @{ "." ~ ASCII_DIGIT+ }
 
 /// An instruction mnemonic: one or more ASCII letters/digits, any case.
 mnemonic = @{ ASCII_ALPHA ~ (ASCII_ALPHA | ASCII_DIGIT)* }

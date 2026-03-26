@@ -81,6 +81,10 @@ pub enum Error {
     #[error("jump from {pos:#06x} to {target:#010x} is out of bounds")]
     BadJumpTarget { pos: usize, target: usize },
 
+    /// A JUMP/JUMPI referenced a label not present in the jump table.
+    #[error("invalid label .{label} at byte {pos:#06x}")]
+    InvalidLabel { pos: usize, label: u16 },
+
     /// The bytecode stream returned a decode error.
     #[error("bad opcode {byte:#04x} at byte {pos:#06x}")]
     BadOpcode { pos: usize, byte: u8 },
@@ -172,6 +176,7 @@ impl Error {
             | Self::InvalidShift { pos, .. }
             | Self::InvalidGridDimensions { pos, .. }
             | Self::BadJumpTarget { pos, .. }
+            | Self::InvalidLabel { pos, .. }
             | Self::IndexOutOfBounds { pos, .. } => Some(*pos),
             Self::RegisterType { .. }
             | Self::CallDataIndex { .. }

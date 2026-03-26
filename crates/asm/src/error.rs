@@ -181,11 +181,11 @@ pub enum AssembleError {
     },
 
     /// A label reference was used in a `JUMP`/`JUMPI` but never defined.
-    #[error("undefined label '{label}'")]
+    #[error("undefined label '.{label}'")]
     #[diagnostic(code(xqasm::undefined_label))]
     UndefinedLabel {
-        /// The label name that was referenced but never defined.
-        label: String,
+        /// The numeric label index that was referenced but never defined.
+        label: u16,
         /// Source text for diagnostic rendering.
         #[source_code]
         src: NamedSource<Arc<str>>,
@@ -195,11 +195,11 @@ pub enum AssembleError {
     },
 
     /// A label was defined more than once in the same source.
-    #[error("label '{label}' is defined more than once")]
+    #[error("label '.{label}' is defined more than once")]
     #[diagnostic(code(xqasm::duplicate_label))]
     DuplicateLabel {
-        /// The duplicated label name.
-        label: String,
+        /// The duplicated label index.
+        label: u16,
         /// Source text for diagnostic rendering.
         #[source_code]
         src: NamedSource<Arc<str>>,
@@ -208,23 +208,17 @@ pub enum AssembleError {
         span: SourceSpan,
     },
 
-    /// The byte offset between a jump site and its target exceeds the
-    /// `i16` range `[-32768, 32767]`.
-    #[error(
-        "jump offset {delta} to label '{label}' \
-         does not fit in i16 (max range: -32768..=32767)"
-    )]
-    #[diagnostic(code(xqasm::jump_offset_overflow))]
-    JumpOffsetOverflow {
-        /// The label name.
-        label: String,
-        /// The computed offset that overflowed.
-        delta: i64,
+    /// A label was placed but never referenced by any `JUMP`/`JUMPI`.
+    #[error("label '.{label}' is defined but never used")]
+    #[diagnostic(code(xqasm::unused_label))]
+    UnusedLabel {
+        /// The unused label index.
+        label: u16,
         /// Source text for diagnostic rendering.
         #[source_code]
         src: NamedSource<Arc<str>>,
-        /// Span of the failing token.
-        #[label("offset too large")]
+        /// Span of the label definition.
+        #[label("unused label")]
         span: SourceSpan,
     },
 }

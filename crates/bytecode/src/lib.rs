@@ -64,7 +64,7 @@
 //!     Instruction::Load   { reg: Register(0) },
 //!     Instruction::PushC1 { val: [5] },
 //!     Instruction::Gt     {},
-//!     Instruction::JumpI  { offset: 1i16 },
+//!     Instruction::JumpI  { label: 0u16 },
 //!     Instruction::Next   {},
 //!     Instruction::Target {},
 //!     Instruction::Halt   {},
@@ -91,6 +91,7 @@ mod types;
 mod builder;
 pub mod codec;
 pub mod error;
+mod jump_table;
 mod program;
 mod stream;
 
@@ -99,6 +100,7 @@ mod stream;
 // ---------------------------------------------------------------------------
 
 pub use builder::{InstructionBuilder, LabelId};
+pub use jump_table::{DecodeError, JumpEntry, JumpTable};
 pub use program::Program;
 pub use stream::InstructionStream;
 pub use types::{Instruction, Opcode, Register};

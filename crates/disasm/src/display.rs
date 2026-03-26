@@ -19,9 +19,9 @@
 //!
 //! The entry point is [`Disassembly`], which wraps either a raw byte slice or
 //! a complete [`Program`] and
-//! implements [`Display`](std::fmt::Display). Jump targets are automatically
-//! assigned sequential labels (`L0`, `L1`, ...) and rendered both at the
-//! destination and as the operand of the originating `JUMP`/`JUMPI`.
+//! implements [`Display`](std::fmt::Display). Jump targets are rendered
+//! with their `.N` label from the jump table, both at the destination and as
+//! the operand of the originating `JUMP`/`JUMPI`.
 //!
 //! `PUSHC_1`..`PUSHC_8` operands are rendered as their sign-extended decimal
 //! value.
@@ -30,8 +30,7 @@
 //! `.byte 0xXX` pseudo-instructions so no information is silently dropped.
 //!
 //! Label collection is delegated to [`InstructionStream`],
-//! which performs the pre-pass during construction and embeds the label name
-//! directly in each decoded instruction tuple.
+//! which derives the label map from the [`Program`]'s jump table.
 //!
 //! # Output format
 //!
@@ -39,9 +38,9 @@
 //! label is present at an address the column is left blank so columns align:
 //!
 //! ```text
-//!   0x0000:  L0:  PUSHC_2  12345
+//!   0x0000:  .0:  PUSHC_2  12345
 //!   0x0003:       GT
-//!   0x0004:       JUMPI    L0
+//!   0x0004:       JUMPI    .0
 //!   0x0007:       HALT
 //! ```
 //!
@@ -94,8 +93,8 @@ fn sign_extend_be(bytes: &[u8]) -> i64 {
 
 /// Format a single operand field of an instruction.
 ///
-/// `i16` fields are resolved against the label map using the instruction's
-/// byte offset as the base; all other field types are formatted as-is.
+/// `u16` fields are formatted as `.N` label references; all other field
+/// types are formatted as-is.
 trait FmtOperand {
     fn fmt_operand(
         &self,
@@ -148,21 +147,15 @@ macro_rules! impl_fmt_operand_byte_array {
 
 impl_fmt_operand_byte_array!(1, 2, 3, 4, 5, 6, 7, 8);
 
-impl FmtOperand for i16 {
-    /// Resolve the offset to a label name when possible; fall back to `+N`.
+impl FmtOperand for u16 {
+    /// Format a label index as `.N`.
     fn fmt_operand(
         &self,
         f: &mut dyn io::Write,
-        labels: &BTreeMap<usize, String>,
-        instr_offset: usize,
+        _labels: &BTreeMap<usize, String>,
+        _instr_offset: usize,
     ) -> io::Result<()> {
-        let target = instr_offset as i64 + i64::from(*self);
-        if let Some(label) = labels.get(&(target as usize))
-            && target >= 0
-        {
-            return write!(f, "{label}");
-        }
-        write!(f, "{self:+}")
+        write!(f, ".{self}")
     }
 }
 
@@ -210,12 +203,12 @@ opcodes!(impl_fmt_instruction);
 
 /// A pretty-printed view of raw XQVM bytecode or a complete [`Program`].
 ///
-/// Jump targets are assigned labels `L0`, `L1`, ... in address order by the
-/// underlying [`InstructionStream`]. Each label is printed inline between the
-/// byte offset and the mnemonic. When no label exists at an address the
-/// column is left blank so all columns align. `JUMP`/`JUMPI` operands are
-/// replaced by the label name when the target is within the same buffer.
-/// `PUSHC_1`..`PUSHC_8` operands are sign-extended and rendered as decimals.
+/// Jump targets are rendered with their `.N` label from the jump table.
+/// Each label is printed inline between the byte offset and the mnemonic.
+/// When no label exists at an address the column is left blank so all
+/// columns align. `JUMP`/`JUMPI` operands are rendered as `.N` label
+/// references. `PUSHC_1`..`PUSHC_8` operands are sign-extended and
+/// rendered as decimals.
 ///
 /// # Examples
 ///
@@ -223,15 +216,10 @@ opcodes!(impl_fmt_instruction);
 /// use aglais_xqvm_bytecode::{Instruction, Register, codec};
 /// use aglais_xqvm_disasm::Disassembly;
 ///
-/// // Build a trivial counted-down loop.
 /// let program = [
-///     Instruction::PushC1 { val: [5] },        // push counter
-///     Instruction::PushC1 { val: [0xFF] },     // push decrement (-1)
-///     Instruction::Target {},                   // loop target
-///     Instruction::Add    {},                   // counter--
-///     Instruction::Dupl   {},                   // check without consuming
-///     Instruction::JumpI  { offset: -4i16 },   // loop back if non-zero
-///     Instruction::Pop    {},
+///     Instruction::PushC1 { val: [5] },
+///     Instruction::PushC1 { val: [0xFF] },
+///     Instruction::Add    {},
 ///     Instruction::Halt   {},
 /// ];
 /// let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
@@ -245,9 +233,9 @@ pub struct Disassembly<'a> {
 impl<'a> Disassembly<'a> {
     /// Wrap a raw bytecode buffer for display.
     ///
-    /// Constructs an [`InstructionStream`] immediately, performing the label
-    /// pre-pass so that repeated calls to [`write_to`](Self::write_to)
-    /// reuse the already-computed label map.
+    /// Constructs an [`InstructionStream`] immediately so that repeated
+    /// calls to [`write_to`](Self::write_to) reuse the already-computed
+    /// label map.
     pub fn new(bytes: &'a [u8]) -> Self {
         Self {
             stream: InstructionStream::new(bytes),
@@ -289,7 +277,7 @@ impl<'a> Disassembly<'a> {
     /// assert!(text.contains("HALT"));
     /// ```
     pub fn write_to(&self, out: &mut impl io::Write) -> io::Result<()> {
-        // Width of the label column: longest "Lx:" string, or 0 when there
+        // Width of the label column: longest ".N:" string, or 0 when there
         // are no labels so the column is omitted entirely.
         let label_col = self
             .stream
@@ -299,7 +287,7 @@ impl<'a> Disassembly<'a> {
             .max()
             .unwrap_or(0);
 
-        // Clone the label map so `fmt_instruction` can resolve i16 operands
+        // Clone the label map so `fmt_instruction` can resolve u16 operands
         // to label names after the stream is consumed by iteration.
         let labels = self.stream.labels().clone();
 
@@ -360,7 +348,7 @@ impl fmt::Display for Disassembly<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aglais_xqvm_bytecode::{Instruction, Register, codec};
+    use aglais_xqvm_bytecode::{Instruction, JumpEntry, JumpTable, Program, Register, codec};
 
     fn assemble(program: &[Instruction]) -> Vec<u8> {
         program.iter().flat_map(codec::encode).collect()
@@ -393,59 +381,75 @@ mod tests {
 
     #[test]
     fn backward_jump_gets_label() {
-        // PUSHC_1 [5] (2 bytes, offset 0) + GT (1 byte, offset 2) = offset 3 for JUMPI.
-        // JUMPI offset = -3  ->  target = 3 + (-3) = 0  -> L0 at offset 0.
-        let buf = assemble(&[
+        // Build a program with a jump table entry for label .0 at offset 0.
+        let code = assemble(&[
             Instruction::PushC1 { val: [5] },
             Instruction::Gt {},
-            Instruction::JumpI { offset: -3i16 },
+            Instruction::JumpI { label: 0u16 },
             Instruction::Halt {},
         ]);
-        let text = Disassembly::new(&buf).to_string();
-        // Label must appear inline on the first instruction's line.
-        assert!(text.contains("L0:"), "missing label L0 in:\n{text}");
-        // Jump operand must reference the label, not the raw offset.
+        let code_len = code.len() as u32;
+        let table = JumpTable::new(vec![JumpEntry {
+            label: 0,
+            start: 0,
+            end: code_len,
+        }]);
+        let program = Program::new_with_table(table, code);
+        let text = Disassembly::from_program(&program).to_string();
+        assert!(text.contains(".0:"), "missing label .0 in:\n{text}");
         assert!(
-            text.contains("JUMPI   L0"),
-            "expected 'JUMPI   L0' in:\n{text}"
+            text.contains("JUMPI   .0"),
+            "expected 'JUMPI   .0' in:\n{text}"
         );
     }
 
     #[test]
     fn forward_jump_gets_label() {
-        // JUMP (3 bytes, offset 0); target = 0 + 3 = 3 = offset of HALT.
-        let buf = assemble(&[
-            Instruction::Jump { offset: 3i16 },
+        // JUMP label .0; NOP; HALT. Label .0 points at HALT (offset 4).
+        let code = assemble(&[
+            Instruction::Jump { label: 0u16 },
             Instruction::Nop {},
             Instruction::Halt {},
         ]);
-        let text = Disassembly::new(&buf).to_string();
-        assert!(text.contains("L0:"), "missing label in:\n{text}");
+        let table = JumpTable::new(vec![JumpEntry {
+            label: 0,
+            start: 4,
+            end: code.len() as u32,
+        }]);
+        let program = Program::new_with_table(table, code);
+        let text = Disassembly::from_program(&program).to_string();
+        assert!(text.contains(".0:"), "missing label in:\n{text}");
         assert!(
-            text.contains("JUMP    L0"),
-            "expected 'JUMP    L0' in:\n{text}"
+            text.contains("JUMP    .0"),
+            "expected 'JUMP    .0' in:\n{text}"
         );
     }
 
     #[test]
-    fn two_distinct_jump_targets_get_distinct_labels() {
-        // JUMPI -> offset 0 (L0)  and  JUMP -> offset 7 (L1) -- sorted by address.
-        let buf = assemble(&[
-            Instruction::JumpI { offset: -3i16 }, // offset 0; target = 0+(-3) = -3 -> OOB
-            Instruction::Jump { offset: 4i16 },   // offset 3; target = 3+4 = 7
-            Instruction::PushC8 {
-                // offset 6 (9 bytes: 6-14)
-                val: [0, 0, 0, 0, 0, 0, 0, 0],
-            },
-            Instruction::Halt {}, // offset 15
+    fn two_distinct_labels_appear() {
+        // Two labels: .0 at offset 0, .1 at the HALT.
+        let code = assemble(&[
+            Instruction::JumpI { label: 0u16 },
+            Instruction::Jump { label: 1u16 },
+            Instruction::Halt {},
         ]);
-        // target of JUMP is offset 7 = inside PUSHC_8 (starts at 6, 9 bytes), target of
-        // JUMPI is -3 (out of bounds). L0 appears at offset 0 (JUMPI's own address).
-        // L1 is at offset 7, which is inside PUSHC_8 -- no instruction starts there,
-        // so "L1:" never appears.
-        let text = Disassembly::new(&buf).to_string();
-        assert!(text.contains("L0:"), "missing L0 in:\n{text}");
-        assert!(!text.contains("L1:"), "unexpected L1 in:\n{text}");
+        let halt_offset = code.len() as u32 - 1;
+        let table = JumpTable::new(vec![
+            JumpEntry {
+                label: 0,
+                start: 0,
+                end: 3,
+            },
+            JumpEntry {
+                label: 1,
+                start: halt_offset,
+                end: code.len() as u32,
+            },
+        ]);
+        let program = Program::new_with_table(table, code);
+        let text = Disassembly::from_program(&program).to_string();
+        assert!(text.contains(".0:"), "missing .0 in:\n{text}");
+        assert!(text.contains(".1:"), "missing .1 in:\n{text}");
     }
 
     #[test]
