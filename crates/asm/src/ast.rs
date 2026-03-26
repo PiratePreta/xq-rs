@@ -47,11 +47,11 @@ pub enum Operand {
     Register(u8),
     /// A signed integer literal, e.g. `42` or `-99` or `0xFF`.
     Integer(i64),
-    /// A symbolic label reference, e.g. `loop_top`.
+    /// A numeric label reference, e.g. `.0`, `.1`.
     ///
     /// Only valid as the operand of `JUMP` or `JUMPI` instructions; the
-    /// assembler resolves the name to a signed 16-bit PC offset.
-    LabelRef(String),
+    /// assembler resolves the index to a label slot in the jump table.
+    LabelRef(u16),
 }
 
 // ---------------------------------------------------------------------------
@@ -76,13 +76,13 @@ pub struct ParsedInstr {
 /// A single logical line of assembly source after parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AsmLine {
-    /// A label definition, e.g. `loop_top:`.
+    /// A label definition, e.g. `.0:`.
     ///
     /// The label is anchored to the byte offset of the *next* instruction.
     LabelDef {
-        /// The label name without the trailing colon.
-        name: String,
-        /// Byte offset of the label name within the source text.
+        /// The numeric label index.
+        label: u16,
+        /// Byte offset of the label token within the source text.
         offset: usize,
     },
     /// An instruction with zero or more operands.

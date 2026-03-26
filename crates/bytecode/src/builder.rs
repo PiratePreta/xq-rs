@@ -21,8 +21,9 @@
 //! using a chained, builder-style API. Labels are opaque handles created
 //! with [`label`](InstructionBuilder::label) and anchored to a byte offset
 //! with [`place`](InstructionBuilder::place). `JUMP`/`JUMPI` instructions
-//! record a fixup instead of a raw offset; [`build`](InstructionBuilder::build)
-//! resolves all fixups and returns the final byte buffer.
+//! record a fixup instead of a raw label index;
+//! [`build`](InstructionBuilder::build) resolves all fixups, constructs a
+//! [`JumpTable`](crate::JumpTable), and returns the final program.
 //!
 //! Both forward and backward references work: you may call
 //! [`jump`](InstructionBuilder::jump) before or after
@@ -74,6 +75,7 @@ use alloc::vec::Vec;
 use thiserror::Error;
 
 use crate::codec;
+use crate::jump_table::{JumpEntry, JumpTable};
 use crate::program::Program;
 use crate::types::{Instruction, Opcode, Register};
 
@@ -91,18 +93,11 @@ pub enum Error {
         id: usize,
     },
 
-    /// The byte distance between a jump and its target exceeds the `i16` range.
-    #[error(
-        "jump at offset {site:#06X} to label {label}: \
-         offset {delta} does not fit in i16"
-    )]
-    OffsetOverflow {
-        /// Byte offset of the JUMP/JUMPI instruction.
-        site: usize,
-        /// Index of the target label.
-        label: usize,
-        /// Computed delta that overflowed.
-        delta: i64,
+    /// A label was placed but never referenced by any jump instruction.
+    #[error("label {id} was placed but never referenced by a jump")]
+    UnusedLabel {
+        /// Index of the unused label.
+        id: usize,
     },
 }
 
@@ -176,7 +171,7 @@ pub struct InstructionBuilder {
 
 // ---------------------------------------------------------------------------
 // tt-muncher: generate no-argument and single-Register emit wrappers from
-// the opcode table.  Entries with `offset`, `model`, or `val` fields are
+// the opcode table.  Entries with `label`, `model`, or `val` fields are
 // skipped because they have dedicated hand-written methods.
 // ---------------------------------------------------------------------------
 
@@ -184,9 +179,9 @@ macro_rules! impl_builder_methods {
     // Base case.
     () => {};
 
-    // Skip JUMP / JUMPI  -- `{offset: ...}`
+    // Skip JUMP / JUMPI  -- `{label: ...}`
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-       {offset: $($rest_f:tt)*}), $($rest:tt)* ) => {
+       {label: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
@@ -294,22 +289,22 @@ impl InstructionBuilder {
     }
 
     // -----------------------------------------------------------------------
-    // Control flow (jump instructions use labels, not raw offsets)
+    // Control flow (jump instructions use labels, not raw indices)
     // -----------------------------------------------------------------------
 
     /// Emit a `JUMP` instruction targeting `label`.
     ///
-    /// The actual `i16` offset is filled in during [`build`](Self::build).
+    /// The `u16` label index is filled in during [`build`](Self::build).
     pub fn jump(&mut self, label: LabelId) -> &mut Self {
-        self.emit_with_fixup(Instruction::Jump { offset: i16::MAX }, label)
+        self.emit_with_fixup(Instruction::Jump { label: u16::MAX }, label)
     }
 
     /// Emit a `JUMPI` instruction targeting `label`.
     ///
-    /// Jumps if the top of the stack is non-zero. The actual `i16` offset is
+    /// Jumps if the top of the stack is non-zero. The `u16` label index is
     /// filled in during [`build`](Self::build).
     pub fn jump_if(&mut self, label: LabelId) -> &mut Self {
-        self.emit_with_fixup(Instruction::JumpI { offset: i16::MAX }, label)
+        self.emit_with_fixup(Instruction::JumpI { label: u16::MAX }, label)
     }
 
     fn emit_with_fixup(&mut self, instr: Instruction, label: LabelId) -> &mut Self {
@@ -361,18 +356,18 @@ impl InstructionBuilder {
     // Finalise
     // -----------------------------------------------------------------------
 
-    /// Resolve all jump fixups and return the assembled [`Program`].
+    /// Resolve all jump fixups, build a [`JumpTable`], and return the
+    /// assembled [`Program`].
     ///
-    /// For each pending `JUMP`/`JUMPI`, computes `delta = label_pos - site`
-    /// and re-encodes the instruction with the resolved `i16` offset in
-    /// place of the placeholder. The returned [`Program`] contains the final
-    /// instruction bytes.
+    /// For each pending `JUMP`/`JUMPI`, patches the placeholder `u16::MAX`
+    /// with the label's index. The jump table maps each placed label to its
+    /// basic-block byte range `[start, end)`.
     ///
     /// # Errors
     ///
     /// - [`Error::UnplacedLabel`] -- a label used in a jump was never placed.
-    /// - [`Error::OffsetOverflow`] -- the distance between a jump and its
-    ///   target exceeds the `i16` range (`[-32768, 32767]`).
+    /// - [`Error::UnusedLabel`] -- a label was placed but never referenced
+    ///   by any jump instruction.
     ///
     /// # Examples
     ///
@@ -386,31 +381,61 @@ impl InstructionBuilder {
     ///
     /// let program = b.build().unwrap();
     ///
-    /// // Verify the instruction bytes decode cleanly.
-    /// let instrs: Vec<_> = InstructionStream::new(program.code())
-    ///     .collect::<Result<Vec<_>>>()
-    ///     .unwrap();
-    /// assert_eq!(instrs.last().unwrap().2, Instruction::Halt {});
+    /// // Verify the jump table has one entry.
+    /// assert_eq!(program.jump_table().len(), 1);
     /// ```
     pub fn build(mut self) -> Result<Program> {
+        // Collect which labels are actually referenced by jump fixups.
+        let mut referenced = vec![false; self.label_positions.len()];
+
+        // 1. Validate all fixup-referenced labels are placed.
         for fixup in &self.fixups {
-            let label_pos = self
-                .label_positions
-                .get(fixup.label.0)
-                .copied()
-                .flatten()
-                .ok_or(Error::UnplacedLabel { id: fixup.label.0 })?;
+            let label_placed = self.label_positions.get(fixup.label.0).copied().flatten();
+            if label_placed.is_none() {
+                return Err(Error::UnplacedLabel { id: fixup.label.0 });
+            }
+            if let Some(slot) = referenced.get_mut(fixup.label.0) {
+                *slot = true;
+            }
+        }
 
-            let delta = label_pos as i64 - fixup.site as i64;
-            let offset = i16::try_from(delta).map_err(|_| Error::OffsetOverflow {
-                site: fixup.site,
-                label: fixup.label.0,
-                delta,
-            })?;
+        // 2. Validate no placed labels are unused (unreferenced by any jump).
+        //    Entry block at byte offset 0 is exempt (implicit entry point).
+        for (idx, pos) in self.label_positions.iter().enumerate() {
+            if pos.is_some() && !referenced.get(idx).copied().unwrap_or(false) && *pos != Some(0) {
+                return Err(Error::UnusedLabel { id: idx });
+            }
+        }
 
+        // 3. Build jump table entries from placed labels.
+        //    Collect (label_idx, position), sort by position, compute end.
+        let mut placed: Vec<(usize, usize)> = self
+            .label_positions
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, pos)| pos.map(|p| (idx, p)))
+            .collect();
+        placed.sort_by_key(|&(_, pos)| pos);
+
+        let mut entries = Vec::with_capacity(placed.len());
+        for (i, &(label_idx, start)) in placed.iter().enumerate() {
+            let end = placed
+                .get(i + 1)
+                .map_or(self.buf.len(), |&(_, next_start)| next_start);
+            entries.push(JumpEntry {
+                label: label_idx as u16,
+                start: start as u32,
+                end: end as u32,
+            });
+        }
+        let jump_table = JumpTable::new(entries);
+
+        // 4. Patch fixups: write u16 label index into the instruction bytes.
+        for fixup in &self.fixups {
+            let label_idx = fixup.label.0 as u16;
             let instr = match fixup.opcode {
-                Opcode::Jump => Instruction::Jump { offset },
-                Opcode::JumpI => Instruction::JumpI { offset },
+                Opcode::Jump => Instruction::Jump { label: label_idx },
+                Opcode::JumpI => Instruction::JumpI { label: label_idx },
                 _ => unreachable!("fixups are emitted only for jumps"),
             };
             let encoded = codec::encode(&instr);
@@ -420,7 +445,8 @@ impl InstructionBuilder {
                 .unwrap_or_else(|| panic!("fixup site {:#06X} out of buffer bounds", fixup.site))
                 .copy_from_slice(&encoded);
         }
-        Ok(Program::new(self.buf))
+
+        Ok(Program::new_with_table(jump_table, self.buf))
     }
 }
 
@@ -555,29 +581,39 @@ mod tests {
 
     #[test]
     fn backward_jump_resolves_correctly() {
-        // PushC0 (1 byte) at 0; JUMPI (3 bytes) at 1; target = 0.
-        // delta = 0 - 1 = -1.
+        // PushC0 (1 byte) at 0; JUMPI (3 bytes) at 1; target label = 0.
         let mut b = InstructionBuilder::new();
         let top = b.label();
         b.place(top).push(0).jump_if(top);
 
-        let instrs = decode_all(b.build().unwrap().code());
+        let program = b.build().unwrap();
+        let instrs = decode_all(program.code());
         assert_eq!(instrs[0], Instruction::PushC0 {});
-        assert_eq!(instrs[1], Instruction::JumpI { offset: -1 });
+        assert_eq!(instrs[1], Instruction::JumpI { label: 0 });
+
+        // Jump table entry for label 0 starts at byte 0.
+        let entry = program.jump_table().get(0).unwrap();
+        assert_eq!(entry.start, 0);
     }
 
     #[test]
     fn forward_jump_resolves_correctly() {
         // JUMP (3 bytes) at 0; NOP (1 byte) at 3; HALT (1 byte) at 4.
-        // jump target = HALT at 4 -> delta = 4 - 0 = +4.
+        // jump target = label 0, placed at offset 4.
         let mut b = InstructionBuilder::new();
         let done = b.label();
         b.jump(done).nop().place(done).halt();
 
-        let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
+        let program = b.build().unwrap();
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::Jump { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Halt {});
+
+        // Jump table entry for label 0 starts at byte 4, ends at 5.
+        let entry = program.jump_table().get(0).unwrap();
+        assert_eq!(entry.start, 4);
+        assert_eq!(entry.end, 5);
     }
 
     #[test]
@@ -591,12 +627,13 @@ mod tests {
             .place(done)
             .halt();
 
-        let instrs = decode_all(b.build().unwrap().code());
+        let program = b.build().unwrap();
+        let instrs = decode_all(program.code());
         assert_eq!(*instrs.last().unwrap(), Instruction::Halt {});
         assert_eq!(instrs[0], Instruction::PushC0 {});
         assert_eq!(instrs[2], Instruction::PushC0 {});
-        assert!(matches!(instrs[1], Instruction::JumpI { .. }));
-        assert!(matches!(instrs[3], Instruction::JumpI { .. }));
+        assert!(matches!(instrs[1], Instruction::JumpI { label: 0 }));
+        assert!(matches!(instrs[3], Instruction::JumpI { label: 0 }));
         assert_eq!(instrs[4], Instruction::Halt {});
     }
 
@@ -609,14 +646,19 @@ mod tests {
     }
 
     #[test]
-    fn two_independent_labels() {
+    fn unused_label_returns_error() {
         let mut b = InstructionBuilder::new();
         let l0 = b.label();
-        let l1 = b.label();
-        b.place(l0).nop().place(l1).halt();
-
-        let instrs = decode_all(b.build().unwrap().code());
-        assert_eq!(instrs, [Instruction::Nop {}, Instruction::Halt {}]);
+        let _l1 = b.label(); // placed but never jumped to
+        b.jump(l0);
+        b.place(l0).nop();
+        // l1 is allocated but not placed, which is fine (not used).
+        // But if we place it without referencing it, that's an error.
+        let mut b2 = InstructionBuilder::new();
+        let target = b2.label();
+        let unused = b2.label();
+        b2.jump(target).place(target).nop().place(unused).halt();
+        assert_eq!(b2.build(), Err(Error::UnusedLabel { id: 1 }));
     }
 
     #[test]
@@ -659,5 +701,24 @@ mod tests {
             b.place(l).place(l);
         });
         assert!(result.is_err(), "placing a label twice should panic");
+    }
+
+    #[test]
+    fn jump_table_has_correct_ranges() {
+        // .0: NOP; .1: HALT
+        let mut b = InstructionBuilder::new();
+        let l0 = b.label();
+        let l1 = b.label();
+        b.place(l0).nop().jump(l1).place(l1).halt();
+
+        let program = b.build().unwrap();
+        let e0 = program.jump_table().get(0).unwrap();
+        let e1 = program.jump_table().get(1).unwrap();
+        // .0 block: NOP (1 byte) + JUMP (3 bytes) = 4 bytes starting at 0.
+        assert_eq!(e0.start, 0);
+        assert_eq!(e0.end, 4);
+        // .1 block: HALT (1 byte) starting at 4.
+        assert_eq!(e1.start, 4);
+        assert_eq!(e1.end, 5);
     }
 }

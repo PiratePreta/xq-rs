@@ -318,10 +318,10 @@ mod tests {
     }
 
     #[test]
-    fn jump_offset_fixint_be() {
-        // i16(-10) in BE = 0xFFF6
-        let bytes = encode(&Instruction::Jump { offset: -10i16 });
-        assert_eq!(bytes, [0x02, 0xFF, 0xF6]);
+    fn jump_label_fixint_be() {
+        // u16(5) in BE = 0x0005
+        let bytes = encode(&Instruction::Jump { label: 5u16 });
+        assert_eq!(bytes, [0x02, 0x00, 0x05]);
     }
 
     #[test]
@@ -402,10 +402,10 @@ mod tests {
 
     #[test]
     fn json_roundtrip_jump() {
-        // Jump: opcode 0x02=2, offset -> [2, -10]
-        let instr = Instruction::Jump { offset: -10i16 };
+        // Jump: opcode 0x02=2, label -> [2, 10]
+        let instr = Instruction::Jump { label: 10u16 };
         let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[2,-10]");
+        assert_eq!(json, "[2,10]");
         assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
     }
 

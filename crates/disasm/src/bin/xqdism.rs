@@ -18,8 +18,7 @@
 //! `disasm` -- XQVM bytecode disassembler.
 //!
 //! Reads raw XQVM bytecode from a file or stdin and prints a human-readable
-//! listing to stdout. Jump targets are automatically labelled `L0`, `L1`, ...
-//! in address order.
+//! Jump targets are labelled `.0`, `.1`, ... from the jump table.
 //!
 //! # Usage
 //!
@@ -42,8 +41,8 @@ use aglais_xqvm_disasm::Disassembly;
 /// Disassemble XQVM bytecode.
 ///
 /// Reads raw bytecode from FILE (or stdin when FILE is omitted) and prints
-/// a human-readable listing to stdout. Jump targets are labelled L0, L1, ...
-/// in ascending address order.
+/// a human-readable listing to stdout. Jump targets are labelled `.0`, `.1`,
+/// ... from the jump table.
 #[derive(Debug, Parser)]
 #[command(name = "disasm", version, about)]
 struct Args {
@@ -69,7 +68,9 @@ fn main() -> Result<()> {
     };
 
     let mut out = Vec::new();
-    let program = Program::decode(&bytes);
+    let program = Program::decode(&bytes)
+        .into_diagnostic()
+        .wrap_err("failed to decode program")?;
     Disassembly::from_program(&program)
         .write_to(&mut out)
         .into_diagnostic()

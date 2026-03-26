@@ -80,8 +80,10 @@ pub(crate) struct LoopFrame {
 pub(crate) enum StepResult {
     /// Advance to the next sequential instruction.
     Continue,
-    /// Seek the instruction stream to the given byte offset.
-    Jump(usize),
+    /// Jump to the basic block identified by this label index.
+    Jump(u16),
+    /// Seek the instruction stream to the given byte offset (loop back-edge).
+    Seek(usize),
     /// Stop execution.
     Halt,
     /// Push a new loop frame; the run loop sets `body_start` to `stream.pos()`.
@@ -265,6 +267,7 @@ impl Vm {
     /// Returns [`Error`] on any runtime fault (stack underflow, bad jump, etc.).
     pub fn run(&mut self, program: &Program) -> Result<(), Error> {
         let mut stream = InstructionStream::from_program(program);
+        let table = program.jump_table();
         let mut steps: u64 = 0;
 
         loop {
@@ -283,7 +286,11 @@ impl Vm {
             match self.dispatch(pos, instr)? {
                 StepResult::Continue => {}
                 StepResult::Halt => break,
-                StepResult::Jump(target) => {
+                StepResult::Jump(label) => {
+                    let entry = table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
+                    stream.seek(entry.start as usize).map_err(Error::from)?;
+                }
+                StepResult::Seek(target) => {
                     stream.seek(target).map_err(Error::from)?;
                 }
                 StepResult::StartLoop { kind } => {
@@ -352,14 +359,6 @@ impl Vm {
         })
     }
 
-    fn jump_target(pos: usize, offset: i16) -> Result<usize, Error> {
-        pos.checked_add_signed(offset as isize)
-            .ok_or(Error::BadJumpTarget {
-                pos,
-                target: usize::MAX,
-            })
-    }
-
     // -- Control flow --
 
     fn exec_nop(&mut self, _pos: usize) -> Result<StepResult, Error> {
@@ -370,14 +369,14 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
-    fn exec_jump(&mut self, pos: usize, offset: i16) -> Result<StepResult, Error> {
-        Ok(StepResult::Jump(Self::jump_target(pos, offset)?))
+    fn exec_jump(&mut self, _pos: usize, label: u16) -> Result<StepResult, Error> {
+        Ok(StepResult::Jump(label))
     }
 
-    fn exec_jump_i(&mut self, pos: usize, offset: i16) -> Result<StepResult, Error> {
+    fn exec_jump_i(&mut self, pos: usize, label: u16) -> Result<StepResult, Error> {
         let cond = self.pop(pos)?;
         if cond != 0 {
-            Ok(StepResult::Jump(Self::jump_target(pos, offset)?))
+            Ok(StepResult::Jump(label))
         } else {
             Ok(StepResult::Continue)
         }
@@ -420,7 +419,7 @@ impl Vm {
         };
 
         if should_loop {
-            Ok(StepResult::Jump(body_start))
+            Ok(StepResult::Seek(body_start))
         } else {
             let _ = self.loop_stack.pop();
             Ok(StepResult::Continue)

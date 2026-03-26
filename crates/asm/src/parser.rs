@@ -76,7 +76,7 @@ use generated::Rule;
 /// ```rust
 /// use aglais_xqvm_asm::{parse, AsmLine, Operand};
 ///
-/// let lines = parse("loop:\n  JUMPI loop", "<test>").unwrap();
+/// let lines = parse(".0:\n  JUMPI .0", "<test>").unwrap();
 /// assert!(matches!(lines[0], AsmLine::LabelDef { .. }));
 /// assert!(matches!(lines[1], AsmLine::Instruction(_)));
 /// ```
@@ -119,18 +119,25 @@ fn visit_line(
         .try_for_each(|inner| match inner.as_rule() {
             Rule::label_def => {
                 let offset = inner.as_span().start();
-                let label_name = inner
+                let label_text = inner
                     .into_inner()
                     .next()
                     .unwrap_or_else(|| {
                         unreachable!("grammar guarantees label_def contains label_id")
                     })
-                    .as_str()
-                    .to_string();
-                out.push(AsmLine::LabelDef {
-                    name: label_name,
-                    offset,
-                });
+                    .as_str();
+                // Strip leading '.' and parse as u16.
+                let idx: u16 =
+                    label_text
+                        .get(1..)
+                        .unwrap_or("")
+                        .parse()
+                        .map_err(|_| ParseError {
+                            message: format!("label index '{label_text}' is not a valid u16"),
+                            src: make_src(src),
+                            span: make_span(offset, label_text.len()),
+                        })?;
+                out.push(AsmLine::LabelDef { label: idx, offset });
                 Ok(())
             }
             Rule::instruction => {
@@ -195,7 +202,19 @@ fn visit_operand(
             let value = parse_integer(text, offset, src)?;
             Ok(Operand::Integer(value))
         }
-        Rule::label_id => Ok(Operand::LabelRef(text.to_string())),
+        Rule::label_id => {
+            // Strip leading '.' and parse as u16.
+            let idx: u16 = text
+                .get(1..)
+                .unwrap_or("")
+                .parse()
+                .map_err(|_| ParseError {
+                    message: format!("label index '{text}' is not a valid u16"),
+                    src: make_src(src),
+                    span: make_span(offset, text.len()),
+                })?;
+            Ok(Operand::LabelRef(idx))
+        }
         r => unreachable!("unexpected operand rule: {r:?}"),
     }
 }
@@ -312,13 +331,15 @@ mod tests {
 
     #[test]
     fn parse_jump_label_ref() {
-        let lines = parse_test("JUMP loop_top").unwrap();
+        let lines = parse_test("JUMP .0").unwrap();
         let i = instr(&lines);
-        assert_eq!(i.operands, [Operand::LabelRef("loop_top".to_string())]);
+        assert_eq!(i.operands, [Operand::LabelRef(0)]);
     }
 
     #[test]
     fn parse_jump_integer_offset() {
+        // Raw integer operands for JUMP are parsed as integers (the assembler
+        // will reject them since jumps require labels in the new model).
         let lines = parse_test("JUMP -10").unwrap();
         let i = instr(&lines);
         assert_eq!(i.operands, [Operand::Integer(-10)]);
@@ -326,16 +347,16 @@ mod tests {
 
     #[test]
     fn parse_label_def() {
-        let lines = parse_test("loop:").unwrap();
+        let lines = parse_test(".0:").unwrap();
         assert_eq!(lines.len(), 1);
-        assert!(matches!(&lines[0], AsmLine::LabelDef { name, .. } if name == "loop"));
+        assert!(matches!(&lines[0], AsmLine::LabelDef { label: 0, .. }));
     }
 
     #[test]
     fn parse_label_and_instruction_same_line() {
-        let lines = parse_test("start: NOP").unwrap();
+        let lines = parse_test(".0: NOP").unwrap();
         assert_eq!(lines.len(), 2);
-        assert!(matches!(&lines[0], AsmLine::LabelDef { name, .. } if name == "start"));
+        assert!(matches!(&lines[0], AsmLine::LabelDef { label: 0, .. }));
         let i = instr(&lines);
         assert_eq!(i.mnemonic, "NOP");
     }

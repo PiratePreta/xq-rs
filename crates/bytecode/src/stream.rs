@@ -22,11 +22,11 @@
 //! Seeking moves the cursor to any absolute byte offset, which lets the VM
 //! execute `JUMP`/`JUMPI` targets directly without re-scanning the buffer.
 //!
-//! During construction the stream performs a single scan to collect all
-//! `JUMP`/`JUMPI` targets and assign them sequential labels `L0`, `L1`, ...
-//! in address order. These labels are then included in every decoded
-//! instruction tuple so that consumers (a disassembler, a debugger, a
-//! tracing VM) do not need to perform a separate pre-pass.
+//! Labels are derived from the [`JumpTable`](crate::JumpTable) attached to a
+//! [`Program`]. When constructed via [`from_program`](InstructionStream::from_program),
+//! the stream maps each jump-table entry's start offset to a label name
+//! (`.0`, `.1`, ...). When constructed from raw bytes via [`new`](InstructionStream::new),
+//! no labels are available.
 //!
 //! The stream also implements [`Iterator`] so it can be consumed with
 //! standard iterator combinators.
@@ -51,7 +51,7 @@
 //! ];
 //! let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
 //!
-//! // No jumps -- every label is None.
+//! // No jump table -- every label is None.
 //! let decoded: Vec<_> = InstructionStream::new(&buf)
 //!     .collect::<Result<Vec<_>>>()
 //!     .unwrap();
@@ -70,8 +70,9 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::codec;
+use crate::jump_table::JumpTable;
 use crate::program::Program;
-use crate::types::{Instruction, Opcode};
+use crate::types::Opcode;
 
 // ---------------------------------------------------------------------------
 // Error and Result
@@ -116,55 +117,13 @@ pub enum Error {
 type Result<T> = core::result::Result<T, Error>;
 
 // ---------------------------------------------------------------------------
-// Label collection (single pre-pass over the raw bytes)
-// ---------------------------------------------------------------------------
-
-/// Scan `bytes` once, find all `JUMP`/`JUMPI` targets, and assign each a
-/// stable sequential label name (`L0`, `L1`, ...) in ascending address order.
-pub(crate) fn collect_labels(bytes: &[u8]) -> BTreeMap<usize, String> {
-    let mut pos = 0usize;
-    let mut targets: Vec<usize> = Vec::new();
-
-    while pos < bytes.len() {
-        match codec::decode(
-            bytes
-                .get(pos..)
-                .unwrap_or_else(|| unreachable!("pos < bytes.len() loop invariant")),
-        ) {
-            Ok((instr, consumed)) => {
-                let rel = match &instr {
-                    Instruction::Jump { offset: r } | Instruction::JumpI { offset: r } => *r,
-                    _ => {
-                        pos += consumed;
-                        continue;
-                    }
-                };
-                let target = (pos as i64 + i64::from(rel)).max(0) as usize;
-                targets.push(target);
-                pos += consumed;
-            }
-            Err(_) => pos += 1,
-        }
-    }
-
-    targets.sort_unstable();
-    targets.dedup();
-
-    targets
-        .into_iter()
-        .enumerate()
-        .map(|(i, addr)| (addr, format!("L{i}")))
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
 // InstructionStream
 // ---------------------------------------------------------------------------
 
 /// Incremental, seekable reader over a raw XQVM bytecode buffer.
 ///
 /// The stream holds a shared reference to a byte slice, an internal cursor,
-/// and a pre-computed label map. Calling
+/// and a label map derived from the program's jump table. Calling
 /// [`next_instruction`](InstructionStream::next_instruction) (or iterating)
 /// decodes the next instruction at the current cursor position, advances the
 /// cursor, and returns the optional label assigned to that address.
@@ -179,30 +138,16 @@ pub(crate) fn collect_labels(bytes: &[u8]) -> BTreeMap<usize, String> {
 /// use aglais_xqvm_bytecode::Instruction;
 /// use aglais_xqvm_bytecode::{codec, InstructionStream};
 ///
-/// // Build a short loop: PUSHC_1 3 / JUMPI -2 (back to PUSHC_1 at offset 0).
-/// let program = [
-///     Instruction::PushC1 { val: [3] },       // offset 0 (2 bytes), target of JUMPI -> label L0
-///     Instruction::JumpI  { offset: -2i16 },  // offset 2; target = 2 + (-2) = 0
-/// ];
-/// let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
+/// let buf: Vec<u8> = [
+///     Instruction::PushC1 { val: [3] },
+///     Instruction::Halt {},
+/// ].iter().flat_map(|i| codec::encode(i)).collect();
 ///
 /// let mut stream = InstructionStream::new(&buf);
 ///
-/// // PUSHC_1 at offset 0 is the jump target, so it carries label "L0".
-/// let (off0, label0, instr0) = stream.next_instruction().unwrap().unwrap();
+/// let (off0, _, instr0) = stream.next_instruction().unwrap().unwrap();
 /// assert_eq!(off0, 0);
-/// assert_eq!(label0.as_deref(), Some("L0"));
 /// assert_eq!(instr0, Instruction::PushC1 { val: [3] });
-///
-/// // JUMPI has no label at its own address.
-/// let (off1, label1, instr1) = stream.next_instruction().unwrap().unwrap();
-/// assert_eq!(off1, 2);
-/// assert_eq!(label1, None);
-/// assert_eq!(instr1, Instruction::JumpI { offset: -2i16 });
-///
-/// // Execute the jump: seek back to the label address.
-/// stream.seek(off0).unwrap();
-/// assert_eq!(stream.pos(), 0);
 /// ```
 #[derive(Debug, Clone)]
 pub struct InstructionStream<'a> {
@@ -214,11 +159,25 @@ pub struct InstructionStream<'a> {
 impl<'a> InstructionStream<'a> {
     /// Create a new stream positioned at the start of `bytes`.
     ///
-    /// The constructor performs a single scan of `bytes` to collect all
-    /// `JUMP`/`JUMPI` targets and assign label names before any instruction
-    /// is returned.
+    /// No labels are assigned; use [`with_jump_table`](Self::with_jump_table)
+    /// or [`from_program`](Self::from_program) to get label information.
     pub fn new(bytes: &'a [u8]) -> Self {
-        let labels = collect_labels(bytes);
+        Self {
+            bytes,
+            pos: 0,
+            labels: BTreeMap::new(),
+        }
+    }
+
+    /// Create a stream with labels derived from a [`JumpTable`].
+    ///
+    /// Each entry's start offset maps to `.{label}` in the label map.
+    pub fn with_jump_table(bytes: &'a [u8], table: &JumpTable) -> Self {
+        let labels = table
+            .entries()
+            .iter()
+            .map(|e| (e.start as usize, format!(".{}", e.label)))
+            .collect();
         Self {
             bytes,
             pos: 0,
@@ -228,7 +187,7 @@ impl<'a> InstructionStream<'a> {
 
     /// Create a stream from a [`Program`], borrowing its instruction bytes.
     ///
-    /// The stream borrows the program's code bytes for its lifetime `'a`.
+    /// Labels are derived from the program's jump table.
     ///
     /// # Examples
     ///
@@ -244,7 +203,7 @@ impl<'a> InstructionStream<'a> {
     /// assert_eq!(instr, Instruction::Halt {});
     /// ```
     pub fn from_program(program: &'a Program) -> Self {
-        Self::new(program.code())
+        Self::with_jump_table(program.code(), program.jump_table())
     }
 
     /// Current cursor position (byte offset into the buffer).
@@ -267,11 +226,10 @@ impl<'a> InstructionStream<'a> {
         self.bytes
     }
 
-    /// The label map computed during construction.
+    /// The label map (possibly empty if constructed from raw bytes).
     ///
-    /// Keys are absolute byte offsets; values are label names (`"L0"`,
-    /// `"L1"`, ...) assigned in ascending address order. Labels are derived
-    /// exclusively from `JUMP`/`JUMPI` targets.
+    /// Keys are absolute byte offsets; values are label names (`.0`,
+    /// `.1`, ...) derived from the jump table.
     pub fn labels(&self) -> &BTreeMap<usize, String> {
         &self.labels
     }
@@ -320,36 +278,13 @@ impl<'a> InstructionStream<'a> {
     /// - `None` when the cursor is at or past the end of the buffer.
     /// - `Some(Ok((offset, label, instruction)))` on a successful decode,
     ///   where `offset` is the byte position of the opcode and `label` is the
-    ///   name assigned to that address (e.g. `Some("L0")`), or `None` when
-    ///   no jump targets this address.
+    ///   name assigned to that address (e.g. `Some(".0")`), or `None` when
+    ///   no jump-table entry targets this address.
     /// - `Some(Err(e))` when the bytes at the cursor cannot be decoded.
     ///   The cursor advances by one byte so subsequent calls make progress.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use aglais_xqvm_bytecode::Instruction;
-    /// use aglais_xqvm_bytecode::{InstructionStream, codec};
-    /// use aglais_xqvm_bytecode::error::StreamError as Error;
-    ///
-    /// // Valid instruction followed by an unknown byte.
-    /// // 0x08 is a gap opcode (not assigned).
-    /// let mut buf = codec::encode(&Instruction::Nop {});
-    /// buf.push(0x08u8);
-    ///
-    /// let mut stream = InstructionStream::new(&buf);
-    ///
-    /// assert_eq!(
-    ///     stream.next_instruction(),
-    ///     Some(Ok((0, None, Instruction::Nop {}))),
-    /// );
-    /// assert_eq!(
-    ///     stream.next_instruction(),
-    ///     Some(Err(Error::UnknownOpcode { offset: 1, byte: 0x08 })),
-    /// );
-    /// assert_eq!(stream.next_instruction(), None);
-    /// ```
-    pub fn next_instruction(&mut self) -> Option<Result<(usize, Option<String>, Instruction)>> {
+    pub fn next_instruction(
+        &mut self,
+    ) -> Option<Result<(usize, Option<String>, crate::types::Instruction)>> {
         if self.pos >= self.bytes.len() {
             return None;
         }
@@ -387,7 +322,7 @@ impl<'a> InstructionStream<'a> {
 // ---------------------------------------------------------------------------
 
 impl Iterator for InstructionStream<'_> {
-    type Item = Result<(usize, Option<String>, Instruction)>;
+    type Item = Result<(usize, Option<String>, crate::types::Instruction)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_instruction()
@@ -399,11 +334,6 @@ impl Iterator for InstructionStream<'_> {
 // ---------------------------------------------------------------------------
 
 fn map_decode_error(_err: oxicode::Error, offset: usize, byte: u8) -> Error {
-    // oxicode serde wraps all errors (including UnexpectedEnd) into
-    // Custom { message } before returning from decode_from_slice, so we cannot
-    // distinguish truncation from unknown opcode by inspecting the error value.
-    // Instead: if the first byte is a known opcode, the buffer must be too short
-    // (truncated operands); otherwise the byte itself is the problem.
     if Opcode::try_from(byte).is_ok() {
         Error::TruncatedInstruction { offset }
     } else {
@@ -419,6 +349,7 @@ fn map_decode_error(_err: oxicode::Error, offset: usize, byte: u8) -> Error {
 #[allow(unused_results, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+    use crate::jump_table::JumpEntry;
     use crate::types::{Instruction, Register};
 
     fn assemble(program: &[Instruction]) -> Vec<u8> {
@@ -444,7 +375,6 @@ mod tests {
 
     #[test]
     fn offsets_advance_correctly() {
-        // PushC0 (1 byte) at 0, HALT (1 byte) at 1.
         let buf = assemble(&[Instruction::PushC0 {}, Instruction::Halt {}]);
         let mut stream = InstructionStream::new(&buf);
 
@@ -474,51 +404,38 @@ mod tests {
     }
 
     #[test]
-    fn jump_target_instruction_carries_label() {
-        // PushC1 { val: [3] } (2 bytes) at 0, JUMPI (3 bytes) at 2; target = 2 + (-2) = 0 -> L0.
+    fn jump_table_labels_are_assigned() {
+        // Build byte buffer: PushC1 (2 bytes) + Jump (3 bytes) + Halt (1 byte)
         let buf = assemble(&[
             Instruction::PushC1 { val: [3] },
-            Instruction::JumpI { offset: -2i16 },
+            Instruction::Jump { label: 0 },
+            Instruction::Halt {},
         ]);
-        let mut stream = InstructionStream::new(&buf);
+        let table = JumpTable::new(vec![JumpEntry {
+            label: 0,
+            start: 5, // Halt at offset 5
+            end: 6,
+        }]);
+        let mut stream = InstructionStream::with_jump_table(&buf, &table);
 
         let (_, label0, _) = stream.next_instruction().unwrap().unwrap();
         let (_, label1, _) = stream.next_instruction().unwrap().unwrap();
+        let (_, label2, _) = stream.next_instruction().unwrap().unwrap();
 
-        assert_eq!(
-            label0.as_deref(),
-            Some("L0"),
-            "PushC1 at target should be L0"
-        );
-        assert_eq!(label1, None, "JUMPI itself has no label");
+        assert_eq!(label0, None);
+        assert_eq!(label1, None);
+        assert_eq!(label2.as_deref(), Some(".0"));
     }
 
     #[test]
-    fn no_labels_when_no_jumps() {
+    fn no_labels_when_no_jump_table() {
         let buf = assemble(&[Instruction::PushC1 { val: [1] }, Instruction::Halt {}]);
         let stream = InstructionStream::new(&buf);
         assert!(stream.labels().is_empty());
     }
 
     #[test]
-    fn labels_map_has_correct_entries() {
-        // JUMP (3 bytes) at 0; target = 0 + 4 = 4 -> L0.
-        // NOP (1 byte) at 3.
-        // HALT (1 byte) at 4 -> labeled L0.
-        let buf = assemble(&[
-            Instruction::Jump { offset: 4i16 },
-            Instruction::Nop {},
-            Instruction::Halt {},
-        ]);
-        let stream = InstructionStream::new(&buf);
-        let labels = stream.labels();
-        assert_eq!(labels.len(), 1);
-        assert_eq!(labels.get(&4).map(String::as_str), Some("L0"));
-    }
-
-    #[test]
     fn seek_to_second_instruction_skips_first() {
-        // PushC0 (1 byte) at 0, NOP (1 byte) at 1, HALT (1 byte) at 2.
         let buf = assemble(&[
             Instruction::PushC0 {},
             Instruction::Nop {},
@@ -551,39 +468,42 @@ mod tests {
                 len: buf.len()
             }),
         );
-        // Position is unchanged after a failed seek.
         assert_eq!(stream.pos(), 0);
     }
 
     #[test]
     fn seek_back_simulates_jump() {
-        // PushC1 { val: [3] } (2 bytes) at 0, JUMPI (3 bytes) at 2; target = 2 + (-2) = 0.
+        // PushC1 { val: [3] } at offset 0 (2 bytes), Jump to label 0 at offset 2 (3 bytes).
         let buf = assemble(&[
             Instruction::PushC1 { val: [3] },
-            Instruction::JumpI { offset: -2i16 },
+            Instruction::Jump { label: 0 },
         ]);
-        let mut stream = InstructionStream::new(&buf);
+        let table = JumpTable::new(vec![JumpEntry {
+            label: 0,
+            start: 0,
+            end: 2,
+        }]);
+        let mut stream = InstructionStream::with_jump_table(&buf, &table);
 
         let (_, _, _push) = stream.next_instruction().unwrap().unwrap();
-        let (off_jumpi, _, jumpi) = stream.next_instruction().unwrap().unwrap();
+        let (_, _, jump) = stream.next_instruction().unwrap().unwrap();
 
-        // Compute jump target as the VM would.
-        let target = if let Instruction::JumpI { offset } = jumpi {
-            (off_jumpi as i64 + i64::from(offset)) as usize
+        // Look up the target from the jump table.
+        let target = if let Instruction::Jump { label } = jump {
+            table.get(label).unwrap().start as usize
         } else {
-            panic!("expected JUMPI");
+            panic!("expected Jump");
         };
 
         stream.seek(target).unwrap();
         let (off, label, instr) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(off, 0);
-        assert_eq!(label.as_deref(), Some("L0"));
+        assert_eq!(label.as_deref(), Some(".0"));
         assert_eq!(instr, Instruction::PushC1 { val: [3] });
     }
 
     #[test]
     fn unknown_opcode_returns_error_and_advances() {
-        // 0x08 is a gap opcode (not assigned).
         let buf = [0x08u8, Instruction::Halt {}.opcode() as u8];
         let mut stream = InstructionStream::new(&buf);
 
@@ -594,7 +514,6 @@ mod tests {
                 byte: 0x08
             })),
         );
-        // After the error the cursor moved to byte 1; HALT should decode.
         assert_eq!(
             stream.next_instruction(),
             Some(Ok((1, None, Instruction::Halt {}))),
@@ -603,7 +522,6 @@ mod tests {
 
     #[test]
     fn truncated_instruction_returns_error_and_advances() {
-        // PushC8 (0x1F) needs 8 operand bytes -- feeding just the opcode truncates it.
         let buf: Vec<u8> = vec![0x1Fu8];
         let mut stream = InstructionStream::new(&buf);
 
@@ -611,7 +529,6 @@ mod tests {
             stream.next_instruction(),
             Some(Err(Error::TruncatedInstruction { offset: 0 })),
         );
-        // Cursor is at 1 == len, so stream is exhausted.
         assert_eq!(stream.next_instruction(), None);
     }
 

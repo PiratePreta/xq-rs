@@ -20,7 +20,10 @@
 //! Delegates label resolution and `JUMP`/`JUMPI` fixups to
 //! [`InstructionBuilder`]. Instructions are emitted in a single pass;
 //! label-based jumps register fixups that [`InstructionBuilder::build`]
-//! resolves at the end, supporting both forward and backward references.
+//! resolves at the end, building a jump table and patching label indices.
+//!
+//! Labels use numeric `.N` syntax (e.g. `.0`, `.1`). Each placed label
+//! becomes a basic-block entry in the jump table.
 //!
 //! `PUSH` is handled specially: the assembly operand is an integer constant.
 //! The assembler calls [`InstructionBuilder::push`] which selects the minimal
@@ -67,9 +70,9 @@ use aglais_xqvm_bytecode::{Instruction, InstructionBuilder, LabelId, Program, Re
 use crate::ast::{AsmLine, Operand, ParsedInstr};
 use crate::error::{AssembleError, Source, make_span, make_src};
 
-/// Maps a label name to its [`LabelId`] and the source location where it was
+/// Maps a label index to its [`LabelId`] and the source location where it was
 /// first defined (`None` if only seen as a forward reference so far).
-type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
+type LabelMap = HashMap<u16, (LabelId, Option<usize>)>;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -85,10 +88,6 @@ type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
 /// `JUMP`/`JUMPI` fixups. Both forward and backward label references are
 /// supported.
 ///
-/// `PUSHC <imm>` is handled specially: the integer operand is the constant
-/// value to intern, not a pool index. The pool index is allocated
-/// automatically and deduplicated.
-///
 /// # Errors
 ///
 /// - [`AssembleError::UnknownMnemonic`] -- unrecognised mnemonic.
@@ -98,7 +97,7 @@ type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
 /// - [`AssembleError::IntegerOutOfRange`] -- integer does not fit target type.
 /// - [`AssembleError::UndefinedLabel`] -- label referenced but not defined.
 /// - [`AssembleError::DuplicateLabel`] -- label defined more than once.
-/// - [`AssembleError::JumpOffsetOverflow`] -- jump distance exceeds `i16`.
+/// - [`AssembleError::UnusedLabel`] -- label placed but never referenced.
 ///
 /// # Examples
 ///
@@ -113,35 +112,30 @@ type LabelMap = HashMap<String, (LabelId, Option<usize>)>;
 pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, AssembleError> {
     let src = Source { text: source, name };
     let mut b = InstructionBuilder::new();
-    // label name -> (LabelId, first definition location)
-    // location is None when the label was first seen via a forward reference.
     let mut label_map: LabelMap = HashMap::new();
-    // label names in creation order: label_names[raw_id] == name
-    let mut label_names: Vec<String> = Vec::new();
-    // first jump reference per label name: used for error span reporting
-    let mut first_ref: HashMap<String, usize> = HashMap::new();
+    // Maps label index -> first reference source offset (for error reporting).
+    let mut first_ref: HashMap<u16, usize> = HashMap::new();
 
     for line in lines {
         match line {
             AsmLine::LabelDef {
-                name: label_name,
+                label: label_idx,
                 offset: def_offset,
             } => {
-                let id = match label_map.entry(label_name.clone()) {
+                let id = match label_map.entry(*label_idx) {
                     Entry::Occupied(e) => {
                         let (id, placed_at) = e.into_mut();
                         if let Some(prev_offset) = *placed_at {
                             return Err(AssembleError::DuplicateLabel {
-                                label: label_name.clone(),
+                                label: *label_idx,
                                 src: make_src(src),
-                                span: make_span(prev_offset, label_name.len()),
+                                span: make_span(prev_offset, format!(".{label_idx}").len()),
                             });
                         }
                         *placed_at = Some(*def_offset);
                         *id
                     }
                     Entry::Vacant(e) => {
-                        label_names.push(label_name.clone());
                         let id = b.label();
                         let _ = e.insert((id, Some(*def_offset)));
                         id
@@ -151,14 +145,7 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
             }
             AsmLine::Instruction(instr) => match instr.mnemonic.as_str() {
                 "JUMP" | "JUMPI" => {
-                    assemble_jump(
-                        instr,
-                        &mut b,
-                        &mut label_map,
-                        &mut label_names,
-                        &mut first_ref,
-                        src,
-                    )?;
+                    assemble_jump(instr, &mut b, &mut label_map, &mut first_ref, src)?;
                 }
                 "PUSH" | "PUSHC" => {
                     assemble_push(instr, &mut b, src)?;
@@ -171,7 +158,7 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
     }
 
     b.build()
-        .map_err(|e| convert_build_error(e, &label_names, &first_ref, src))
+        .map_err(|e| convert_build_error(e, &first_ref, src))
 }
 
 // ---------------------------------------------------------------------------
@@ -220,12 +207,9 @@ fn assemble_jump(
     instr: &ParsedInstr,
     b: &mut InstructionBuilder,
     label_map: &mut LabelMap,
-    label_names: &mut Vec<String>,
-    first_ref: &mut HashMap<String, usize>,
+    first_ref: &mut HashMap<u16, usize>,
     src: Source<'_>,
 ) -> Result<(), AssembleError> {
-    let mnem_span = make_span(instr.offset, instr.mnemonic.len());
-
     check_operand_count(instr, 1, src)?;
 
     match instr
@@ -233,41 +217,26 @@ fn assemble_jump(
         .first()
         .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
     {
-        Operand::LabelRef(label) => {
-            let id = match label_map.entry(label.clone()) {
+        Operand::LabelRef(label_idx) => {
+            let id = match label_map.entry(*label_idx) {
                 Entry::Occupied(e) => e.get().0,
                 Entry::Vacant(e) => {
-                    label_names.push(label.clone());
                     let id = b.label();
                     let _ = e.insert((id, None));
                     id
                 }
             };
-            let _ = first_ref.entry(label.clone()).or_insert(instr.offset);
+            let _ = first_ref.entry(*label_idx).or_insert(instr.offset);
             let _ = match instr.mnemonic.as_str() {
                 "JUMPI" => b.jump_if(id),
                 _ => b.jump(id),
             };
         }
-        Operand::Integer(n) => {
-            let offset = i16::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
-                value: *n,
-                target_type: "i16",
-                field: "offset".to_string(),
-                mnemonic: instr.mnemonic.clone(),
-                src: make_src(src),
-                span: mnem_span,
-            })?;
-            let _ = match instr.mnemonic.as_str() {
-                "JUMPI" => b.emit(Instruction::JumpI { offset }),
-                _ => b.emit(Instruction::Jump { offset }),
-            };
-        }
-        Operand::Register(_) => {
+        Operand::Integer(_) | Operand::Register(_) => {
             return Err(err_wrong_kind(
                 instr,
-                "offset",
-                "integer or label reference",
+                "label",
+                "label reference (e.g. .0)",
                 src,
             ));
         }
@@ -311,30 +280,27 @@ fn assemble_push(
 
 fn convert_build_error(
     e: BuilderError,
-    label_names: &[String],
-    first_ref: &HashMap<String, usize>,
+    first_ref: &HashMap<u16, usize>,
     src: Source<'_>,
 ) -> AssembleError {
     match e {
         BuilderError::UnplacedLabel { id } => {
-            let label = label_names.get(id).cloned().unwrap_or_default();
-            let offset = first_ref.get(&label).copied().unwrap_or(0);
+            let label_idx = id as u16;
+            let offset = first_ref.get(&label_idx).copied().unwrap_or(0);
+            let label_str = format!(".{label_idx}");
             AssembleError::UndefinedLabel {
-                label: label.clone(),
+                label: label_idx,
                 src: make_src(src),
-                span: make_span(offset, label.len()),
+                span: make_span(offset, label_str.len()),
             }
         }
-        BuilderError::OffsetOverflow {
-            label: id, delta, ..
-        } => {
-            let label = label_names.get(id).cloned().unwrap_or_default();
-            let offset = first_ref.get(&label).copied().unwrap_or(0);
-            AssembleError::JumpOffsetOverflow {
-                label: label.clone(),
-                delta,
+        BuilderError::UnusedLabel { id } => {
+            let label_idx = id as u16;
+            let label_str = format!(".{label_idx}");
+            AssembleError::UnusedLabel {
+                label: label_idx,
                 src: make_src(src),
-                span: make_span(offset, label.len()),
+                span: make_span(0, label_str.len()),
             }
         }
     }
@@ -426,10 +392,11 @@ macro_rules! impl_from_operand_byte_array {
 
 impl_from_operand_byte_array!(1, 2, 3, 4, 5, 6, 7, 8);
 
-/// `i16` is used only for `JUMP`/`JUMPI` offsets, which are handled
-/// separately. This impl covers hypothetical non-jump opcodes that take an
-/// `i16` field (currently none).
-impl FromOperand for i16 {
+/// `u16` is used for `JUMP`/`JUMPI` label operands, which are handled
+/// separately by `assemble_jump`. This impl covers the `impl_build_instr`
+/// macro's generated arms (unreachable at runtime because the caller routes
+/// JUMP/JUMPI to `assemble_jump` first).
+impl FromOperand for u16 {
     fn from_operand(
         op: &Operand,
         field: &str,
@@ -438,20 +405,11 @@ impl FromOperand for i16 {
         src: Source<'_>,
     ) -> Result<Self, AssembleError> {
         match op {
-            Operand::Integer(n) => {
-                Self::try_from(*n).map_err(|_| AssembleError::IntegerOutOfRange {
-                    value: *n,
-                    target_type: "i16",
-                    field: field.to_string(),
-                    mnemonic: mnemonic.to_string(),
-                    src: make_src(src),
-                    span: make_span(offset, mnemonic.len()),
-                })
-            }
+            Operand::LabelRef(idx) => Ok(*idx),
             _ => Err(AssembleError::WrongOperandKind {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
-                expected_kind: "integer literal".to_string(),
+                expected_kind: "label reference (e.g. .0)".to_string(),
                 src: make_src(src),
                 span: make_span(offset, mnemonic.len()),
             }),
@@ -545,13 +503,11 @@ mod tests {
 
     #[test]
     fn push_zero() {
-        // 0 encodes as PUSHC_0 (opcode 0x10, no payload)
         assert_eq!(asm("PUSH 0"), [0x10]);
     }
 
     #[test]
     fn push_negative() {
-        // -1 encodes as PUSHC_1 (opcode 0x18) with 1-byte payload 0xFF
         assert_eq!(asm("PUSH -1"), [0x18, 0xFF]);
     }
 
@@ -578,38 +534,44 @@ mod tests {
 
     #[test]
     fn forward_jump_label() {
-        // JUMP done (3 bytes at site 0)
+        // JUMP .0 (3 bytes at site 0)
         // NOP       (1 byte  at site 3)
-        // done:
+        // .0:
         // HALT      (1 byte  at site 4)
-        // => delta = 4 - 0 = 4
-        let src = "JUMP done\nNOP\ndone:\nHALT";
-        let buf = asm(src);
-        let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
+        // label 0 should be at byte 4
+        let src = "JUMP .0\nNOP\n.0:\nHALT";
+        let lines = parse(src, "<test>").unwrap();
+        let program = assemble(&lines, src, "<test>").unwrap();
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::Jump { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Halt {});
+        // Jump table entry for .0 starts at byte 4.
+        assert_eq!(program.jump_table().get(0).unwrap().start, 4);
     }
 
     #[test]
     fn backward_jumpi_label() {
-        // top:
-        // PUSH -1   (2 bytes at 0: PUSHC_1 0xFF)
+        // .0:
+        // PUSH -1   (2 bytes at 0)
         // ADD       (1 byte  at 2)
         // DUPL      (1 byte  at 3)
-        // JUMPI top (3 bytes at 4)
-        // => delta = 0 - 4 = -4
-        let src = "top:\nPUSH -1\nADD\nDUPL\nJUMPI top";
-        let buf = asm(src);
-        let instrs = decode_all(&buf);
-        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -4 });
+        // JUMPI .0  (3 bytes at 4)
+        let src = ".0:\nPUSH -1\nADD\nDUPL\nJUMPI .0";
+        let lines = parse(src, "<test>").unwrap();
+        let program = assemble(&lines, src, "<test>").unwrap();
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { label: 0 });
+        // Jump table entry for .0 starts at byte 0.
+        assert_eq!(program.jump_table().get(0).unwrap().start, 0);
     }
 
     #[test]
-    fn jump_raw_integer_offset() {
-        let buf = asm("JUMP 3");
-        let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::Jump { offset: 3 });
+    fn jump_raw_integer_rejected() {
+        let src = "JUMP 3";
+        let lines = parse(src, "<test>").unwrap();
+        let err = assemble(&lines, src, "<test>").unwrap_err();
+        assert!(matches!(err, AssembleError::WrongOperandKind { .. }));
     }
 
     #[test]
@@ -628,7 +590,6 @@ mod tests {
 
     #[test]
     fn wrong_operand_kind_error() {
-        // LOAD expects a register, not an integer
         let src = "LOAD 42";
         let lines = parse(src, "<test>").unwrap();
         assert!(assemble(&lines, src, "<test>").is_err());
@@ -636,40 +597,27 @@ mod tests {
 
     #[test]
     fn undefined_label_error() {
-        let src = "JUMP nowhere";
+        let src = "JUMP .99";
         let lines = parse(src, "<test>").unwrap();
         assert!(assemble(&lines, src, "<test>").is_err());
     }
 
     #[test]
     fn duplicate_label_error() {
-        let src = "top:\nNOP\ntop:\nHALT";
+        let src = ".0:\nNOP\nJUMP .0\n.0:\nHALT";
         let lines = parse(src, "<test>").unwrap();
         assert!(assemble(&lines, src, "<test>").is_err());
-    }
-
-    #[test]
-    fn duplicate_label_reports_first_definition_location() {
-        let src = "top:\nNOP\ntop:\nHALT";
-        let lines = parse(src, "<test>").unwrap();
-        let err = assemble(&lines, src, "<test>").unwrap_err();
-        assert!(matches!(
-            err,
-            AssembleError::DuplicateLabel { ref label, .. } if label == "top"
-        ));
     }
 
     #[test]
     fn push_hex_literal() {
         let buf = asm("PUSH 0xFF");
         let instrs = decode_all(&buf);
-        // 255 fits in 2 bytes (needs sign bit), so PUSHC_2 { val: [0x00, 0xFF] }
         assert_eq!(instrs[0], Instruction::PushC2 { val: [0x00, 0xFF] });
     }
 
     #[test]
     fn all_zero_arg_instructions_assemble() {
-        // Spot-check a handful of zero-operand mnemonics.
         for mnem in &["NOP", "HALT", "ADD", "SUB", "MUL", "DIV", "NOT", "AND"] {
             let buf = asm(mnem);
             assert_eq!(buf.len(), 1, "expected 1 byte for {mnem}");
@@ -681,7 +629,6 @@ mod tests {
         let src = "PUSHC 12345";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
-        // 12345 = 0x3039, fits in 2 bytes, so PUSHC_2 { val: [0x30, 0x39] }.
         let instrs = decode_all(program.code());
         assert_eq!(instrs.len(), 1);
         assert_eq!(instrs[0], Instruction::PushC2 { val: [0x30, 0x39] });

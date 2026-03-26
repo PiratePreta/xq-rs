@@ -125,45 +125,43 @@ fn energy_instruction() {
 
 #[test]
 fn forward_jump_resolves() {
-    // JUMP done  (3 bytes, site=0)
-    // NOP        (1 byte,  site=3)
-    // done:
-    // HALT       (1 byte,  site=4)
-    // delta = 4 - 0 = 4
-    let instrs = asm("JUMP done\nNOP\ndone:\nHALT");
-    assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
+    // JUMP .0  (3 bytes, site=0)
+    // NOP      (1 byte,  site=3)
+    // .0:
+    // HALT     (1 byte,  site=4)
+    let instrs = asm("JUMP .0\nNOP\n.0:\nHALT");
+    assert_eq!(instrs[0], Instruction::Jump { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Halt {});
 }
 
 #[test]
 fn backward_jumpi_resolves() {
-    // top:
-    // PUSH -1   (2 bytes, site=0: PUSHC_1 0xFF)
-    // ADD       (1 byte,  site=2)
-    // DUPL      (1 byte,  site=3)
-    // JUMPI top (3 bytes, site=4)
-    // delta = 0 - 4 = -4
-    let instrs = asm("top:\nPUSH -1\nADD\nDUPL\nJUMPI top");
-    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { offset: -4 });
+    // .0:
+    // PUSH -1  (2 bytes, site=0: PUSHC_1 0xFF)
+    // ADD      (1 byte,  site=2)
+    // DUPL     (1 byte,  site=3)
+    // JUMPI .0 (3 bytes, site=4)
+    let instrs = asm(".0:\nPUSH -1\nADD\nDUPL\nJUMPI .0");
+    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { label: 0 });
 }
 
 #[test]
 fn label_on_same_line_as_instruction() {
-    // start: NOP -- label is at byte 0, NOP follows
-    // JUMP start -- delta = 0 - 1 = -1
-    let instrs = asm("start: NOP\nJUMP start");
+    // .0: NOP -- label at byte 0, NOP follows
+    // JUMP .0
+    let instrs = asm(".0: NOP\nJUMP .0");
     assert_eq!(instrs[0], Instruction::Nop {});
-    assert_eq!(instrs[1], Instruction::Jump { offset: -1 });
+    assert_eq!(instrs[1], Instruction::Jump { label: 0 });
 }
 
 #[test]
 fn multiple_labels_and_jumps() {
     let src = "
         PUSH 0
-        JUMPI done
+        JUMPI .0
         PUSH 42
-    done:
+    .0:
         HALT
     ";
     let instrs = asm(src);
@@ -174,15 +172,13 @@ fn multiple_labels_and_jumps() {
 }
 
 #[test]
-fn jump_with_raw_integer_offset() {
-    let instrs = asm("JUMP 3");
-    assert_eq!(instrs[0], Instruction::Jump { offset: 3 });
+fn jump_raw_integer_is_error() {
+    assert!(assemble_source("JUMP 3").is_err());
 }
 
 #[test]
-fn jump_with_negative_integer_offset() {
-    let instrs = asm("JUMP -4");
-    assert_eq!(instrs[0], Instruction::Jump { offset: -4 });
+fn jump_negative_integer_is_error() {
+    assert!(assemble_source("JUMP -4").is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -267,8 +263,8 @@ fn mixed_case_produces_same_bytecode_as_uppercase() {
 
 #[test]
 fn case_insensitive_jump_mnemonics() {
-    let instrs = asm("jump done\nnop\ndone:\nhalt");
-    assert_eq!(instrs[0], Instruction::Jump { offset: 4 });
+    let instrs = asm("jump .0\nnop\n.0:\nhalt");
+    assert_eq!(instrs[0], Instruction::Jump { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Halt {});
 }
@@ -302,12 +298,12 @@ fn unknown_mnemonic_is_error() {
 
 #[test]
 fn undefined_label_is_error() {
-    assert!(assemble_source("JUMP nonexistent").is_err());
+    assert!(assemble_source("JUMP .99").is_err());
 }
 
 #[test]
 fn duplicate_label_is_error() {
-    assert!(assemble_source("top:\nNOP\ntop:\nHALT").is_err());
+    assert!(assemble_source(".0:\nNOP\n.0:\nHALT").is_err());
 }
 
 #[test]
@@ -331,7 +327,6 @@ fn register_out_of_range_parse_error() {
 }
 
 #[test]
-fn integer_offset_overflow_is_error() {
-    // 40000 > i16::MAX (32767)
+fn raw_integer_for_jump_is_error() {
     assert!(assemble_source("JUMP 40000").is_err());
 }

@@ -79,6 +79,8 @@ fn main() -> Result<()> {
             .wrap_err("assembly failed")?
     } else {
         Program::decode(&source)
+            .into_diagnostic()
+            .wrap_err("failed to decode program")?
     };
 
     let calldata: Vec<RegVal> = args.calldata.into_iter().map(RegVal::Int).collect();

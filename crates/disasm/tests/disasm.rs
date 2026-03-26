@@ -22,7 +22,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use aglais_xqvm_bytecode::{Instruction, InstructionBuilder, Register, codec};
+use aglais_xqvm_bytecode::{Instruction, InstructionBuilder, Program, Register, codec};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,9 +61,10 @@ fn run_file(path: &Path) -> Output {
         .expect("failed to run disasm")
 }
 
-/// Encode a slice of instructions into a byte buffer.
+/// Encode a slice of instructions into a Program wire format (with empty jump table).
 fn assemble(instrs: &[Instruction]) -> Vec<u8> {
-    instrs.iter().flat_map(codec::encode).collect()
+    let code: Vec<u8> = instrs.iter().flat_map(codec::encode).collect();
+    Program::new(code).encode()
 }
 
 // ---------------------------------------------------------------------------
@@ -71,8 +72,10 @@ fn assemble(instrs: &[Instruction]) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn empty_stdin_produces_empty_output() {
-    let out = run_stdin(&[]);
+fn empty_program_produces_empty_output() {
+    // Empty program: 2-byte empty jump table header + no code.
+    let bytes = Program::new(Vec::new()).encode();
+    let out = run_stdin(&bytes);
     assert!(out.status.success());
     assert_eq!(out.stdout, b"");
 }
@@ -104,18 +107,18 @@ fn jump_target_gets_label() {
     let mut b = InstructionBuilder::new();
     let top = b.label();
     let _ = b.place(top).nop().jump(top);
-    let bytes = b.build().unwrap().code().to_vec();
+    let program = b.build().unwrap();
+    let bytes = program.encode();
 
     let out = run_stdin(&bytes);
     assert!(out.status.success(), "exit: {}", out.status);
 
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("L0:"), "missing label L0 in:\n{text}");
+    assert!(text.contains(".0:"), "missing label .0 in:\n{text}");
     assert!(text.contains("JUMP"), "missing JUMP in:\n{text}");
-    // Jump operand should resolve to the label name, not a raw offset.
     assert!(
-        text.contains("L0"),
-        "jump operand should show L0 in:\n{text}"
+        text.contains(".0"),
+        "jump operand should show .0 in:\n{text}"
     );
 }
 
@@ -124,12 +127,13 @@ fn conditional_jump_shows_label() {
     let mut b = InstructionBuilder::new();
     let done = b.label();
     let _ = b.push(0).jump_if(done).push(1).place(done).halt();
-    let bytes = b.build().unwrap().code().to_vec();
+    let program = b.build().unwrap();
+    let bytes = program.encode();
 
     let out = run_stdin(&bytes);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("JUMPI"), "missing JUMPI in:\n{text}");
-    assert!(text.contains("L0:"), "missing label in:\n{text}");
+    assert!(text.contains(".0:"), "missing label in:\n{text}");
 }
 
 #[test]
@@ -156,7 +160,9 @@ fn energy_shows_both_registers() {
 
 #[test]
 fn unknown_byte_renders_as_dot_byte() {
-    let out = run_stdin(&[0xFE]);
+    // Encode a program with a single unknown opcode byte.
+    let bytes = Program::new(vec![0xFE]).encode();
+    let out = run_stdin(&bytes);
     assert!(out.status.success(), "exit: {}", out.status);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains(".byte"), "missing .byte in:\n{text}");
