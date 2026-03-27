@@ -11,10 +11,3 @@ workspace = true
 
 [dependencies]
 aglais-xqvm-bytecode = { workspace = true, features = [ "std" ] }
-clap.workspace       = true
-miette.workspace     = true
-thiserror.workspace  = true
-
-[[bin]]
-name = "xqdism"
-path = "src/bin/xqdism.rs"
