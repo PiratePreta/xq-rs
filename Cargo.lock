@@ -22,7 +22,6 @@ name = "aglais-xqvm-asm"
 version = "0.1.0"
 dependencies = [
  "aglais-xqvm-bytecode",
- "clap",
  "miette",
  "pest",
  "pest_derive",
@@ -59,9 +58,6 @@ name = "aglais-xqvm-disasm"
 version = "0.1.0"
 dependencies = [
  "aglais-xqvm-bytecode",
- "clap",
- "miette",
- "thiserror",
 ]
 
 [[package]]
@@ -71,7 +67,6 @@ dependencies = [
  "aglais-xqvm-asm",
  "aglais-xqvm-bytecode",
  "aglais-xqvm-disasm",
- "clap",
  "miette",
  "pastey",
  "thiserror",
