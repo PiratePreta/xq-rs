@@ -26,7 +26,8 @@
 //! xqvm [OPTIONS] <FILE>
 //! ```
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -34,7 +35,16 @@ use miette::{IntoDiagnostic, Result, WrapErr};
 
 use aglais_xqvm_asm::assemble_source;
 use aglais_xqvm_bytecode::Program;
-use aglais_xqvm_vm::{RegVal, Vm};
+use aglais_xqvm_vm::{JsonTracer, RegVal, TextTracer, Vm};
+
+/// Trace output format.
+#[derive(Clone, Debug, clap::ValueEnum)]
+enum TraceFormat {
+    /// Human-readable aligned columns.
+    Text,
+    /// One JSON object per line (JSONL).
+    Json,
+}
 
 /// Interpret XQVM bytecode.
 ///
@@ -58,6 +68,18 @@ struct Args {
     /// Maximum number of instructions to execute (0 = unlimited).
     #[arg(long, default_value = "10000000")]
     step_limit: u64,
+
+    /// Enable execution tracing.
+    #[arg(long)]
+    trace: bool,
+
+    /// Trace output format (requires --trace).
+    #[arg(long, default_value = "text", requires = "trace")]
+    trace_format: TraceFormat,
+
+    /// Write trace output to a file instead of stderr (requires --trace).
+    #[arg(long, requires = "trace")]
+    trace_file: Option<PathBuf>,
 
     /// Bytecode (or assembly) file to interpret.
     file: PathBuf,
@@ -91,8 +113,32 @@ fn main() -> Result<()> {
         let _ = vm.set_step_limit(args.step_limit);
     }
 
-    vm.run(&program)
-        .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
+    if args.trace {
+        let writer: Box<dyn Write> = match &args.trace_file {
+            Some(path) => {
+                let file = File::create(path)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("failed to create '{}'", path.display()))?;
+                Box::new(BufWriter::new(file))
+            }
+            None => Box::new(BufWriter::new(std::io::stderr())),
+        };
+        match args.trace_format {
+            TraceFormat::Text => {
+                let mut tracer = TextTracer::new(writer);
+                vm.run_trace(&mut tracer, &program)
+                    .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
+            }
+            TraceFormat::Json => {
+                let mut tracer = JsonTracer::new(writer);
+                vm.run_trace(&mut tracer, &program)
+                    .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
+            }
+        }
+    } else {
+        vm.run(&program)
+            .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
+    };
 
     let outputs = vm.outputs();
     let has_outputs = outputs.iter().any(|v| v != &RegVal::default());
