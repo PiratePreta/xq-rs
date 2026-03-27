@@ -1,255 +1,359 @@
 # XQVM Bytecode Semantics
 
 Authoritative reference for every instruction in the XQVM bytecode format.
-Derived directly from `crates/bytecode/src/types/table.rs`, which is the single
-source of truth: the `opcodes!` x-macro generates the `Opcode` and `Instruction`
-enums, the codec, the assembler, the disassembler, and the VM dispatcher from
-this one file.
+Derived directly from the `opcodes!` x-macro in
+`crates/bytecode/src/types/table.rs`, with mechanical behaviour verified
+against `crates/vm/src/vm.rs`. When these two sources disagree, this document
+reflects the VM implementation.
+
+---
+
+## VM State
+
+A running VM holds four pieces of mutable state:
+
+| Component | Type | Description |
+|-----------|------|-------------|
+| **Stack** | `Vec<i64>` | Operand stack. Max depth: **8 192** items. Overflow → error. |
+| **Register file** | `[RegVal; 256]` | 256 slots, indexed `r0`–`r255`. Initialised to `Int(0)`. |
+| **Loop stack** | `Vec<LoopFrame>` | Frames pushed by `RANGE`/`ITER`, popped by `NEXT`. |
+| **Calldata / Outputs** | `Vec<RegVal>` | Read-only input slots (`INPUT`) and writable output slots (`OUTPUT`). |
+
+### `RegVal` — the register value type
+
+Each register holds one variant:
+
+| Variant | Rust type | Notes |
+|---------|-----------|-------|
+| `Int(i64)` | `i64` | Default value for every register. |
+| `VecInt(Vec<i64>)` | `Vec<i64>` | Integer vector. |
+| `VecXqmx(Vec<XqmxModel>)` | `Vec<XqmxModel>` | Vector of models. |
+| `Model(XqmxModel)` | struct | QUBO/Ising/discrete Hamiltonian. |
+| `Sample(XqmxSample)` | struct | Variable-assignment vector. |
+
+---
 
 ## Notation
 
-- **Stack effect** — described as `[..., a, b] → [...]` where the rightmost item
-  is the **top** of the stack.
-- **Register** — a `u8` index (`r0`–`r255`). Each slot holds one of:
-  `Int(i64)`, `VecInt`, `VecXqmx`, `Model`, or `Sample`.
-- **`label: u16`** — a jump-table index resolved at load time to a byte offset.
-- **`val: [u8; N]`** — `N` inline bytes in big-endian order, sign-extended to
-  `i64` on the stack.
-- **Reserved** — byte codes `0x08`, `0x0D`, `0x19`, and `0x35` are unassigned
-  gaps. The decoder treats them as illegal opcodes.
+- **Stack diagrams** — `[..., a, b] → [..., r]`, rightmost = **top**. `b` is
+  popped first.
+- **`reg`** — the `u8` operand encoded in the instruction byte stream.
+- Assignments use `←` (register write) and `→` (stack push).
+- **Wrapping** — all integer arithmetic uses wrapping semantics on `i64`
+  (no panic on overflow; result truncated to 64 bits).
+- **Reserved** — opcodes `0x08`, `0x0D`, `0x19`, `0x35` are unassigned gaps;
+  the decoder rejects them as illegal.
 
 ---
 
 ## Control Flow
 
-| Code   | Mnemonic  | Arguments     | Interpretation                                                                                      |
-|--------|-----------|---------------|-----------------------------------------------------------------------------------------------------|
-| `0x00` | `NOP`     | —             | No operation.                                                                                       |
-| `0x01` | `TARGET`  | —             | Mark a valid jump destination. Required before any label that `JUMP`/`JUMPI` can target.            |
-| `0x02` | `JUMP`    | `label: u16`  | Unconditionally jump to the basic block at `label`.                                                 |
-| `0x03` | `JUMPI`   | `label: u16`  | Pop `cond`; jump to `label` if `cond != 0`, otherwise fall through.                                 |
-| `0x04` | `NEXT`    | —             | Advance the active loop counter. If the range/iteration is not exhausted, jump back to loop body start; otherwise pop the loop frame and fall through. |
-| `0x05` | `LVAL`    | `reg: Register` | Copy the current loop value (range integer or vec element) into `reg`.                            |
-| `0x06` | `RANGE`   | —             | Pop `count`, then `start`; start a range loop over `[start, start + count)`.                       |
-| `0x07` | `ITER`    | `reg: Register` | Start a vec iteration over the vec held in `reg`.                                                 |
-| `0x09` | `HALT`    | —             | Stop execution immediately.                                                                         |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x00` | `NOP` | — | `[...] → [...]` | No operation. |
+| `0x01` | `TARGET` | — | `[...] → [...]` | Mark a valid jump destination. Required at every label that `JUMP`/`JUMPI` may target; treated as `NOP` at runtime. |
+| `0x02` | `JUMP` | `label: u16` | `[...] → [...]` | Seek the instruction stream to `jump_table[label].start`. Unconditional. |
+| `0x03` | `JUMPI` | `label: u16` | `[..., cond] → [...]` | Pop `cond`. If `cond != 0`, seek to `jump_table[label].start`; otherwise fall through. |
+| `0x04` | `NEXT` | — | `[...] → [...]` | Advance the active loop frame. For `Range`: increment `current`; if `current < end`, seek to `body_start`, else pop frame and fall through. For `Iter`: increment `index`; if `index < len(reg)`, seek to `body_start`, else pop frame and fall through. Errors if no loop frame is active. |
+| `0x05` | `LVAL` | `reg: Register` | `[...] → [...]` | Copy the current loop value into `reg`. For `Range`: `reg ← Int(current)`. For `Iter`: `reg ← vec[index]` (element type preserved: `Int` or `Model`). |
+| `0x06` | `RANGE` | — | `[..., start, count] → [...]` | Pop `count`, then `start`. Push a `Range { current: start, end: start.wrapping_add(count) }` loop frame; the next instruction's byte offset becomes `body_start`. |
+| `0x07` | `ITER` | `reg: Register` | `[...] → [...]` | Validate that `reg` holds a `VecInt` or `VecXqmx`; push an `Iter { reg, index: 0 }` loop frame. The next instruction's byte offset becomes `body_start`. |
+| `0x09` | `HALT` | — | `[...] → [...]` | Stop execution immediately. |
 
 ---
 
 ## Register I/O
 
-| Code   | Mnemonic  | Arguments       | Interpretation                                                                            |
-|--------|-----------|-----------------|-------------------------------------------------------------------------------------------|
-| `0x0A` | `LOAD`    | `reg: Register` | Push the integer value of `reg` onto the stack.                                           |
-| `0x0B` | `STOW`    | `reg: Register` | Pop the top of the stack and store it into `reg`.                                         |
-| `0x0C` | `DROP`    | `reg: Register` | Reset `reg` to `Int(0)`, releasing any heap allocation it held.                           |
-| `0x0E` | `INPUT`   | `reg: Register` | Pop a calldata slot index `s`; load calldata slot `s` into `reg`.                        |
-| `0x0F` | `OUTPUT`  | `reg: Register` | Pop an output slot index `s`; write `reg` to output slot `s`.                            |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x0A` | `LOAD` | `reg: Register` | `[...] → [..., v]` | `reg` must hold `Int(v)`. Push `v`. Errors if `reg` holds any other variant. |
+| `0x0B` | `STOW` | `reg: Register` | `[..., v] → [...]` | Pop `v`. Write `reg ← Int(v)`. |
+| `0x0C` | `DROP` | `reg: Register` | `[...] → [...]` | Write `reg ← Int(0)`, releasing any heap allocation the slot held. |
+| `0x0E` | `INPUT` | `reg: Register` | `[..., s] → [...]` | Pop `s` (slot index). `s` must be a valid index into calldata (`0 ≤ s < len`). Clone `calldata[s]` into `reg`. Any `RegVal` variant is transferable. |
+| `0x0F` | `OUTPUT` | `reg: Register` | `[..., s] → [...]` | Pop `s` (slot index). `s` must be a valid index into the output array (`0 ≤ s < len`). Clone `reg`'s value into `outputs[s]`. |
 
 ---
 
 ## Stack Manipulation
 
-| Code   | Mnemonic  | Arguments       | Interpretation                                                                            |
-|--------|-----------|-----------------|-------------------------------------------------------------------------------------------|
-| `0x10` | `POP`     | —               | Discard the top of the stack.                                                             |
-| `0x11` | `PUSH1`   | `val: [u8; 1]`  | Push `val` sign-extended to `i64`.                                                        |
-| `0x12` | `PUSH2`   | `val: [u8; 2]`  | Push `val` (big-endian, 2 bytes) sign-extended to `i64`.                                  |
-| `0x13` | `PUSH3`   | `val: [u8; 3]`  | Push `val` (big-endian, 3 bytes) sign-extended to `i64`.                                  |
-| `0x14` | `PUSH4`   | `val: [u8; 4]`  | Push `val` (big-endian, 4 bytes) sign-extended to `i64`.                                  |
-| `0x15` | `PUSH5`   | `val: [u8; 5]`  | Push `val` (big-endian, 5 bytes) sign-extended to `i64`.                                  |
-| `0x16` | `PUSH6`   | `val: [u8; 6]`  | Push `val` (big-endian, 6 bytes) sign-extended to `i64`.                                  |
-| `0x17` | `PUSH7`   | `val: [u8; 7]`  | Push `val` (big-endian, 7 bytes) sign-extended to `i64`.                                  |
-| `0x18` | `PUSH8`   | `val: [u8; 8]`  | Push the full 8-byte big-endian `i64` constant `val`.                                     |
-| `0x1A` | `SCLR`    | —               | Clear the entire value stack.                                                             |
-| `0x1B` | `SWAP`    | —               | Swap the top two stack elements.                                                          |
-| `0x1C` | `COPY`    | —               | Duplicate the top of the stack.                                                           |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x10` | `POP` | — | `[..., a] → [...]` | Discard the top of the stack. |
+| `0x11` | `PUSH1` | `val: [u8; 1]` | `[...] → [..., v]` | Interpret `val` as a 1-byte big-endian signed integer, sign-extend to `i64`, push `v`. |
+| `0x12` | `PUSH2` | `val: [u8; 2]` | `[...] → [..., v]` | Same, 2 bytes. |
+| `0x13` | `PUSH3` | `val: [u8; 3]` | `[...] → [..., v]` | Same, 3 bytes. |
+| `0x14` | `PUSH4` | `val: [u8; 4]` | `[...] → [..., v]` | Same, 4 bytes. |
+| `0x15` | `PUSH5` | `val: [u8; 5]` | `[...] → [..., v]` | Same, 5 bytes. |
+| `0x16` | `PUSH6` | `val: [u8; 6]` | `[...] → [..., v]` | Same, 6 bytes. |
+| `0x17` | `PUSH7` | `val: [u8; 7]` | `[...] → [..., v]` | Same, 7 bytes. |
+| `0x18` | `PUSH8` | `val: [u8; 8]` | `[...] → [..., v]` | Interpret `val` as a full 8-byte big-endian `i64`, push `v`. |
+| `0x1A` | `SCLR` | — | `[...] → []` | Clear the entire value stack. |
+| `0x1B` | `SWAP` | — | `[..., a, b] → [..., b, a]` | Swap the top two elements. Errors if stack depth < 2. |
+| `0x1C` | `COPY` | — | `[..., a] → [..., a, a]` | Duplicate the top of the stack without consuming it. |
 
 ---
 
 ## Arithmetic
 
-All arithmetic instructions operate on `i64` values. Pop order: `b` is popped first
-(top of stack), then `a`.
+All operations are on `i64` with **wrapping** semantics (no overflow trap).
 
-| Code   | Mnemonic | Arguments | Interpretation                                       |
-|--------|----------|-----------|------------------------------------------------------|
-| `0x20` | `ADD`    | —         | Pop `b`, `a`; push `a + b`.                          |
-| `0x21` | `SUB`    | —         | Pop `b`, `a`; push `a - b`.                          |
-| `0x22` | `MUL`    | —         | Pop `b`, `a`; push `a * b`.                          |
-| `0x23` | `DIV`    | —         | Pop `b`, `a`; push `a / b` (truncating). Errors if `b == 0`. |
-| `0x24` | `MOD`    | —         | Pop `b`, `a`; push `a % b`. Errors if `b == 0`.     |
-| `0x25` | `SQR`    | —         | Pop `a`; push `a * a`.                               |
-| `0x26` | `ABS`    | —         | Pop `a`; push `|a|`.                                 |
-| `0x27` | `NEG`    | —         | Pop `a`; push `-a`.                                  |
-| `0x28` | `MIN`    | —         | Pop `b`, `a`; push `min(a, b)`.                      |
-| `0x29` | `MAX`    | —         | Pop `b`, `a`; push `max(a, b)`.                      |
-| `0x2A` | `INC`    | —         | Pop `a`; push `a + 1`.                               |
-| `0x2B` | `DEC`    | —         | Pop `a`; push `a - 1`.                               |
+| Code | Mnemonic | Stack effect | Interpretation |
+|------|----------|--------------|----------------|
+| `0x20` | `ADD` | `[..., a, b] → [..., a+b]` | Wrapping addition. |
+| `0x21` | `SUB` | `[..., a, b] → [..., a-b]` | Wrapping subtraction. |
+| `0x22` | `MUL` | `[..., a, b] → [..., a*b]` | Wrapping multiplication. |
+| `0x23` | `DIV` | `[..., a, b] → [..., a/b]` | Truncating integer division. Errors if `b == 0`. |
+| `0x24` | `MOD` | `[..., a, b] → [..., a%b]` | Truncating remainder. Errors if `b == 0`. |
+| `0x25` | `SQR` | `[..., a] → [..., a*a]` | Wrapping square. |
+| `0x26` | `ABS` | `[..., a] → [..., \|a\|]` | Wrapping absolute value (`i64::MIN.abs()` wraps to `i64::MIN`). |
+| `0x27` | `NEG` | `[..., a] → [..., -a]` | Wrapping negation. |
+| `0x28` | `MIN` | `[..., a, b] → [..., min(a,b)]` | Signed minimum. |
+| `0x29` | `MAX` | `[..., a, b] → [..., max(a,b)]` | Signed maximum. |
+| `0x2A` | `INC` | `[..., a] → [..., a+1]` | Wrapping increment. |
+| `0x2B` | `DEC` | `[..., a] → [..., a-1]` | Wrapping decrement. |
 
 ---
 
 ## Comparison
 
-Results are `1` (true) or `0` (false). Pop order: `b` first, then `a`.
+Results are `1i64` (true) or `0i64` (false). All comparisons are signed.
 
-| Code   | Mnemonic | Arguments | Interpretation                                  |
-|--------|----------|-----------|-------------------------------------------------|
-| `0x30` | `EQ`     | —         | Pop `b`, `a`; push `1` if `a == b`, else `0`.  |
-| `0x31` | `LT`     | —         | Pop `b`, `a`; push `1` if `a < b`, else `0`.   |
-| `0x32` | `GT`     | —         | Pop `b`, `a`; push `1` if `a > b`, else `0`.   |
-| `0x33` | `LTE`    | —         | Pop `b`, `a`; push `1` if `a <= b`, else `0`.  |
-| `0x34` | `GTE`    | —         | Pop `b`, `a`; push `1` if `a >= b`, else `0`.  |
+| Code | Mnemonic | Stack effect | Interpretation |
+|------|----------|--------------|----------------|
+| `0x30` | `EQ` | `[..., a, b] → [..., a==b ? 1 : 0]` | Signed equality. |
+| `0x31` | `LT` | `[..., a, b] → [..., a<b ? 1 : 0]` | Signed less-than. |
+| `0x32` | `GT` | `[..., a, b] → [..., a>b ? 1 : 0]` | Signed greater-than. |
+| `0x33` | `LTE` | `[..., a, b] → [..., a<=b ? 1 : 0]` | Signed less-or-equal. |
+| `0x34` | `GTE` | `[..., a, b] → [..., a>=b ? 1 : 0]` | Signed greater-or-equal. |
 
 ---
 
 ## Logical Boolean
 
-Operands are treated as booleans: zero is false, non-zero is true. Results are `1` or `0`.
+Operands are treated as booleans: `0` is false, any non-zero value is true.
+Results are `1i64` or `0i64`.
 
-| Code   | Mnemonic | Arguments | Interpretation                                               |
-|--------|----------|-----------|--------------------------------------------------------------|
-| `0x36` | `NOT`    | —         | Pop `a`; push `1` if `a == 0`, else `0`.                    |
-| `0x37` | `AND`    | —         | Pop `b`, `a`; push `1` if both non-zero, else `0`.          |
-| `0x38` | `OR`     | —         | Pop `b`, `a`; push `1` if either non-zero, else `0`.        |
-| `0x39` | `XOR`    | —         | Pop `b`, `a`; push `1` if exactly one is non-zero, else `0`.|
+| Code | Mnemonic | Stack effect | Interpretation |
+|------|----------|--------------|----------------|
+| `0x36` | `NOT` | `[..., a] → [..., a==0 ? 1 : 0]` | Logical NOT. |
+| `0x37` | `AND` | `[..., a, b] → [..., (a!=0 && b!=0) ? 1 : 0]` | Logical AND (short-circuit not applicable; both operands already popped). |
+| `0x38` | `OR` | `[..., a, b] → [..., (a!=0 \|\| b!=0) ? 1 : 0]` | Logical OR. |
+| `0x39` | `XOR` | `[..., a, b] → [..., ((a!=0) ^ (b!=0)) ? 1 : 0]` | Logical XOR. True iff exactly one operand is non-zero. |
 
 ---
 
 ## Bitwise
 
-Operate on the raw `i64` bit patterns.
+Operate on raw `i64` bit patterns.
 
-| Code   | Mnemonic | Arguments | Interpretation                                                  |
-|--------|----------|-----------|-----------------------------------------------------------------|
-| `0x3A` | `BAND`   | —         | Pop `b`, `a`; push `a & b`.                                    |
-| `0x3B` | `BOR`    | —         | Pop `b`, `a`; push `a \| b`.                                   |
-| `0x3C` | `BXOR`   | —         | Pop `b`, `a`; push `a ^ b`.                                    |
-| `0x3D` | `BNOT`   | —         | Pop `a`; push `~a`.                                            |
-| `0x3E` | `SHL`    | —         | Pop `b`, `a`; push `a << b`. `b` must be in `0..=63`.          |
-| `0x3F` | `SHR`    | —         | Pop `b`, `a`; push `a >> b` (logical/unsigned). `b` must be in `0..=63`. |
+| Code | Mnemonic | Stack effect | Interpretation |
+|------|----------|--------------|----------------|
+| `0x3A` | `BAND` | `[..., a, b] → [..., a & b]` | Bitwise AND. |
+| `0x3B` | `BOR` | `[..., a, b] → [..., a \| b]` | Bitwise OR. |
+| `0x3C` | `BXOR` | `[..., a, b] → [..., a ^ b]` | Bitwise XOR. |
+| `0x3D` | `BNOT` | `[..., a] → [..., ~a]` | Bitwise NOT (one's complement). |
+| `0x3E` | `SHL` | `[..., a, b] → [..., a << b]` | Left shift. `b` must satisfy `0 ≤ b < 64`; otherwise errors. Signed `i64` left shift, wrapping behaviour on overflow. |
+| `0x3F` | `SHR` | `[..., a, b] → [..., (a as u64 >> b) as i64]` | Logical (unsigned) right shift. `b` must satisfy `0 ≤ b < 64`. The high bit is always filled with `0`. |
 
 ---
 
 ## Allocators
 
-These instructions allocate quantum/combinatorial model or sample objects into registers.
+These instructions allocate quantum/combinatorial objects into registers.
+An invalid (negative) size pops as-is; a non-representable `usize` silently
+uses size `0`.
 
 ### Model Allocators
 
-| Code   | Mnemonic | Arguments       | Interpretation                                                                 |
-|--------|----------|-----------------|--------------------------------------------------------------------------------|
-| `0x40` | `BQMX`   | `reg: Register` | Pop `size`; allocate a binary QUBO model (variable domain `{0, 1}`) into `reg`.         |
-| `0x41` | `SQMX`   | `reg: Register` | Pop `size`; allocate a spin Ising model (variable domain `{-1, 1}`) into `reg`.         |
-| `0x42` | `XQMX`   | `reg: Register` | Pop `k`, then `size`; allocate a discrete model (variable domain `{0, …, k-1}`) into `reg`. |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x40` | `BQMX` | `reg: Register` | `[..., size] → [...]` | Pop `size`. `reg ← Model(XqmxModel { domain: Binary, size, linear: {}, quad: {} })`. Variable domain: `{0, 1}`. |
+| `0x41` | `SQMX` | `reg: Register` | `[..., size] → [...]` | Pop `size`. `reg ← Model(XqmxModel { domain: Spin, size, ... })`. Variable domain: `{-1, 1}`. |
+| `0x42` | `XQMX` | `reg: Register` | `[..., size, k] → [...]` | Pop `k`, then `size`. `reg ← Model(XqmxModel { domain: Discrete(k), size, ... })`. Variable domain: `{0, …, k-1}`. |
 
 ### Sample Allocators
 
-| Code   | Mnemonic | Arguments       | Interpretation                                                                    |
-|--------|----------|-----------------|-----------------------------------------------------------------------------------|
-| `0x43` | `BSMX`   | `reg: Register` | Pop `size`; allocate a binary sample (domain `{0, 1}`) into `reg`.                       |
-| `0x44` | `SSMX`   | `reg: Register` | Pop `size`; allocate a spin sample (domain `{-1, 1}`) into `reg`.                        |
-| `0x45` | `XSMX`   | `reg: Register` | Pop `k`, then `size`; allocate a discrete sample (domain `{0, …, k-1}`) into `reg`. |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x43` | `BSMX` | `reg: Register` | `[..., size] → [...]` | Pop `size`. `reg ← Sample(XqmxSample { domain: Binary, values: vec![0; size] })`. |
+| `0x44` | `SSMX` | `reg: Register` | `[..., size] → [...]` | Pop `size`. `reg ← Sample(XqmxSample { domain: Spin, values: vec![-1; size] })`. Default value is `-1` (spin-down). |
+| `0x45` | `XSMX` | `reg: Register` | `[..., size, k] → [...]` | Pop `k`, then `size`. `reg ← Sample(XqmxSample { domain: Discrete(k), values: vec![0; size] })`. |
 
 ### Vec Allocators
 
-| Code   | Mnemonic | Arguments       | Interpretation                                                                   |
-|--------|----------|-----------------|----------------------------------------------------------------------------------|
-| `0x4A` | `VEC`    | `reg: Register` | Create an empty vec in `reg`; element type is inferred on the first `VECPUSH`.   |
-| `0x4B` | `VECI`   | `reg: Register` | Create an empty `vec<int>` in `reg`.                                             |
-| `0x4C` | `VECX`   | `reg: Register` | Create an empty `vec<xqmx>` in `reg`.                                            |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x4A` | `VEC` | `reg: Register` | `[...] → [...]` | `reg ← VecInt([])`. Identical to `VECI` at runtime; documented as "untyped" but always creates an integer vec. |
+| `0x4B` | `VECI` | `reg: Register` | `[...] → [...]` | `reg ← VecInt([])`. Explicit integer vec. |
+| `0x4C` | `VECX` | `reg: Register` | `[...] → [...]` | `reg ← VecXqmx([])`. Vec of `XqmxModel` values. |
 
 ---
 
 ## Vector Access
 
-| Code   | Mnemonic   | Arguments       | Interpretation                                                        |
-|--------|------------|-----------------|-----------------------------------------------------------------------|
-| `0x50` | `VECPUSH`  | `reg: Register` | Pop `value`; append it to the vec in `reg`.                          |
-| `0x51` | `VECGET`   | `reg: Register` | Pop `index`; push `vec[index]` from the vec in `reg`.                |
-| `0x52` | `VECSET`   | `reg: Register` | Pop `value`, then `index`; set `vec[index]` in the vec in `reg`.     |
-| `0x53` | `VECLEN`   | `reg: Register` | Push the length of the vec in `reg` onto the stack.                  |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x50` | `VECPUSH` | `reg: Register` | `[..., v] → [...]` | Pop `v`. `reg` must hold `VecInt`. Append `v`. |
+| `0x51` | `VECGET` | `reg: Register` | `[..., idx] → [..., v]` | Pop `idx`. `reg` must hold `VecInt`. Bounds-check: `0 ≤ idx < len`. Push `vec[idx]`. |
+| `0x52` | `VECSET` | `reg: Register` | `[..., idx, v] → [...]` | Pop `v` (value), then `idx` (index). `reg` must hold `VecInt`. Bounds-check: `0 ≤ idx < len`. Set `vec[idx] ← v`. |
+| `0x53` | `VECLEN` | `reg: Register` | `[...] → [..., n]` | `reg` must hold `VecInt` or `VecXqmx`. Push `len(reg)` as `i64`. |
 
 ---
 
 ## Index Math
 
-Utilities for mapping 2-D coordinates to flat array indices.
+Utilities for mapping 2-D coordinates to flat array indices. All arithmetic
+is wrapping on `i64`.
 
-| Code   | Mnemonic   | Arguments | Interpretation                                                                    |
-|--------|------------|-----------|-----------------------------------------------------------------------------------|
-| `0x5A` | `IDXGRID`  | —         | Pop `cols`, `col`, `row`; push `row * cols + col` (row-major flat index).        |
-| `0x5B` | `IDXTRIU`  | —         | Pop `j`, `i` (where `i <= j`); push the upper-triangular index `j*(j-1)/2 + i`. |
+| Code | Mnemonic | Stack effect | Interpretation |
+|------|----------|--------------|----------------|
+| `0x5A` | `IDXGRID` | `[..., row, col, cols] → [..., row*cols+col]` | Row-major flat index. Pops `cols`, then `col`, then `row`; pushes `row.wrapping_mul(cols).wrapping_add(col)`. |
+| `0x5B` | `IDXTRIU` | `[..., i, j] → [..., j*(j-1)/2+i]` | Upper-triangular index for the pair `(i, j)` with `i ≤ j`. Pops `j`, then `i`; pushes `j.wrapping_mul(j.wrapping_sub(1)) / 2 + i`. |
 
 ---
 
 ## XQMX Coefficient Access
 
-Read and write linear (bias) and quadratic (coupling) coefficients of a model. Missing
-entries read as `0`; writes create the entry on first use.
+Read and write the linear (bias) and quadratic (coupling) coefficients of a
+`Model` register. Missing entries read as `0`; writes create the entry on the
+first call. All coefficient values are `i64`; `reg` must hold `Model`.
 
 ### Linear Coefficients
 
-| Code   | Mnemonic   | Arguments       | Interpretation                                                              |
-|--------|------------|-----------------|-----------------------------------------------------------------------------|
-| `0x60` | `GETLINE`  | `reg: Register` | Pop `i`; push `linear[i]` from `reg`'s model (0 if absent).               |
-| `0x61` | `SETLINE`  | `reg: Register` | Pop `value`, `i`; set `linear[i]` in `reg`'s model to `value`.            |
-| `0x62` | `ADDLINE`  | `reg: Register` | Pop `delta`, `i`; add `delta` to `linear[i]` in `reg`'s model.            |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x60` | `GETLINE` | `reg: Register` | `[..., i] → [..., linear[i]]` | Pop `i`. Push `model.linear[i]` (0 if absent). |
+| `0x61` | `SETLINE` | `reg: Register` | `[..., i, v] → [...]` | Pop `v`, then `i`. Set `model.linear[i] ← v`. |
+| `0x62` | `ADDLINE` | `reg: Register` | `[..., i, δ] → [...]` | Pop `δ`, then `i`. `model.linear[i] += δ`. |
 
 ### Quadratic Coefficients
 
-| Code   | Mnemonic   | Arguments       | Interpretation                                                                    |
-|--------|------------|-----------------|-----------------------------------------------------------------------------------|
-| `0x63` | `GETQUAD`  | `reg: Register` | Pop `j`, `i`; push `quadratic[i, j]` from `reg`'s model (0 if absent).          |
-| `0x64` | `SETQUAD`  | `reg: Register` | Pop `value`, `j`, `i`; set `quadratic[i, j]` in `reg`'s model to `value`.       |
-| `0x65` | `ADDQUAD`  | `reg: Register` | Pop `delta`, `j`, `i`; add `delta` to `quadratic[i, j]` in `reg`'s model.       |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x63` | `GETQUAD` | `reg: Register` | `[..., i, j] → [..., quad[i,j]]` | Pop `j`, then `i`. Push `model.quad[i,j]` (0 if absent). |
+| `0x64` | `SETQUAD` | `reg: Register` | `[..., i, j, v] → [...]` | Pop `v`, then `j`, then `i`. Set `model.quad[i,j] ← v`. |
+| `0x65` | `ADDQUAD` | `reg: Register` | `[..., i, j, δ] → [...]` | Pop `δ`, then `j`, then `i`. `model.quad[i,j] += δ`. |
 
 ---
 
 ## XQMX Grid
 
-A model can optionally be given 2-D grid dimensions, enabling row/column addressing
-of variables.
+A model can optionally be given 2-D grid dimensions so that variables are
+addressed as `(row, col)` with flat index `row * cols + col`. `reg` must hold `Model`.
 
-| Code   | Mnemonic   | Arguments       | Interpretation                                                                           |
-|--------|------------|-----------------|------------------------------------------------------------------------------------------|
-| `0x66` | `RESIZE`   | `reg: Register` | Pop `cols`, `rows`; set the grid dimensions of `reg`'s model to `rows × cols`.          |
-| `0x67` | `ROWFIND`  | `reg: Register` | Pop `value`, `row`; push the first column index where a linear value equals `value`, or `-1` if not found. |
-| `0x68` | `COLFIND`  | `reg: Register` | Pop `value`, `col`; push the first row index where a linear value equals `value`, or `-1` if not found.   |
-| `0x69` | `ROWSUM`   | `reg: Register` | Pop `row`; push the sum of all linear values in grid row `row`.                          |
-| `0x6A` | `COLSUM`   | `reg: Register` | Pop `col`; push the sum of all linear values in grid column `col`.                       |
+| Code | Mnemonic | Arguments | Stack effect | Interpretation |
+|------|----------|-----------|--------------|----------------|
+| `0x66` | `RESIZE` | `reg: Register` | `[..., rows, cols] → [...]` | Pop `cols`, then `rows`. Set `model.rows ← rows`, `model.cols ← cols`. Both must be `> 0`; otherwise errors with `InvalidGridDimensions`. |
+| `0x67` | `ROWFIND` | `reg: Register` | `[..., row, value] → [..., col]` | Pop `value`, then `row`. Scan `linear[row*cols]..linear[row*cols + cols)` for the first entry equal to `value`. Push the column index, or `-1` if not found. |
+| `0x68` | `COLFIND` | `reg: Register` | `[..., col, value] → [..., row]` | Pop `value`, then `col`. Scan `linear[0*cols+col], linear[1*cols+col], …` across all rows. Push the row index of the first match, or `-1` if not found. |
+| `0x69` | `ROWSUM` | `reg: Register` | `[..., row] → [..., sum]` | Pop `row`. Push `Σ linear[row*cols + c]` for `c` in `0..cols`. |
+| `0x6A` | `COLSUM` | `reg: Register` | `[..., col] → [..., sum]` | Pop `col`. Push `Σ linear[r*cols + col]` for `r` in `0..rows`. |
 
 ---
 
 ## XQMX High-Level Constraints
 
-These instructions inject QUBO penalty terms for common combinatorial constraints,
-expanding them into linear and quadratic coefficients automatically.
+These instructions inject QUBO penalty terms for common combinatorial
+constraints, expanding into linear and quadratic coefficient deltas
+automatically. `reg` must hold `Model` with grid dimensions pre-set by
+`RESIZE`. All coefficients are `i64`.
 
-| Code   | Mnemonic   | Arguments       | Interpretation                                                                                                                         |
-|--------|------------|-----------------|----------------------------------------------------------------------------------------------------------------------------------------|
-| `0x70` | `ONEHOTR`  | `reg: Register` | Pop `penalty`, `row`; add a one-hot constraint over all variables in grid row `row`. Encodes `H += penalty * (Σxᵢ - 1)²`.             |
-| `0x71` | `ONEHOTC`  | `reg: Register` | Pop `penalty`, `col`; add a one-hot constraint over all variables in grid column `col`. Encodes `H += penalty * (Σxᵢ - 1)²`.          |
-| `0x72` | `EXCLUDE`  | `reg: Register` | Pop `penalty`, `j`, `i`; add a mutual-exclusion constraint: penalises `xᵢ = 1` and `xⱼ = 1` simultaneously. Encodes `H += penalty * xᵢxⱼ`. |
-| `0x73` | `IMPLIES`  | `reg: Register` | Pop `penalty`, `j`, `i`; add an implication constraint `i → j`: penalises `xᵢ = 1` with `xⱼ = 0`. Encodes `H += penalty * xᵢ(1 - xⱼ)`. |
+### `0x70` — `ONEHOTR reg`
+
+**Stack:** `[..., row, penalty] → [...]`
+
+Pop `penalty`, then `row`. Apply the one-hot constraint over all variables in
+grid row `row`:
+
+```
+H += penalty * (Σ x_{row,c} - 1)²
+   = penalty * (Σ x_{row,c}² - 2·Σ x_{row,c} + 1)
+```
+
+Expanding (binary variables: `x² = x`):
+
+```
+linear[row*cols + c]            += -penalty          for each c in 0..cols
+quad[row*cols + ci, row*cols + cj]  += 2*penalty     for each pair ci < cj
+```
+
+### `0x71` — `ONEHOTC reg`
+
+**Stack:** `[..., col, penalty] → [...]`
+
+Pop `penalty`, then `col`. One-hot over all variables in grid column `col`:
+
+```
+linear[ri*cols + col]            += -penalty          for each ri in 0..rows
+quad[ri*cols + col, rj*cols + col]  += 2*penalty     for each pair ri < rj
+```
+
+### `0x72` — `EXCLUDE reg`
+
+**Stack:** `[..., i, j, penalty] → [...]`
+
+Pop `penalty`, then `j`, then `i`. Add mutual-exclusion: penalise
+`x_i = 1` and `x_j = 1` simultaneously.
+
+```
+quad[i, j] += penalty
+```
+
+### `0x73` — `IMPLIES reg`
+
+**Stack:** `[..., i, j, penalty] → [...]`
+
+Pop `penalty`, then `j`, then `i`. Add implication `i → j`: penalise
+`x_i = 1` with `x_j = 0`.
+
+```
+H += penalty * x_i * (1 - x_j) = penalty*x_i - penalty*x_i*x_j
+
+linear[i]    += penalty
+quad[i, j]   += -penalty
+```
 
 ---
 
 ## Energy Evaluation
 
-| Code   | Mnemonic  | Arguments                          | Interpretation                                                                   |
-|--------|-----------|------------------------------------|----------------------------------------------------------------------------------|
-| `0x7F` | `ENERGY`  | `model: Register, sample: Register` | Compute the Hamiltonian energy of `sample` evaluated against `model`; push the `i64` result. |
+### `0x7F` — `ENERGY model sample`
+
+**Stack:** `[...] → [..., E]`
+
+The `model` register must hold `Model`. The `sample` register may hold either:
+
+- `Sample(s)` — `s.values` is used directly as the variable assignment vector.
+- `Model(s)` — `linear[i]` of the sample model is used as `x_i` for each `i`
+  in `0..size`. This allows a model built via `SETLINE`/`ADDLINE` to act as a
+  sample.
+
+Evaluate the Hamiltonian:
+
+```
+E = Σᵢ linear[i] * x[i]  +  Σ_{i<j} quad[i,j] * x[i] * x[j]
+```
+
+Push the result as `i64`. Errors if `len(sample) != model.size`.
 
 `ENERGY` is the only instruction with two register operands.
 
 ---
 
+## Runtime Limits
+
+| Limit | Default | Notes |
+|-------|---------|-------|
+| Stack depth | 8 192 items | `StackOverflow` error if exceeded. |
+| Step count | 10 000 000 | `StepLimitExceeded` error if exceeded. Configurable via `Vm::set_step_limit`. Passing `0` sets the limit to `u64::MAX`. |
+
+---
+
 ## Reserved / Illegal Opcodes
 
-The following byte values are explicitly unassigned gaps in the table and will
-cause a decode error at runtime:
+The following byte values are explicitly unassigned gaps; the decoder rejects
+them as illegal opcodes:
 
 `0x08`, `0x0D`, `0x19`, `0x35`
 
-All other byte values outside the ranges above are likewise illegal.
+All other byte values outside the assigned ranges are likewise illegal.
