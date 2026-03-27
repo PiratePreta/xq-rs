@@ -16,6 +16,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::Opcode;
+use super::RegisterEffect;
 
 // ---------------------------------------------------------------------------
 // Macro-generated Instruction enum
@@ -106,6 +107,230 @@ macro_rules! impl_instruction {
 opcodes!(impl_instruction);
 
 // ---------------------------------------------------------------------------
+// Register introspection
+// ---------------------------------------------------------------------------
+
+impl Instruction {
+    /// Register indices this instruction reads from.
+    ///
+    /// Returns the set of register slots whose current values are consumed
+    /// by this instruction. Stack-only and control-flow-only instructions
+    /// return an empty set.
+    pub fn read_registers(&self) -> RegisterEffect {
+        match self {
+            // -- No register reads --
+            // Control flow
+            Self::Nop { .. }
+            | Self::Target { .. }
+            | Self::Jump { .. }
+            | Self::JumpI { .. }
+            | Self::Next { .. }
+            | Self::Range { .. }
+            | Self::Halt { .. }
+            // Stack manipulation
+            | Self::Pop { .. }
+            | Self::Push1 { .. }
+            | Self::Push2 { .. }
+            | Self::Push3 { .. }
+            | Self::Push4 { .. }
+            | Self::Push5 { .. }
+            | Self::Push6 { .. }
+            | Self::Push7 { .. }
+            | Self::Push8 { .. }
+            | Self::Sclr { .. }
+            | Self::Swap { .. }
+            | Self::Copy { .. }
+            // Arithmetic
+            | Self::Add { .. }
+            | Self::Sub { .. }
+            | Self::Mul { .. }
+            | Self::Div { .. }
+            | Self::Modulo { .. }
+            | Self::Sqr { .. }
+            | Self::Abs { .. }
+            | Self::Neg { .. }
+            | Self::Min { .. }
+            | Self::Max { .. }
+            | Self::Inc { .. }
+            | Self::Dec { .. }
+            // Comparison
+            | Self::Eq { .. }
+            | Self::Lt { .. }
+            | Self::Gt { .. }
+            | Self::Lte { .. }
+            | Self::Gte { .. }
+            // Logical
+            | Self::Not { .. }
+            | Self::And { .. }
+            | Self::Or { .. }
+            | Self::Xor { .. }
+            // Bitwise
+            | Self::BAnd { .. }
+            | Self::BOr { .. }
+            | Self::BXor { .. }
+            | Self::BNot { .. }
+            | Self::Shl { .. }
+            | Self::Shr { .. }
+            // Index math
+            | Self::IdxGrid { .. }
+            | Self::IdxTriu { .. }
+            // Write-only: allocators + stores
+            | Self::Stow { .. }
+            | Self::Drop { .. }
+            | Self::Input { .. }
+            | Self::LVal { .. }
+            | Self::Bqmx { .. }
+            | Self::Sqmx { .. }
+            | Self::Xqmx { .. }
+            | Self::Bsmx { .. }
+            | Self::Ssmx { .. }
+            | Self::Xsmx { .. }
+            | Self::Vec { .. }
+            | Self::VecI { .. }
+            | Self::VecX { .. } => RegisterEffect::EMPTY,
+
+            // -- Single register reads --
+            Self::Load { reg }
+            | Self::Output { reg }
+            | Self::Iter { reg }
+            | Self::VecGet { reg }
+            | Self::VecLen { reg }
+            | Self::GetLine { reg }
+            | Self::GetQuad { reg }
+            | Self::RowFind { reg }
+            | Self::ColFind { reg }
+            | Self::RowSum { reg }
+            | Self::ColSum { reg }
+            // Read+write
+            | Self::VecPush { reg }
+            | Self::VecSet { reg }
+            | Self::SetLine { reg }
+            | Self::AddLine { reg }
+            | Self::SetQuad { reg }
+            | Self::AddQuad { reg }
+            | Self::Resize { reg }
+            | Self::OneHotR { reg }
+            | Self::OneHotC { reg }
+            | Self::Exclude { reg }
+            | Self::Implies { reg } => RegisterEffect::one(reg.slot()),
+
+            // -- Two register reads --
+            Self::Energy { model, sample } => {
+                RegisterEffect::two(model.slot(), sample.slot())
+            }
+        }
+    }
+
+    /// Register indices this instruction writes to.
+    ///
+    /// Returns the set of register slots whose values are modified by this
+    /// instruction. Stack-only, control-flow-only, and read-only register
+    /// instructions return an empty set.
+    pub fn written_registers(&self) -> RegisterEffect {
+        match self {
+            // -- No register writes --
+            // Control flow
+            Self::Nop { .. }
+            | Self::Target { .. }
+            | Self::Jump { .. }
+            | Self::JumpI { .. }
+            | Self::Next { .. }
+            | Self::Range { .. }
+            | Self::Halt { .. }
+            // Stack manipulation
+            | Self::Pop { .. }
+            | Self::Push1 { .. }
+            | Self::Push2 { .. }
+            | Self::Push3 { .. }
+            | Self::Push4 { .. }
+            | Self::Push5 { .. }
+            | Self::Push6 { .. }
+            | Self::Push7 { .. }
+            | Self::Push8 { .. }
+            | Self::Sclr { .. }
+            | Self::Swap { .. }
+            | Self::Copy { .. }
+            // Arithmetic
+            | Self::Add { .. }
+            | Self::Sub { .. }
+            | Self::Mul { .. }
+            | Self::Div { .. }
+            | Self::Modulo { .. }
+            | Self::Sqr { .. }
+            | Self::Abs { .. }
+            | Self::Neg { .. }
+            | Self::Min { .. }
+            | Self::Max { .. }
+            | Self::Inc { .. }
+            | Self::Dec { .. }
+            // Comparison
+            | Self::Eq { .. }
+            | Self::Lt { .. }
+            | Self::Gt { .. }
+            | Self::Lte { .. }
+            | Self::Gte { .. }
+            // Logical
+            | Self::Not { .. }
+            | Self::And { .. }
+            | Self::Or { .. }
+            | Self::Xor { .. }
+            // Bitwise
+            | Self::BAnd { .. }
+            | Self::BOr { .. }
+            | Self::BXor { .. }
+            | Self::BNot { .. }
+            | Self::Shl { .. }
+            | Self::Shr { .. }
+            // Index math
+            | Self::IdxGrid { .. }
+            | Self::IdxTriu { .. }
+            // Read-only register ops
+            | Self::Load { .. }
+            | Self::Output { .. }
+            | Self::Iter { .. }
+            | Self::VecGet { .. }
+            | Self::VecLen { .. }
+            | Self::GetLine { .. }
+            | Self::GetQuad { .. }
+            | Self::RowFind { .. }
+            | Self::ColFind { .. }
+            | Self::RowSum { .. }
+            | Self::ColSum { .. }
+            // Energy reads two, writes none
+            | Self::Energy { .. } => RegisterEffect::EMPTY,
+
+            // -- Single register writes --
+            // Write-only
+            Self::Stow { reg }
+            | Self::Drop { reg }
+            | Self::Input { reg }
+            | Self::LVal { reg }
+            | Self::Bqmx { reg }
+            | Self::Sqmx { reg }
+            | Self::Xqmx { reg }
+            | Self::Bsmx { reg }
+            | Self::Ssmx { reg }
+            | Self::Xsmx { reg }
+            | Self::Vec { reg }
+            | Self::VecI { reg }
+            | Self::VecX { reg }
+            // Read+write
+            | Self::VecPush { reg }
+            | Self::VecSet { reg }
+            | Self::SetLine { reg }
+            | Self::AddLine { reg }
+            | Self::SetQuad { reg }
+            | Self::AddQuad { reg }
+            | Self::Resize { reg }
+            | Self::OneHotR { reg }
+            | Self::OneHotC { reg }
+            | Self::Exclude { reg }
+            | Self::Implies { reg } => RegisterEffect::one(reg.slot()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -171,6 +396,52 @@ mod tests {
             assert_eq!(sample.slot(), 1);
         } else {
             panic!("pattern match failed");
+        }
+    }
+
+    #[test]
+    fn read_registers_stack_only() {
+        let add = Instruction::Add {};
+        assert!(add.read_registers().is_empty());
+        assert!(add.written_registers().is_empty());
+    }
+
+    #[test]
+    fn read_registers_load() {
+        let load = Instruction::Load { reg: Register(5) };
+        assert_eq!(load.read_registers().as_slice(), &[5]);
+        assert!(load.written_registers().is_empty());
+    }
+
+    #[test]
+    fn written_registers_stow() {
+        let stow = Instruction::Stow { reg: Register(3) };
+        assert!(stow.read_registers().is_empty());
+        assert_eq!(stow.written_registers().as_slice(), &[3]);
+    }
+
+    #[test]
+    fn read_write_registers_vec_push() {
+        let vp = Instruction::VecPush { reg: Register(0) };
+        assert_eq!(vp.read_registers().as_slice(), &[0]);
+        assert_eq!(vp.written_registers().as_slice(), &[0]);
+    }
+
+    #[test]
+    fn read_registers_energy() {
+        let e = Instruction::Energy {
+            model: Register(1),
+            sample: Register(2),
+        };
+        assert_eq!(e.read_registers().as_slice(), &[1, 2]);
+        assert!(e.written_registers().is_empty());
+    }
+
+    #[test]
+    fn all_variants_covered_by_read_and_written() {
+        for (instr, _, _) in opcodes!(all_instruction_opcode_pairs) {
+            let _ = instr.read_registers();
+            let _ = instr.written_registers();
         }
     }
 }
