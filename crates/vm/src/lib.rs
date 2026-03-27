@@ -55,6 +55,7 @@ extern crate alloc;
 
 mod error;
 mod model;
+pub mod tracer;
 mod value;
 mod vm;
 
@@ -66,5 +67,8 @@ pub use error::Error;
 #[cfg(feature = "std")]
 pub use error::RuntimeDiagnostic;
 pub use model::{Domain, XqmxModel, XqmxSample};
+pub use tracer::{NoopTracer, StepState, Tracer};
+#[cfg(feature = "std")]
+pub use tracer::{JsonTracer, TextTracer};
 pub use value::RegVal;
 pub use vm::Vm;
