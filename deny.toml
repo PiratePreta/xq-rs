@@ -17,8 +17,13 @@ allow = [
 
 [bans]
 multiple-versions = "warn"
-wildcards         = "allow"
-highlight         = "all"
+wildcards = "allow"
+highlight = "all"
+skip = [
+    # assert_cmd / predicates (dev-only) pull older transitive versions.
+    { name = "unicode-width", version = "=0.1.14" },
+    { name = "windows-sys", version = "=0.60.2" },
+]
 
 [sources]
 unknown-registry = "warn"

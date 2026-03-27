@@ -17,13 +17,51 @@
 
 //! `xq dism` subcommand -- disassembles XQVM bytecode.
 
+use std::io::{self, Read, Write};
+use std::path::PathBuf;
+
 use clap::Parser;
+use miette::{IntoDiagnostic, WrapErr};
+
+use aglais_xqvm_bytecode::Program;
+use aglais_xqvm_disasm::Disassembly;
 
 /// Disassemble XQVM bytecode into a human-readable listing.
+///
+/// Reads raw bytecode from FILE (or stdin when FILE is omitted) and prints
+/// a listing to stdout.  Jump targets are labelled `.0`, `.1`, ... from the
+/// jump table.
 #[derive(Debug, Parser)]
-pub(crate) struct Args {}
+pub(crate) struct Args {
+    /// Bytecode file to disassemble.  Reads from stdin when omitted.
+    file: Option<PathBuf>,
+}
 
 /// Execute the `dism` subcommand.
-pub(crate) fn exec(_args: Args) -> miette::Result<()> {
-    todo!()
+pub(crate) fn exec(args: Args) -> miette::Result<()> {
+    let bytes = match args.file {
+        Some(ref path) => std::fs::read(path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to read '{}'", path.display()))?,
+        None => {
+            let mut buf = Vec::new();
+            let _n = io::stdin()
+                .read_to_end(&mut buf)
+                .into_diagnostic()
+                .wrap_err("failed to read stdin")?;
+            buf
+        }
+    };
+
+    let mut out = Vec::new();
+    let program = Program::decode(&bytes)
+        .into_diagnostic()
+        .wrap_err("failed to decode program")?;
+    Disassembly::from_program(&program)
+        .write_to(&mut out)
+        .into_diagnostic()
+        .wrap_err("failed to write disassembly")?;
+    io::stdout().write_all(&out).into_diagnostic()?;
+
+    Ok(())
 }
