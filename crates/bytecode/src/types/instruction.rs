@@ -15,6 +15,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use core::fmt;
+
 use super::Opcode;
 use super::RegisterEffect;
 
@@ -331,6 +333,88 @@ impl Instruction {
 }
 
 // ---------------------------------------------------------------------------
+// Display
+// ---------------------------------------------------------------------------
+
+/// Sign-extend a big-endian byte slice (1..=8 bytes) to `i64`.
+fn sign_extend_be(bytes: &[u8]) -> i64 {
+    debug_assert!(!bytes.is_empty() && bytes.len() <= 8);
+    let mut v = 0i64;
+    for &b in bytes {
+        v = (v << 8) | i64::from(b);
+    }
+    let shift = 64u32 - (bytes.len() * 8) as u32;
+    (v << shift) >> shift
+}
+
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Push variants: show decoded integer value.
+            Self::Push1 { val } => write!(f, "PUSH1 {}", sign_extend_be(val)),
+            Self::Push2 { val } => write!(f, "PUSH2 {}", sign_extend_be(val)),
+            Self::Push3 { val } => write!(f, "PUSH3 {}", sign_extend_be(val)),
+            Self::Push4 { val } => write!(f, "PUSH4 {}", sign_extend_be(val)),
+            Self::Push5 { val } => write!(f, "PUSH5 {}", sign_extend_be(val)),
+            Self::Push6 { val } => write!(f, "PUSH6 {}", sign_extend_be(val)),
+            Self::Push7 { val } => write!(f, "PUSH7 {}", sign_extend_be(val)),
+            Self::Push8 { val } => write!(f, "PUSH8 {}", sign_extend_be(val)),
+
+            // Jump variants: show label index with dot prefix.
+            Self::Jump { label } => write!(f, "JUMP .{label}"),
+            Self::JumpI { label } => write!(f, "JUMPI .{label}"),
+
+            // Energy: two register operands.
+            Self::Energy { model, sample } => {
+                write!(f, "ENERGY r{} r{}", model.slot(), sample.slot())
+            }
+
+            // All other single-register variants.
+            Self::Load { reg }
+            | Self::Stow { reg }
+            | Self::Drop { reg }
+            | Self::Input { reg }
+            | Self::Output { reg }
+            | Self::LVal { reg }
+            | Self::Iter { reg }
+            | Self::Bqmx { reg }
+            | Self::Sqmx { reg }
+            | Self::Xqmx { reg }
+            | Self::Bsmx { reg }
+            | Self::Ssmx { reg }
+            | Self::Xsmx { reg }
+            | Self::Vec { reg }
+            | Self::VecI { reg }
+            | Self::VecX { reg }
+            | Self::VecPush { reg }
+            | Self::VecGet { reg }
+            | Self::VecSet { reg }
+            | Self::VecLen { reg }
+            | Self::GetLine { reg }
+            | Self::SetLine { reg }
+            | Self::AddLine { reg }
+            | Self::GetQuad { reg }
+            | Self::SetQuad { reg }
+            | Self::AddQuad { reg }
+            | Self::Resize { reg }
+            | Self::RowFind { reg }
+            | Self::ColFind { reg }
+            | Self::RowSum { reg }
+            | Self::ColSum { reg }
+            | Self::OneHotR { reg }
+            | Self::OneHotC { reg }
+            | Self::Exclude { reg }
+            | Self::Implies { reg } => {
+                write!(f, "{} r{}", self.mnemonic(), reg.slot())
+            }
+
+            // No-operand variants: just the mnemonic.
+            _ => write!(f, "{}", self.mnemonic()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -443,5 +527,61 @@ mod tests {
             let _ = instr.read_registers();
             let _ = instr.written_registers();
         }
+    }
+
+    #[cfg(not(feature = "std"))]
+    use alloc::format;
+
+    #[test]
+    fn display_no_operands() {
+        assert_eq!(format!("{}", Instruction::Add {}), "ADD");
+        assert_eq!(format!("{}", Instruction::Halt {}), "HALT");
+        assert_eq!(format!("{}", Instruction::Nop {}), "NOP");
+    }
+
+    #[test]
+    fn display_register_operand() {
+        assert_eq!(
+            format!("{}", Instruction::Load { reg: Register(5) }),
+            "LOAD r5",
+        );
+        assert_eq!(
+            format!("{}", Instruction::Stow { reg: Register(0) }),
+            "STOW r0",
+        );
+    }
+
+    #[test]
+    fn display_push() {
+        assert_eq!(
+            format!("{}", Instruction::Push8 { val: 42i64.to_be_bytes() }),
+            "PUSH8 42",
+        );
+        assert_eq!(
+            format!("{}", Instruction::Push1 { val: [0xFF] }),
+            "PUSH1 -1",
+        );
+    }
+
+    #[test]
+    fn display_jump() {
+        assert_eq!(
+            format!("{}", Instruction::Jump { label: 3 }),
+            "JUMP .3",
+        );
+    }
+
+    #[test]
+    fn display_energy() {
+        assert_eq!(
+            format!(
+                "{}",
+                Instruction::Energy {
+                    model: Register(0),
+                    sample: Register(1)
+                }
+            ),
+            "ENERGY r0 r1",
+        );
     }
 }

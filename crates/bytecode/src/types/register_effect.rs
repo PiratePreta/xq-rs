@@ -29,20 +29,31 @@ pub struct RegisterEffect {
 
 impl RegisterEffect {
     /// Empty set (no registers).
-    pub const EMPTY: Self = Self { buf: [0; 2], len: 0 };
+    pub const EMPTY: Self = Self {
+        buf: [0; 2],
+        len: 0,
+    };
 
     /// Single-register set.
     pub const fn one(r: u8) -> Self {
-        Self { buf: [r, 0], len: 1 }
+        Self {
+            buf: [r, 0],
+            len: 1,
+        }
     }
 
     /// Two-register set.
     pub const fn two(a: u8, b: u8) -> Self {
-        Self { buf: [a, b], len: 2 }
+        Self {
+            buf: [a, b],
+            len: 2,
+        }
     }
 
     /// View as a slice.
     pub fn as_slice(&self) -> &[u8] {
+        // SAFETY: `len` is only set to 0, 1, or 2 by private constructors.
+        #[allow(clippy::indexing_slicing)]
         &self.buf[..self.len as usize]
     }
 
