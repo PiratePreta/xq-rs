@@ -11,7 +11,7 @@ workspace = true
 
 [dependencies]
 aglais-xqvm-asm      = { workspace = true }
-aglais-xqvm-bytecode = { workspace = true, features = ["std"] }
+aglais-xqvm-bytecode = { workspace = true, features = [ "std" ] }
 aglais-xqvm-disasm   = { workspace = true }
 aglais-xqvm-vm       = { workspace = true }
 clap.workspace       = true
