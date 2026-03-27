@@ -39,13 +39,14 @@
 //! ```
 
 #[cfg(not(feature = "std"))]
-use alloc::{vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 
 use aglais_xqvm_bytecode::opcodes;
 use aglais_xqvm_bytecode::{Instruction, InstructionStream, Program, Register};
 
 use crate::error::Error;
 use crate::model::{Domain, XqmxModel, XqmxSample};
+use crate::tracer::{NoopTracer, StepState, Tracer};
 use crate::value::RegVal;
 
 // ---------------------------------------------------------------------------
@@ -266,6 +267,29 @@ impl Vm {
     ///
     /// Returns [`Error`] on any runtime fault (stack underflow, bad jump, etc.).
     pub fn run(&mut self, program: &Program) -> Result<(), Error> {
+        self.run_trace(&mut NoopTracer, program)
+    }
+
+    /// Execute a [`Program`] with a [`Tracer`].
+    ///
+    /// Behaves identically to [`run`](Self::run) but invokes `tracer.on_step`
+    /// after every instruction, providing a snapshot of the VM state.
+    ///
+    /// When `T` is [`NoopTracer`], the compiler eliminates all tracing
+    /// overhead via dead-code elimination.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] on any runtime fault, or [`Error::TraceFailed`] if
+    /// the tracer callback returns an error.
+    pub fn run_trace<T: Tracer>(
+        &mut self,
+        tracer: &mut T,
+        program: &Program,
+    ) -> Result<(), Error>
+    where
+        T::Error: core::fmt::Display,
+    {
         let mut stream = InstructionStream::from_program(program);
         let table = program.jump_table();
         let mut steps: u64 = 0;
@@ -283,11 +307,61 @@ impl Vm {
             };
             let (pos, _label, instr) = item.map_err(Error::from)?;
 
-            match self.dispatch(pos, instr)? {
+            let result = if T::ENABLED {
+                // Snapshot read registers before dispatch.
+                let read_slots = instr.read_registers();
+                let read_regs: Vec<(u8, RegVal)> = read_slots
+                    .as_slice()
+                    .iter()
+                    .map(|&i| (i, self.regs[usize::from(i)].clone()))
+                    .collect();
+
+                // Snapshot written register values before dispatch.
+                let write_slots = instr.written_registers();
+                let pre_write: Vec<RegVal> = write_slots
+                    .as_slice()
+                    .iter()
+                    .map(|&i| self.regs[usize::from(i)].clone())
+                    .collect();
+
+                // Execute the instruction.
+                let result = self.dispatch(pos, instr)?;
+
+                // Collect registers that actually changed.
+                let written_regs: Vec<(u8, RegVal)> = write_slots
+                    .as_slice()
+                    .iter()
+                    .zip(pre_write.iter())
+                    .filter(|(i, pre)| self.regs[usize::from(**i)] != **pre)
+                    .map(|(i, _)| (*i, self.regs[usize::from(*i)].clone()))
+                    .collect();
+
+                let state = StepState {
+                    pos,
+                    step: steps,
+                    instruction: &instr,
+                    stack: &self.stack,
+                    read_regs: &read_regs,
+                    written_regs: &written_regs,
+                    loop_depth: self.loop_stack.len(),
+                };
+
+                tracer.on_step(&state).map_err(|e| Error::TraceFailed {
+                    pos,
+                    message: format!("{e}"),
+                })?;
+
+                result
+            } else {
+                self.dispatch(pos, instr)?
+            };
+
+            match result {
                 StepResult::Continue => {}
                 StepResult::Halt => break,
                 StepResult::Jump(label) => {
-                    let entry = table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
+                    let entry =
+                        table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
                     stream.seek(entry.start as usize).map_err(Error::from)?;
                 }
                 StepResult::Seek(target) => {
@@ -1321,5 +1395,169 @@ impl Vm {
         })?;
         self.push_stack(energy, pos)?;
         Ok(StepResult::Continue)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use aglais_xqvm_bytecode::{Instruction, InstructionBuilder, Register};
+
+    use crate::error::Error;
+    use crate::tracer::{NoopTracer, StepState, Tracer};
+    use crate::value::RegVal;
+    use crate::Vm;
+
+    /// Test tracer that records all step states.
+    struct RecordingTracer {
+        steps: Vec<RecordedStep>,
+    }
+
+    #[allow(dead_code)]
+    struct RecordedStep {
+        pos: usize,
+        step: u64,
+        instruction: Instruction,
+        stack: Vec<i64>,
+        read_regs: Vec<(u8, RegVal)>,
+        written_regs: Vec<(u8, RegVal)>,
+        loop_depth: usize,
+    }
+
+    impl RecordingTracer {
+        fn new() -> Self {
+            Self { steps: Vec::new() }
+        }
+    }
+
+    impl Tracer for RecordingTracer {
+        type Error = core::convert::Infallible;
+
+        fn on_step(
+            &mut self,
+            state: &StepState<'_>,
+        ) -> Result<(), Self::Error> {
+            self.steps.push(RecordedStep {
+                pos: state.pos,
+                step: state.step,
+                instruction: *state.instruction,
+                stack: state.stack.to_vec(),
+                read_regs: state.read_regs.to_vec(),
+                written_regs: state.written_regs.to_vec(),
+                loop_depth: state.loop_depth,
+            });
+            Ok(())
+        }
+    }
+
+    /// Tracer that errors on a specific step.
+    struct FailingTracer {
+        fail_at: u64,
+    }
+
+    impl Tracer for FailingTracer {
+        type Error = String;
+
+        fn on_step(
+            &mut self,
+            state: &StepState<'_>,
+        ) -> Result<(), Self::Error> {
+            if state.step == self.fail_at {
+                Err(format!(
+                    "intentional failure at step {}",
+                    self.fail_at
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn run_delegates_to_run_trace() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(3).push(4).add().halt();
+        let program = b.build().unwrap();
+
+        let mut vm1 = Vm::new();
+        vm1.run(&program).unwrap();
+
+        let mut vm2 = Vm::new();
+        vm2.run_trace(&mut NoopTracer, &program).unwrap();
+
+        assert_eq!(vm1.stack(), vm2.stack());
+    }
+
+    #[test]
+    fn recording_tracer_captures_steps() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(3).push(4).add().stow(Register(0)).halt();
+        let program = b.build().unwrap();
+
+        let mut tracer = RecordingTracer::new();
+        let mut vm = Vm::new();
+        vm.run_trace(&mut tracer, &program).unwrap();
+
+        assert_eq!(tracer.steps.len(), 5);
+
+        // Step 1: PUSH 3 -> stack=[3], no regs
+        assert_eq!(tracer.steps[0].step, 1);
+        assert_eq!(tracer.steps[0].stack, &[3]);
+        assert!(tracer.steps[0].read_regs.is_empty());
+        assert!(tracer.steps[0].written_regs.is_empty());
+
+        // Step 2: PUSH 4 -> stack=[3, 4], no regs
+        assert_eq!(tracer.steps[1].stack, &[3, 4]);
+
+        // Step 3: ADD -> stack=[7], no regs
+        assert_eq!(tracer.steps[2].stack, &[7]);
+
+        // Step 4: STOW r0 -> stack=[], writes r0=7
+        assert_eq!(tracer.steps[3].stack, &[] as &[i64]);
+        assert!(tracer.steps[3].read_regs.is_empty());
+        assert_eq!(tracer.steps[3].written_regs.len(), 1);
+        assert_eq!(tracer.steps[3].written_regs[0], (0, RegVal::Int(7)));
+
+        // Step 5: HALT -> stack=[]
+        assert_eq!(tracer.steps[4].stack, &[] as &[i64]);
+    }
+
+    #[test]
+    fn recording_tracer_captures_read_regs() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(42).stow(Register(0)).load(Register(0)).halt();
+        let program = b.build().unwrap();
+
+        let mut tracer = RecordingTracer::new();
+        let mut vm = Vm::new();
+        vm.run_trace(&mut tracer, &program).unwrap();
+
+        // Step 3: LOAD r0 reads r0=42
+        assert_eq!(tracer.steps[2].read_regs.len(), 1);
+        assert_eq!(tracer.steps[2].read_regs[0], (0, RegVal::Int(42)));
+    }
+
+    #[test]
+    fn failing_tracer_propagates_error() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(1).push(2).add().halt();
+        let program = b.build().unwrap();
+
+        let mut tracer = FailingTracer { fail_at: 2 };
+        let mut vm = Vm::new();
+        let err = vm.run_trace(&mut tracer, &program).unwrap_err();
+
+        match err {
+            Error::TraceFailed { message, .. } => {
+                assert!(
+                    message.contains("intentional failure at step 2")
+                );
+            }
+            other => panic!("expected TraceFailed, got {other:?}"),
+        }
     }
 }
