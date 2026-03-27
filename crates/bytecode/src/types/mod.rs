@@ -29,9 +29,11 @@ mod table;
 mod instruction;
 mod opcode;
 mod operand;
+mod register_effect;
 
 pub use self::{
     instruction::Instruction,
     opcode::{DecodeError, Opcode},
     operand::Register,
+    register_effect::RegisterEffect,
 };

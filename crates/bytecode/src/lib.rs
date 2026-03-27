@@ -103,4 +103,4 @@ pub use builder::{InstructionBuilder, LabelId};
 pub use jump_table::{DecodeError, JumpEntry, JumpTable};
 pub use program::Program;
 pub use stream::InstructionStream;
-pub use types::{Instruction, Opcode, Register};
+pub use types::{Instruction, Opcode, Register, RegisterEffect};

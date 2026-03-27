@@ -40,6 +40,9 @@
 //! // diag implements miette::Diagnostic and can be returned from main()
 //! ```
 
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
+
 #[cfg(feature = "std")]
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
@@ -123,6 +126,10 @@ pub enum Error {
     /// The RESIZE instruction received non-positive dimensions.
     #[error("invalid grid dimensions {rows}x{cols} at byte {pos:#06x}")]
     InvalidGridDimensions { pos: usize, rows: i64, cols: i64 },
+
+    /// A tracer callback returned an error (e.g. I/O write failure).
+    #[error("trace failed at byte {pos:#06x}: {message}")]
+    TraceFailed { pos: usize, message: String },
 }
 
 // `into_diagnostic` and `byte_pos` require the disassembler (std-only).
@@ -180,6 +187,7 @@ impl Error {
             | Self::TruncatedInstruction { pos }
             | Self::InvalidShift { pos, .. }
             | Self::InvalidGridDimensions { pos, .. }
+            | Self::TraceFailed { pos, .. }
             | Self::BadJumpTarget { pos, .. }
             | Self::InvalidLabel { pos, .. }
             | Self::IndexOutOfBounds { pos, .. } => Some(*pos),
