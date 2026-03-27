@@ -154,6 +154,18 @@ This adds:
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
+## AI Assistants
+
+The repository ships configuration for AI coding assistants so they understand
+the project's conventions out of the box.
+
+| File | Tool |
+|---|---|
+| `AGENTS.md` | Claude Code, OpenAI Codex, Cursor (primary source of truth) |
+
+`AGENTS.md` is the canonical source of project conventions for AI assistants.
+When updating project conventions, keep this file up to date.
+
 ## Merge Requests
 
 - Keep changes focused and minimal.
