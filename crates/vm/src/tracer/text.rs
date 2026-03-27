@@ -78,7 +78,7 @@ fn fmt_stack(stack: &[i64]) -> String {
         format!("{stack:?}")
     } else {
         let skip = stack.len() - MAX_STACK_DISPLAY;
-        let top = &stack[skip..];
+        let top = stack.get(skip..).unwrap_or_default();
         format!("[...{skip} more, {}]", fmt_stack_elems(top))
     }
 }

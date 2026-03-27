@@ -45,11 +45,14 @@ fn json_tracer_produces_valid_jsonl() {
         assert!(is_valid_json(line), "line {i} is not valid JSON: {line}");
     }
 
-    assert!(lines[0].contains("\"step\":1"));
-    assert!(lines[4].contains("\"step\":5"));
+    let first = lines.first().expect("should have line 0");
+    let last = lines.get(4).expect("should have line 4");
+    assert!(first.contains("\"step\":1"));
+    assert!(last.contains("\"step\":5"));
 
     // STOW r0 (step 4) should show written register.
-    assert!(lines[3].contains("\"written_regs\""));
+    let stow_line = lines.get(3).expect("should have line 3");
+    assert!(stow_line.contains("\"written_regs\""));
 }
 
 #[test]
@@ -67,7 +70,10 @@ fn json_tracer_each_line_has_required_fields() {
     for line in output.lines() {
         assert!(line.contains("\"step\""), "missing step: {line}");
         assert!(line.contains("\"pos\""), "missing pos: {line}");
-        assert!(line.contains("\"instruction\""), "missing instruction: {line}");
+        assert!(
+            line.contains("\"instruction\""),
+            "missing instruction: {line}"
+        );
         assert!(line.contains("\"stack\""), "missing stack: {line}");
     }
 }

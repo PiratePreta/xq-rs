@@ -67,8 +67,8 @@ pub use error::Error;
 #[cfg(feature = "std")]
 pub use error::RuntimeDiagnostic;
 pub use model::{Domain, XqmxModel, XqmxSample};
-pub use tracer::{NoopTracer, StepState, Tracer};
 #[cfg(feature = "std")]
 pub use tracer::{JsonTracer, TextTracer};
+pub use tracer::{NoopTracer, StepState, Tracer};
 pub use value::RegVal;
 pub use vm::Vm;

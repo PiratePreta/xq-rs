@@ -554,7 +554,12 @@ mod tests {
     #[test]
     fn display_push() {
         assert_eq!(
-            format!("{}", Instruction::Push8 { val: 42i64.to_be_bytes() }),
+            format!(
+                "{}",
+                Instruction::Push8 {
+                    val: 42i64.to_be_bytes()
+                }
+            ),
             "PUSH8 42",
         );
         assert_eq!(
@@ -565,10 +570,7 @@ mod tests {
 
     #[test]
     fn display_jump() {
-        assert_eq!(
-            format!("{}", Instruction::Jump { label: 3 }),
-            "JUMP .3",
-        );
+        assert_eq!(format!("{}", Instruction::Jump { label: 3 }), "JUMP .3",);
     }
 
     #[test]

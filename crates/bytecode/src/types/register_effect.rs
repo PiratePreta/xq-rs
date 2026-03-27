@@ -19,7 +19,8 @@
 
 /// A compact set of register indices (0-2 elements, stack-allocated).
 ///
-/// Used by [`Instruction::read_registers`] and [`Instruction::written_registers`]
+/// Used by [`Instruction::read_registers`](super::Instruction::read_registers)
+/// and [`Instruction::written_registers`](super::Instruction::written_registers)
 /// to report which registers an instruction accesses without heap allocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegisterEffect {

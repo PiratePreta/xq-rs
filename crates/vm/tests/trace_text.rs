@@ -35,17 +35,18 @@ fn text_tracer_produces_header_and_rows() {
     let lines: Vec<&str> = output.lines().collect();
 
     // First line is the column header.
-    assert!(lines[0].contains("step"));
-    assert!(lines[0].contains("instruction"));
+    let header = lines.first().expect("should have header");
+    assert!(header.contains("step"));
+    assert!(header.contains("instruction"));
 
     // We should have header + 5 data rows.
     assert_eq!(lines.len(), 6, "header + 5 steps, got:\n{output}");
 
     // Step 4 (STOW r0) should show a written register.
+    let stow_row = lines.get(4).expect("should have row 4");
     assert!(
-        lines[4].contains("r0=7"),
-        "STOW r0 row should show r0=7, got: {}",
-        lines[4]
+        stow_row.contains("r0=7"),
+        "STOW r0 row should show r0=7, got: {stow_row}",
     );
 }
 

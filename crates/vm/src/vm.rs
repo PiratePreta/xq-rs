@@ -282,11 +282,7 @@ impl Vm {
     ///
     /// Returns [`Error`] on any runtime fault, or [`Error::TraceFailed`] if
     /// the tracer callback returns an error.
-    pub fn run_trace<T: Tracer>(
-        &mut self,
-        tracer: &mut T,
-        program: &Program,
-    ) -> Result<(), Error>
+    pub fn run_trace<T: Tracer>(&mut self, tracer: &mut T, program: &Program) -> Result<(), Error>
     where
         T::Error: core::fmt::Display,
     {
@@ -313,7 +309,7 @@ impl Vm {
                 let read_regs: Vec<(u8, RegVal)> = read_slots
                     .as_slice()
                     .iter()
-                    .map(|&i| (i, self.regs[usize::from(i)].clone()))
+                    .filter_map(|&i| Some((i, self.regs.get(usize::from(i))?.clone())))
                     .collect();
 
                 // Snapshot written register values before dispatch.
@@ -321,7 +317,7 @@ impl Vm {
                 let pre_write: Vec<RegVal> = write_slots
                     .as_slice()
                     .iter()
-                    .map(|&i| self.regs[usize::from(i)].clone())
+                    .filter_map(|&i| self.regs.get(usize::from(i)).cloned())
                     .collect();
 
                 // Execute the instruction.
@@ -332,8 +328,10 @@ impl Vm {
                     .as_slice()
                     .iter()
                     .zip(pre_write.iter())
-                    .filter(|(i, pre)| self.regs[usize::from(**i)] != **pre)
-                    .map(|(i, _)| (*i, self.regs[usize::from(*i)].clone()))
+                    .filter_map(|(&i, pre)| {
+                        let cur = self.regs.get(usize::from(i))?;
+                        (cur != pre).then(|| (i, cur.clone()))
+                    })
                     .collect();
 
                 let state = StepState {
@@ -360,8 +358,7 @@ impl Vm {
                 StepResult::Continue => {}
                 StepResult::Halt => break,
                 StepResult::Jump(label) => {
-                    let entry =
-                        table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
+                    let entry = table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
                     stream.seek(entry.start as usize).map_err(Error::from)?;
                 }
                 StepResult::Seek(target) => {
@@ -1407,10 +1404,10 @@ mod tests {
 
     use aglais_xqvm_bytecode::{Instruction, InstructionBuilder, Register};
 
+    use crate::Vm;
     use crate::error::Error;
     use crate::tracer::{NoopTracer, StepState, Tracer};
     use crate::value::RegVal;
-    use crate::Vm;
 
     /// Test tracer that records all step states.
     struct RecordingTracer {
@@ -1437,10 +1434,7 @@ mod tests {
     impl Tracer for RecordingTracer {
         type Error = core::convert::Infallible;
 
-        fn on_step(
-            &mut self,
-            state: &StepState<'_>,
-        ) -> Result<(), Self::Error> {
+        fn on_step(&mut self, state: &StepState<'_>) -> Result<(), Self::Error> {
             self.steps.push(RecordedStep {
                 pos: state.pos,
                 step: state.step,
@@ -1462,15 +1456,9 @@ mod tests {
     impl Tracer for FailingTracer {
         type Error = String;
 
-        fn on_step(
-            &mut self,
-            state: &StepState<'_>,
-        ) -> Result<(), Self::Error> {
+        fn on_step(&mut self, state: &StepState<'_>) -> Result<(), Self::Error> {
             if state.step == self.fail_at {
-                Err(format!(
-                    "intentional failure at step {}",
-                    self.fail_at
-                ))
+                Err(format!("intentional failure at step {}", self.fail_at))
             } else {
                 Ok(())
             }
@@ -1505,25 +1493,30 @@ mod tests {
         assert_eq!(tracer.steps.len(), 5);
 
         // Step 1: PUSH 3 -> stack=[3], no regs
-        assert_eq!(tracer.steps[0].step, 1);
-        assert_eq!(tracer.steps[0].stack, &[3]);
-        assert!(tracer.steps[0].read_regs.is_empty());
-        assert!(tracer.steps[0].written_regs.is_empty());
+        let s0 = tracer.steps.first().expect("step 0");
+        assert_eq!(s0.step, 1);
+        assert_eq!(s0.stack, &[3]);
+        assert!(s0.read_regs.is_empty());
+        assert!(s0.written_regs.is_empty());
 
         // Step 2: PUSH 4 -> stack=[3, 4], no regs
-        assert_eq!(tracer.steps[1].stack, &[3, 4]);
+        let s1 = tracer.steps.get(1).expect("step 1");
+        assert_eq!(s1.stack, &[3, 4]);
 
         // Step 3: ADD -> stack=[7], no regs
-        assert_eq!(tracer.steps[2].stack, &[7]);
+        let s2 = tracer.steps.get(2).expect("step 2");
+        assert_eq!(s2.stack, &[7]);
 
         // Step 4: STOW r0 -> stack=[], writes r0=7
-        assert_eq!(tracer.steps[3].stack, &[] as &[i64]);
-        assert!(tracer.steps[3].read_regs.is_empty());
-        assert_eq!(tracer.steps[3].written_regs.len(), 1);
-        assert_eq!(tracer.steps[3].written_regs[0], (0, RegVal::Int(7)));
+        let s3 = tracer.steps.get(3).expect("step 3");
+        assert_eq!(s3.stack, &[] as &[i64]);
+        assert!(s3.read_regs.is_empty());
+        assert_eq!(s3.written_regs.len(), 1);
+        assert_eq!(s3.written_regs.first(), Some(&(0, RegVal::Int(7))));
 
         // Step 5: HALT -> stack=[]
-        assert_eq!(tracer.steps[4].stack, &[] as &[i64]);
+        let s4 = tracer.steps.get(4).expect("step 4");
+        assert_eq!(s4.stack, &[] as &[i64]);
     }
 
     #[test]
@@ -1537,8 +1530,9 @@ mod tests {
         vm.run_trace(&mut tracer, &program).unwrap();
 
         // Step 3: LOAD r0 reads r0=42
-        assert_eq!(tracer.steps[2].read_regs.len(), 1);
-        assert_eq!(tracer.steps[2].read_regs[0], (0, RegVal::Int(42)));
+        let s2 = tracer.steps.get(2).expect("step 2");
+        assert_eq!(s2.read_regs.len(), 1);
+        assert_eq!(s2.read_regs.first(), Some(&(0, RegVal::Int(42))));
     }
 
     #[test]
@@ -1553,9 +1547,7 @@ mod tests {
 
         match err {
             Error::TraceFailed { message, .. } => {
-                assert!(
-                    message.contains("intentional failure at step 2")
-                );
+                assert!(message.contains("intentional failure at step 2"));
             }
             other => panic!("expected TraceFailed, got {other:?}"),
         }
