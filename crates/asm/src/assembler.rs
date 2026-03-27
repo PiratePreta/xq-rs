@@ -27,7 +27,7 @@
 //!
 //! `PUSH` is handled specially: the assembly operand is an integer constant.
 //! The assembler calls [`InstructionBuilder::push`] which selects the minimal
-//! inline-constant variant (`PUSHC_0`..`PUSHC_8`) automatically.
+//! inline-constant variant (`PUSH1`..`PUSH8`) automatically.
 //!
 //! `source` and `name` are used solely for diagnostic output: they are
 //! embedded in any [`AssembleError`] so that miette can render a source
@@ -52,7 +52,7 @@
 //!     }),
 //! ];
 //! let program = assemble(&lines, src, "<test>").unwrap();
-//! assert_eq!(program.code()[0], 0x10); // PUSHC_0 opcode
+//! assert_eq!(program.code()[0], 0x11); // PUSH1 opcode
 //! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
 //! ```
 
@@ -250,7 +250,7 @@ fn assemble_jump(
 // ---------------------------------------------------------------------------
 
 /// Handle `PUSH <imm>` and `PUSHC <imm>`: encode the integer constant inline
-/// using the minimal `PUSHC_N` encoding chosen by [`InstructionBuilder::push`].
+/// using the minimal `PushN` encoding chosen by [`InstructionBuilder::push`].
 fn assemble_push(
     instr: &ParsedInstr,
     b: &mut InstructionBuilder,
@@ -363,7 +363,7 @@ impl FromOperand for i64 {
     }
 }
 
-/// `[u8; N]` fields appear on `PUSHC_1`..`PUSHC_8` instructions.
+/// `[u8; N]` fields appear on `PUSH1`..`PUSH8` instructions.
 ///
 /// These mnemonics are not user-facing (assembly uses `PUSH`/`PUSHC` which are
 /// handled by `assemble_push` before this path is reached), so this impl is
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn halt_is_one_byte() {
-        assert_eq!(asm("HALT"), [0x0F]);
+        assert_eq!(asm("HALT"), [0x09]);
     }
 
     #[test]
@@ -503,17 +503,19 @@ mod tests {
 
     #[test]
     fn push_zero() {
-        assert_eq!(asm("PUSH 0"), [0x10]);
+        // 0 encodes as Push1 (opcode 0x11) with 1-byte payload 0x00
+        assert_eq!(asm("PUSH 0"), [0x11, 0x00]);
     }
 
     #[test]
     fn push_negative() {
-        assert_eq!(asm("PUSH -1"), [0x18, 0xFF]);
+        // -1 encodes as Push1 (opcode 0x11) with 1-byte payload 0xFF
+        assert_eq!(asm("PUSH -1"), [0x11, 0xFF]);
     }
 
     #[test]
     fn load_register() {
-        assert_eq!(asm("LOAD r3"), [0x14, 0x03]);
+        assert_eq!(asm("LOAD r3"), [0x0A, 0x03]);
     }
 
     #[test]
@@ -526,8 +528,8 @@ mod tests {
         let src = "PUSH 5\nPUSH 3\nADD\nHALT";
         let buf = asm(src);
         let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::PushC1 { val: [5] });
-        assert_eq!(instrs[1], Instruction::PushC1 { val: [3] });
+        assert_eq!(instrs[0], Instruction::Push1 { val: [5] });
+        assert_eq!(instrs[1], Instruction::Push1 { val: [3] });
         assert_eq!(instrs[2], Instruction::Add {});
         assert_eq!(instrs[3], Instruction::Halt {});
     }
@@ -553,11 +555,11 @@ mod tests {
     #[test]
     fn backward_jumpi_label() {
         // .0:
-        // PUSH -1   (2 bytes at 0)
+        // PUSH -1   (2 bytes at 0: Push1 0xFF)
         // ADD       (1 byte  at 2)
-        // DUPL      (1 byte  at 3)
+        // COPY      (1 byte  at 3)
         // JUMPI .0  (3 bytes at 4)
-        let src = ".0:\nPUSH -1\nADD\nDUPL\nJUMPI .0";
+        let src = ".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
@@ -613,7 +615,8 @@ mod tests {
     fn push_hex_literal() {
         let buf = asm("PUSH 0xFF");
         let instrs = decode_all(&buf);
-        assert_eq!(instrs[0], Instruction::PushC2 { val: [0x00, 0xFF] });
+        // 255 fits in 2 bytes (needs sign bit), so Push2 { val: [0x00, 0xFF] }
+        assert_eq!(instrs[0], Instruction::Push2 { val: [0x00, 0xFF] });
     }
 
     #[test]
@@ -629,9 +632,10 @@ mod tests {
         let src = "PUSHC 12345";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
+        // 12345 = 0x3039, fits in 2 bytes, so Push2 { val: [0x30, 0x39] }.
         let instrs = decode_all(program.code());
         assert_eq!(instrs.len(), 1);
-        assert_eq!(instrs[0], Instruction::PushC2 { val: [0x30, 0x39] });
+        assert_eq!(instrs[0], Instruction::Push2 { val: [0x30, 0x39] });
     }
 
     #[test]

@@ -57,6 +57,10 @@ pub enum Error {
     #[error("stack underflow at byte {pos:#06x}")]
     StackUnderflow { pos: usize },
 
+    /// The value stack exceeded the 8192-element depth limit.
+    #[error("stack overflow at byte {pos:#06x} (limit: 8192)")]
+    StackOverflow { pos: usize },
+
     /// A register held the wrong value kind for the operation.
     #[error("register r{reg} holds {got}, expected {expected}")]
     RegisterType {
@@ -169,6 +173,7 @@ impl Error {
     fn byte_pos(&self) -> Option<usize> {
         match self {
             Self::StackUnderflow { pos }
+            | Self::StackOverflow { pos }
             | Self::DivisionByZero { pos }
             | Self::NoActiveLoop { pos }
             | Self::BadOpcode { pos, .. }

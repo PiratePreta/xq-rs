@@ -63,7 +63,7 @@ fn single_halt() {
 #[test]
 fn push_and_halt() {
     let instrs = asm("PUSH 7\nHALT");
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [7] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [7] });
     assert_eq!(instrs[1], Instruction::Halt {});
 }
 
@@ -74,8 +74,8 @@ fn push_and_halt() {
 #[test]
 fn arithmetic_sequence() {
     let instrs = asm("PUSH 10\nPUSH 3\nSUB\nNEG\nHALT");
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [10] });
-    assert_eq!(instrs[1], Instruction::PushC1 { val: [3] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [10] });
+    assert_eq!(instrs[1], Instruction::Push1 { val: [3] });
     assert_eq!(instrs[2], Instruction::Sub {});
     assert_eq!(instrs[3], Instruction::Neg {});
     assert_eq!(instrs[4], Instruction::Halt {});
@@ -84,8 +84,8 @@ fn arithmetic_sequence() {
 #[test]
 fn bitwise_instructions() {
     let instrs = asm("PUSH 0xFF\nPUSH 0x0F\nBAND\nHALT");
-    assert_eq!(instrs[0], Instruction::PushC2 { val: [0x00, 0xFF] });
-    assert_eq!(instrs[1], Instruction::PushC1 { val: [0x0F] });
+    assert_eq!(instrs[0], Instruction::Push2 { val: [0x00, 0xFF] });
+    assert_eq!(instrs[1], Instruction::Push1 { val: [0x0F] });
     assert_eq!(instrs[2], Instruction::BAnd {});
 }
 
@@ -96,7 +96,7 @@ fn bitwise_instructions() {
 #[test]
 fn stow_and_load_roundtrip() {
     let instrs = asm("PUSH 99\nSTOW r5\nLOAD r5\nHALT");
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [99] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [99] });
     assert_eq!(instrs[1], Instruction::Stow { reg: Register(5) });
     assert_eq!(instrs[2], Instruction::Load { reg: Register(5) });
 }
@@ -138,11 +138,11 @@ fn forward_jump_resolves() {
 #[test]
 fn backward_jumpi_resolves() {
     // .0:
-    // PUSH -1  (2 bytes, site=0: PUSHC_1 0xFF)
+    // PUSH -1  (2 bytes, site=0: Push1 0xFF)
     // ADD      (1 byte,  site=2)
-    // DUPL     (1 byte,  site=3)
+    // COPY     (1 byte,  site=3)
     // JUMPI .0 (3 bytes, site=4)
-    let instrs = asm(".0:\nPUSH -1\nADD\nDUPL\nJUMPI .0");
+    let instrs = asm(".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0");
     assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { label: 0 });
 }
 
@@ -165,9 +165,9 @@ fn multiple_labels_and_jumps() {
         HALT
     ";
     let instrs = asm(src);
-    assert_eq!(instrs[0], Instruction::PushC0 {});
+    assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
     assert!(matches!(instrs[1], Instruction::JumpI { .. }));
-    assert_eq!(instrs[2], Instruction::PushC1 { val: [42] });
+    assert_eq!(instrs[2], Instruction::Push1 { val: [42] });
     assert_eq!(instrs[3], Instruction::Halt {});
 }
 
@@ -188,14 +188,14 @@ fn jump_negative_integer_is_error() {
 #[test]
 fn bqmx_allocate() {
     let instrs = asm("PUSH 4\nBQMX r0");
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [4] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [4] });
     assert_eq!(instrs[1], Instruction::Bqmx { reg: Register(0) });
 }
 
 #[test]
 fn setquad_instruction() {
     let instrs = asm("PUSH -1\nPUSH 2\nPUSH 2\nSETQUAD r0");
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [0xFF] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [0xFF] });
     assert_eq!(instrs[3], Instruction::SetQuad { reg: Register(0) });
 }
 
@@ -215,7 +215,7 @@ fn vec_operations() {
 fn inline_comments_ignored() {
     let instrs = asm("PUSH 1 ; push one\nHALT ; stop");
     assert_eq!(instrs.len(), 2);
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [1] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [1] });
 }
 
 #[test]
@@ -228,8 +228,8 @@ fn blank_lines_and_indentation_ignored() {
 #[test]
 fn hex_and_decimal_literals() {
     let instrs = asm("PUSH 0xFF\nPUSH 255");
-    assert_eq!(instrs[0], Instruction::PushC2 { val: [0x00, 0xFF] });
-    assert_eq!(instrs[1], Instruction::PushC2 { val: [0x00, 0xFF] });
+    assert_eq!(instrs[0], Instruction::Push2 { val: [0x00, 0xFF] });
+    assert_eq!(instrs[1], Instruction::Push2 { val: [0x00, 0xFF] });
 }
 
 // ---------------------------------------------------------------------------
@@ -239,8 +239,8 @@ fn hex_and_decimal_literals() {
 #[test]
 fn lowercase_mnemonics_assemble() {
     let instrs = asm("push 5\npush 3\nadd\nhalt");
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [5] });
-    assert_eq!(instrs[1], Instruction::PushC1 { val: [3] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [5] });
+    assert_eq!(instrs[1], Instruction::Push1 { val: [3] });
     assert_eq!(instrs[2], Instruction::Add {});
     assert_eq!(instrs[3], Instruction::Halt {});
 }
@@ -248,7 +248,7 @@ fn lowercase_mnemonics_assemble() {
 #[test]
 fn mixed_case_mnemonics_assemble() {
     let instrs = asm("pUsH 7\nHaLt");
-    assert_eq!(instrs[0], Instruction::PushC1 { val: [7] });
+    assert_eq!(instrs[0], Instruction::Push1 { val: [7] });
     assert_eq!(instrs[1], Instruction::Halt {});
 }
 
@@ -275,12 +275,12 @@ fn case_insensitive_jump_mnemonics() {
 
 #[test]
 fn push_large_value_encodes_inline() {
-    // 100000 = 0x0001_86A0 encodes inline as PUSHC_3 -- no constant pool needed.
+    // 100000 = 0x0001_86A0 encodes inline as PUSH3 -- no constant pool needed.
     let program = assemble_source("PUSH 100000\nHALT").expect("assemble failed");
     let instrs = decode_all(program.code());
     assert_eq!(
         instrs[0],
-        Instruction::PushC3 {
+        Instruction::Push3 {
             val: [0x01, 0x86, 0xA0]
         }
     );

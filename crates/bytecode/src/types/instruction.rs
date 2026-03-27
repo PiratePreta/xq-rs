@@ -43,9 +43,9 @@ macro_rules! impl_instruction {
         /// use aglais_xqvm_bytecode::types::Register;
         /// use aglais_xqvm_bytecode::types::Opcode;
         ///
-        /// let instr = Instruction::PushC0 {};
-        /// assert_eq!(instr.opcode(), Opcode::PushC0);
-        /// assert_eq!(instr.mnemonic(), "PUSHC_0");
+        /// let instr = Instruction::Pop {};
+        /// assert_eq!(instr.opcode(), Opcode::Pop);
+        /// assert_eq!(instr.mnemonic(), "POP");
         ///
         /// let instr = Instruction::Energy {
         ///     model:  Register(0),
@@ -155,8 +155,8 @@ mod tests {
     }
 
     #[test]
-    fn instruction_count_is_76() {
-        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 76);
+    fn instruction_count_is_84() {
+        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 84);
     }
 
     #[test]

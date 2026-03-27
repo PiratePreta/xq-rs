@@ -42,7 +42,7 @@ fn main() {
     let _ = b
         .push(5)
         .place(loop_top)
-        .dupl()
+        .copy()
         .jump_if(done) // exit when counter reaches 0
         .push(-1)
         .add()

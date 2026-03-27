@@ -82,20 +82,20 @@ fn empty_program_produces_empty_output() {
 
 #[test]
 fn push_halt_contains_mnemonic_and_immediate() {
-    let bytes = assemble(&[Instruction::PushC1 { val: [42] }, Instruction::Halt {}]);
+    let bytes = assemble(&[Instruction::Push1 { val: [42] }, Instruction::Halt {}]);
     let out = run_stdin(&bytes);
     assert!(out.status.success(), "exit: {}", out.status);
 
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("PUSHC_1"), "missing PUSHC_1 in:\n{text}");
+    assert!(text.contains("PUSH1"), "missing PUSH1 in:\n{text}");
     assert!(text.contains("42"), "missing immediate 42 in:\n{text}");
     assert!(text.contains("HALT"), "missing HALT in:\n{text}");
 }
 
 #[test]
 fn byte_offsets_appear_in_output() {
-    // PUSHC_0 is 1 byte (opcode only); HALT starts at 0x0001.
-    let bytes = assemble(&[Instruction::PushC0 {}, Instruction::Halt {}]);
+    // POP is 1 byte (opcode only); HALT starts at 0x0001.
+    let bytes = assemble(&[Instruction::Pop {}, Instruction::Halt {}]);
     let out = run_stdin(&bytes);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("0x0000"), "missing 0x0000 in:\n{text}");
@@ -171,7 +171,7 @@ fn unknown_byte_renders_as_dot_byte() {
 
 #[test]
 fn file_argument_works() {
-    let bytes = assemble(&[Instruction::PushC1 { val: [7] }, Instruction::Halt {}]);
+    let bytes = assemble(&[Instruction::Push1 { val: [7] }, Instruction::Halt {}]);
     let path = std::env::temp_dir().join("disasm_smoke_test.bin");
     fs::write(&path, &bytes).expect("failed to write temp file");
 
@@ -180,7 +180,7 @@ fn file_argument_works() {
 
     assert!(out.status.success(), "exit: {}", out.status);
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("PUSHC_1"), "missing PUSHC_1 in:\n{text}");
+    assert!(text.contains("PUSH1"), "missing PUSH1 in:\n{text}");
     assert!(text.contains("7"), "missing immediate 7 in:\n{text}");
 }
 

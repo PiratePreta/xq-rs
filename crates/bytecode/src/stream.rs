@@ -44,8 +44,8 @@
 //! use aglais_xqvm_bytecode::{codec, InstructionStream};
 //!
 //! let program = [
-//!     Instruction::PushC1 { val: [1] },
-//!     Instruction::PushC1 { val: [2] },
+//!     Instruction::Push1 { val: [1] },
+//!     Instruction::Push1 { val: [2] },
 //!     Instruction::Add  {},
 //!     Instruction::Halt {},
 //! ];
@@ -57,7 +57,7 @@
 //!     .unwrap();
 //!
 //! assert_eq!(decoded.len(), 4);
-//! assert_eq!(decoded[0].2, Instruction::PushC1 { val: [1] });
+//! assert_eq!(decoded[0].2, Instruction::Push1 { val: [1] });
 //! assert_eq!(decoded[3].2, Instruction::Halt {});
 //! assert!(decoded.iter().all(|(_, label, _)| label.is_none()));
 //! ```
@@ -139,7 +139,7 @@ type Result<T> = core::result::Result<T, Error>;
 /// use aglais_xqvm_bytecode::{codec, InstructionStream};
 ///
 /// let buf: Vec<u8> = [
-///     Instruction::PushC1 { val: [3] },
+///     Instruction::Push1 { val: [3] },
 ///     Instruction::Halt {},
 /// ].iter().flat_map(|i| codec::encode(i)).collect();
 ///
@@ -147,7 +147,7 @@ type Result<T> = core::result::Result<T, Error>;
 ///
 /// let (off0, _, instr0) = stream.next_instruction().unwrap().unwrap();
 /// assert_eq!(off0, 0);
-/// assert_eq!(instr0, Instruction::PushC1 { val: [3] });
+/// assert_eq!(instr0, Instruction::Push1 { val: [3] });
 /// ```
 #[derive(Debug, Clone)]
 pub struct InstructionStream<'a> {
@@ -375,7 +375,8 @@ mod tests {
 
     #[test]
     fn offsets_advance_correctly() {
-        let buf = assemble(&[Instruction::PushC0 {}, Instruction::Halt {}]);
+        // Pop (1 byte) at 0, HALT (1 byte) at 1.
+        let buf = assemble(&[Instruction::Pop {}, Instruction::Halt {}]);
         let mut stream = InstructionStream::new(&buf);
 
         let (off0, _, _) = stream.next_instruction().unwrap().unwrap();
@@ -388,8 +389,8 @@ mod tests {
     #[test]
     fn iterator_collects_all_instructions() {
         let program = [
-            Instruction::PushC1 { val: [5] },
-            Instruction::PushC1 { val: [3] },
+            Instruction::Push1 { val: [5] },
+            Instruction::Push1 { val: [3] },
             Instruction::Add {},
             Instruction::Halt {},
         ];
@@ -407,7 +408,7 @@ mod tests {
     fn jump_table_labels_are_assigned() {
         // Build byte buffer: PushC1 (2 bytes) + Jump (3 bytes) + Halt (1 byte)
         let buf = assemble(&[
-            Instruction::PushC1 { val: [3] },
+            Instruction::Push1 { val: [3] },
             Instruction::Jump { label: 0 },
             Instruction::Halt {},
         ]);
@@ -429,7 +430,7 @@ mod tests {
 
     #[test]
     fn no_labels_when_no_jump_table() {
-        let buf = assemble(&[Instruction::PushC1 { val: [1] }, Instruction::Halt {}]);
+        let buf = assemble(&[Instruction::Push1 { val: [1] }, Instruction::Halt {}]);
         let stream = InstructionStream::new(&buf);
         assert!(stream.labels().is_empty());
     }
@@ -437,7 +438,7 @@ mod tests {
     #[test]
     fn seek_to_second_instruction_skips_first() {
         let buf = assemble(&[
-            Instruction::PushC0 {},
+            Instruction::Pop {},
             Instruction::Nop {},
             Instruction::Halt {},
         ]);
@@ -475,7 +476,7 @@ mod tests {
     fn seek_back_simulates_jump() {
         // PushC1 { val: [3] } at offset 0 (2 bytes), Jump to label 0 at offset 2 (3 bytes).
         let buf = assemble(&[
-            Instruction::PushC1 { val: [3] },
+            Instruction::Push1 { val: [3] },
             Instruction::Jump { label: 0 },
         ]);
         let table = JumpTable::new(vec![JumpEntry {
@@ -499,7 +500,7 @@ mod tests {
         let (off, label, instr) = stream.next_instruction().unwrap().unwrap();
         assert_eq!(off, 0);
         assert_eq!(label.as_deref(), Some(".0"));
-        assert_eq!(instr, Instruction::PushC1 { val: [3] });
+        assert_eq!(instr, Instruction::Push1 { val: [3] });
     }
 
     #[test]
@@ -522,7 +523,8 @@ mod tests {
 
     #[test]
     fn truncated_instruction_returns_error_and_advances() {
-        let buf: Vec<u8> = vec![0x1Fu8];
+        // Push8 (0x18) needs 8 operand bytes -- feeding just the opcode truncates it.
+        let buf: Vec<u8> = vec![0x18u8];
         let mut stream = InstructionStream::new(&buf);
 
         assert_eq!(

@@ -303,9 +303,9 @@ fn push_pop() {
 }
 
 #[test]
-fn dupl_duplicates_top() {
+fn copy_duplicates_top() {
     let vm = run(|b| {
-        b.push(7).dupl().halt();
+        b.push(7).copy().halt();
     });
     assert_eq!(vm.stack(), &[7, 7]);
 }
@@ -747,7 +747,7 @@ fn one_hot_constraint_adds_coefficients() {
         // resize: push rows=1 first, cols=3 on top
         b.push(1).push(3).resize(Register(0));
         // onehot: push row=0 first, penalty=1 on top
-        b.push(0).push(1).one_hot(Register(0));
+        b.push(0).push(1).one_hot_r(Register(0));
         b.halt();
     });
     let reg = vm.register(0);
@@ -912,4 +912,112 @@ fn row_find_and_col_find() {
         b.halt();
     });
     assert_eq!(vm.stack(), &[1, 1]);
+}
+
+// ---------------------------------------------------------------------------
+// New opcodes added in spec migration
+// ---------------------------------------------------------------------------
+
+#[test]
+fn drop_resets_register_to_zero() {
+    let vm = run(|b| {
+        b.push(42).stow(Register(3)).drop_reg(Register(3)).halt();
+    });
+    assert_eq!(vm.register(3), &RegVal::Int(0));
+}
+
+#[test]
+fn sclr_clears_entire_stack() {
+    let vm = run(|b| {
+        b.push(1).push(2).push(3).sclr().halt();
+    });
+    assert!(vm.stack().is_empty());
+}
+
+#[test]
+fn sqr_squares_top() {
+    let vm = run(|b| {
+        b.push(7).sqr().halt();
+    });
+    assert_eq!(vm.stack(), &[49]);
+}
+
+#[test]
+fn abs_positive_unchanged() {
+    let vm = run(|b| {
+        b.push(5).abs().halt();
+    });
+    assert_eq!(vm.stack(), &[5]);
+}
+
+#[test]
+fn abs_negative_becomes_positive() {
+    let vm = run(|b| {
+        b.push(-9).abs().halt();
+    });
+    assert_eq!(vm.stack(), &[9]);
+}
+
+#[test]
+fn min_returns_smaller() {
+    let vm = run(|b| {
+        b.push(10).push(3).min().halt();
+    });
+    assert_eq!(vm.stack(), &[3]);
+}
+
+#[test]
+fn max_returns_larger() {
+    let vm = run(|b| {
+        b.push(10).push(3).max().halt();
+    });
+    assert_eq!(vm.stack(), &[10]);
+}
+
+#[test]
+fn inc_adds_one() {
+    let vm = run(|b| {
+        b.push(41).inc().halt();
+    });
+    assert_eq!(vm.stack(), &[42]);
+}
+
+#[test]
+fn dec_subtracts_one() {
+    let vm = run(|b| {
+        b.push(43).dec().halt();
+    });
+    assert_eq!(vm.stack(), &[42]);
+}
+
+#[test]
+fn one_hot_c_applies_column_constraint() {
+    // 2x2 BQMX, apply one-hot over column 0 with penalty 1.
+    // Variables: (0,0)=idx 0, (1,0)=idx 2.
+    // Expected: linear[0] += -1, linear[2] += -1, quad(0,2) += 2.
+    let vm = run(|b| {
+        b.push(4).bqmx(Register(0));
+        b.push(2).push(2).resize(Register(0));
+        b.push(0).push(1).one_hot_c(Register(0));
+        b.halt();
+    });
+    if let RegVal::Model(m) = vm.register(0) {
+        assert_eq!(m.get_linear(0), -1);
+        assert_eq!(m.get_linear(2), -1);
+        assert_eq!(m.get_quad(0, 2), 2);
+    } else {
+        panic!("r0 should be a model");
+    }
+}
+
+#[test]
+fn stack_overflow_at_8192() {
+    // Push 8193 values: the 8193rd push should trigger StackOverflow.
+    let err = run_err(|b| {
+        // Loop: push counter from 0 to 8192 (8193 pushes total).
+        b.push(0).push(8193).range();
+        b.push(0); // push inside the loop body
+        b.next().halt();
+    });
+    assert!(matches!(err, Error::StackOverflow { .. }));
 }

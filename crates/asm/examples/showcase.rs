@@ -99,11 +99,11 @@ fn main() -> miette::Result<()> {
         .into_diagnostic()
         .wrap_err("failed to decode sum program bytecode")?;
 
-    // First instruction must be PUSHC_0 (push 0)
+    // First instruction must be PUSH1 0 (push 0)
     let first = instrs
         .first()
         .ok_or_else(|| miette::miette!("sum program produced an empty instruction stream"))?;
-    assert_eq!(*first, Instruction::PushC0 {});
+    assert_eq!(*first, Instruction::Push1 { val: [0x00] });
     // Last instruction must be HALT
     let last = instrs
         .last()

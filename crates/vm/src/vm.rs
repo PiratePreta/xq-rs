@@ -19,7 +19,7 @@
 //!
 //! [`Vm`] executes XQVM bytecode programs. It maintains an integer stack,
 //! a 256-slot register file, a loop stack, and optional calldata / output slots.
-//! Constants are encoded inline in `PUSH_C0`..`PUSH_C8` instructions; no
+//! Constants are encoded inline in `PUSH1`..`PUSH8` instructions; no
 //! separate constant pool is required.
 //!
 //! # Examples
@@ -259,7 +259,7 @@ impl Vm {
     /// Execute a [`Program`].
     ///
     /// Executes the instruction stream of `program`. Inline constants are
-    /// encoded directly in `PUSH_C0`..`PUSH_C8` instructions -- no separate
+    /// encoded directly in `PUSH1`..`PUSH8` instructions -- no separate
     /// constant pool is needed.
     ///
     /// # Errors
@@ -343,8 +343,15 @@ impl Vm {
         self.stack.pop().ok_or(Error::StackUnderflow { pos })
     }
 
-    fn push_val(&mut self, v: i64) {
+    /// Stack depth limit required by the spec.
+    const STACK_LIMIT: usize = 8192;
+
+    fn push_stack(&mut self, v: i64, pos: usize) -> Result<(), Error> {
+        if self.stack.len() >= Self::STACK_LIMIT {
+            return Err(Error::StackOverflow { pos });
+        }
         self.stack.push(v);
+        Ok(())
     }
 
     fn reg(&self, r: Register) -> &RegVal {
@@ -514,48 +521,43 @@ impl Vm {
 
     // -- Stack & register I/O --
 
-    fn exec_push_c0(&mut self, _pos: usize) -> Result<StepResult, Error> {
-        self.push_val(0);
+    fn exec_push1(&mut self, pos: usize, val: [u8; 1]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c1(&mut self, _pos: usize, val: [u8; 1]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
+    fn exec_push2(&mut self, pos: usize, val: [u8; 2]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c2(&mut self, _pos: usize, val: [u8; 2]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
+    fn exec_push3(&mut self, pos: usize, val: [u8; 3]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c3(&mut self, _pos: usize, val: [u8; 3]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
+    fn exec_push4(&mut self, pos: usize, val: [u8; 4]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c4(&mut self, _pos: usize, val: [u8; 4]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
+    fn exec_push5(&mut self, pos: usize, val: [u8; 5]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c5(&mut self, _pos: usize, val: [u8; 5]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
+    fn exec_push6(&mut self, pos: usize, val: [u8; 6]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c6(&mut self, _pos: usize, val: [u8; 6]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
+    fn exec_push7(&mut self, pos: usize, val: [u8; 7]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
-    fn exec_push_c7(&mut self, _pos: usize, val: [u8; 7]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
-        Ok(StepResult::Continue)
-    }
-
-    fn exec_push_c8(&mut self, _pos: usize, val: [u8; 8]) -> Result<StepResult, Error> {
-        self.push_val(sign_extend_be(&val));
+    fn exec_push8(&mut self, pos: usize, val: [u8; 8]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -564,9 +566,9 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
-    fn exec_dupl(&mut self, pos: usize) -> Result<StepResult, Error> {
+    fn exec_copy(&mut self, pos: usize) -> Result<StepResult, Error> {
         let top = *self.stack.last().ok_or(Error::StackUnderflow { pos })?;
-        self.push_val(top);
+        self.push_stack(top, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -579,13 +581,13 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
-    fn exec_load(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
+    fn exec_load(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let v = self.reg(reg).as_int().map_err(|got| Error::RegisterType {
             reg: reg.slot(),
             expected: "int",
             got,
         })?;
-        self.push_val(v);
+        self.push_stack(v, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -613,6 +615,16 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
+    fn exec_drop(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
+        *self.reg_mut(reg) = RegVal::default();
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_sclr(&mut self, _pos: usize) -> Result<StepResult, Error> {
+        self.stack.clear();
+        Ok(StepResult::Continue)
+    }
+
     fn exec_output(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let idx = self.pop(pos)?;
         let usize_idx = usize::try_from(idx)
@@ -635,21 +647,21 @@ impl Vm {
     fn exec_add(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(a.wrapping_add(b));
+        self.push_stack(a.wrapping_add(b), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_sub(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(a.wrapping_sub(b));
+        self.push_stack(a.wrapping_sub(b), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_mul(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(a.wrapping_mul(b));
+        self.push_stack(a.wrapping_mul(b), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -659,7 +671,7 @@ impl Vm {
         if b == 0 {
             return Err(Error::DivisionByZero { pos });
         }
-        self.push_val(a.wrapping_div(b));
+        self.push_stack(a.wrapping_div(b), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -669,13 +681,51 @@ impl Vm {
         if b == 0 {
             return Err(Error::DivisionByZero { pos });
         }
-        self.push_val(a.wrapping_rem(b));
+        self.push_stack(a.wrapping_rem(b), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_neg(&mut self, pos: usize) -> Result<StepResult, Error> {
         let a = self.pop(pos)?;
-        self.push_val(a.wrapping_neg());
+        self.push_stack(a.wrapping_neg(), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_sqr(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_mul(a), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_abs(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_abs(), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_min(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a.min(b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_max(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a.max(b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_inc(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_add(1), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_dec(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_sub(1), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -684,35 +734,35 @@ impl Vm {
     fn exec_eq(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a == b));
+        self.push_stack(i64::from(a == b), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_lt(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a < b));
+        self.push_stack(i64::from(a < b), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_gt(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a > b));
+        self.push_stack(i64::from(a > b), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_lte(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a <= b));
+        self.push_stack(i64::from(a <= b), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_gte(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a >= b));
+        self.push_stack(i64::from(a >= b), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -720,28 +770,28 @@ impl Vm {
 
     fn exec_not(&mut self, pos: usize) -> Result<StepResult, Error> {
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a == 0));
+        self.push_stack(i64::from(a == 0), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_and(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a != 0 && b != 0));
+        self.push_stack(i64::from(a != 0 && b != 0), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_or(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from(a != 0 || b != 0));
+        self.push_stack(i64::from(a != 0 || b != 0), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_xor(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(i64::from((a != 0) ^ (b != 0)));
+        self.push_stack(i64::from((a != 0) ^ (b != 0)), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -750,27 +800,27 @@ impl Vm {
     fn exec_b_and(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(a & b);
+        self.push_stack(a & b, pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_b_or(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(a | b);
+        self.push_stack(a | b, pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_b_xor(&mut self, pos: usize) -> Result<StepResult, Error> {
         let b = self.pop(pos)?;
         let a = self.pop(pos)?;
-        self.push_val(a ^ b);
+        self.push_stack(a ^ b, pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_b_not(&mut self, pos: usize) -> Result<StepResult, Error> {
         let a = self.pop(pos)?;
-        self.push_val(!a);
+        self.push_stack(!a, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -780,7 +830,7 @@ impl Vm {
         if !(0..64).contains(&b) {
             return Err(Error::InvalidShift { pos, amount: b });
         }
-        self.push_val(a << b);
+        self.push_stack(a << b, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -791,7 +841,7 @@ impl Vm {
             return Err(Error::InvalidShift { pos, amount: b });
         }
         // Logical (unsigned) right shift.
-        self.push_val(((a as u64) >> (b as u64)) as i64);
+        self.push_stack(((a as u64) >> (b as u64)) as i64, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -886,10 +936,11 @@ impl Vm {
                 len: vec.len(),
             },
         )?;
-        self.push_val(
+        self.push_stack(
             *vec.get(usize_idx)
                 .unwrap_or_else(|| unreachable!("usize_idx < vec.len() checked above")),
-        );
+            pos,
+        )?;
         Ok(StepResult::Continue)
     }
 
@@ -916,7 +967,7 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
-    fn exec_vec_len(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
+    fn exec_vec_len(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let len = match self.reg(reg) {
             RegVal::VecInt(v) => v.len(),
             RegVal::VecXqmx(v) => v.len(),
@@ -928,7 +979,7 @@ impl Vm {
                 });
             }
         };
-        self.push_val(len as i64);
+        self.push_stack(len as i64, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -938,7 +989,7 @@ impl Vm {
         let cols = self.pop(pos)?;
         let col = self.pop(pos)?;
         let row = self.pop(pos)?;
-        self.push_val(row.wrapping_mul(cols).wrapping_add(col));
+        self.push_stack(row.wrapping_mul(cols).wrapping_add(col), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -948,7 +999,7 @@ impl Vm {
         // Upper-triangular index for (i, j) with i <= j:
         // index = j*(j-1)/2 + i
         let idx = j.wrapping_mul(j.wrapping_sub(1)) / 2 + i;
-        self.push_val(idx);
+        self.push_stack(idx, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -965,7 +1016,7 @@ impl Vm {
                 got,
             })?;
         let usize_i = i as usize;
-        self.push_val(m.get_linear(usize_i));
+        self.push_stack(m.get_linear(usize_i), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1010,7 +1061,7 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        self.push_val(m.get_quad(i as usize, j as usize));
+        self.push_stack(m.get_quad(i as usize, j as usize), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1083,7 +1134,7 @@ impl Vm {
             .find(|&col| m.get_linear(row_start + col) == value)
             .map(|c| c as i64)
             .unwrap_or(-1);
-        self.push_val(result);
+        self.push_stack(result, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1102,7 +1153,7 @@ impl Vm {
             .find(|&row| m.get_linear(row * m.cols + col as usize) == value)
             .map(|r| r as i64)
             .unwrap_or(-1);
-        self.push_val(result);
+        self.push_stack(result, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1118,7 +1169,7 @@ impl Vm {
             })?;
         let row_start = row as usize * m.cols;
         let sum: i64 = (0..m.cols).map(|c| m.get_linear(row_start + c)).sum();
-        self.push_val(sum);
+        self.push_stack(sum, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1135,13 +1186,13 @@ impl Vm {
         let sum: i64 = (0..m.rows)
             .map(|r| m.get_linear(r * m.cols + col as usize))
             .sum();
-        self.push_val(sum);
+        self.push_stack(sum, pos)?;
         Ok(StepResult::Continue)
     }
 
     // -- Constraints --
 
-    fn exec_one_hot(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+    fn exec_one_hot_r(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let penalty = self.pop(pos)?;
         let row = self.pop(pos)?;
         let m = self
@@ -1162,6 +1213,32 @@ impl Vm {
         for ci in 0..m.cols {
             for cj in (ci + 1)..m.cols {
                 m.add_quad(row_start + ci, row_start + cj, 2 * penalty);
+            }
+        }
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_one_hot_c(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let col = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let col_idx = col as usize;
+        // H = penalty * (sum(x_{r,col}) - 1)^2 over all rows.
+        // Linear: -penalty per variable in column.
+        // Quadratic: 2*penalty per pair in column.
+        for ri in 0..m.rows {
+            m.add_linear(ri * m.cols + col_idx, -penalty);
+        }
+        for ri in 0..m.rows {
+            for rj in (ri + 1)..m.rows {
+                m.add_quad(ri * m.cols + col_idx, rj * m.cols + col_idx, 2 * penalty);
             }
         }
         Ok(StepResult::Continue)
@@ -1206,7 +1283,7 @@ impl Vm {
 
     fn exec_energy(
         &mut self,
-        _pos: usize,
+        pos: usize,
         model: Register,
         sample: Register,
     ) -> Result<StepResult, Error> {
@@ -1242,7 +1319,7 @@ impl Vm {
             model_size: m.size,
             sample_len: sample_values.len(),
         })?;
-        self.push_val(energy);
+        self.push_stack(energy, pos)?;
         Ok(StepResult::Continue)
     }
 }
