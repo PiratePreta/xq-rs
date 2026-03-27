@@ -15,46 +15,32 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `disasm` -- XQVM bytecode disassembler.
-//!
-//! Reads raw XQVM bytecode from a file or stdin and prints a human-readable
-//! Jump targets are labelled `.0`, `.1`, ... from the jump table.
-//!
-//! # Usage
-//!
-//! ```text
-//! disasm [FILE]
-//! ```
-//!
-//! When `FILE` is omitted, bytecode is read from standard input.
+//! `xq dism` subcommand -- disassembles XQVM bytecode.
 
-use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 use clap::Parser;
-use miette::{IntoDiagnostic, Result, WrapErr};
+use miette::{IntoDiagnostic, WrapErr};
 
 use aglais_xqvm_bytecode::Program;
 use aglais_xqvm_disasm::Disassembly;
 
-/// Disassemble XQVM bytecode.
+/// Disassemble XQVM bytecode into a human-readable listing.
 ///
 /// Reads raw bytecode from FILE (or stdin when FILE is omitted) and prints
-/// a human-readable listing to stdout. Jump targets are labelled `.0`, `.1`,
-/// ... from the jump table.
+/// a listing to stdout.  Jump targets are labelled `.0`, `.1`, ... from the
+/// jump table.
 #[derive(Debug, Parser)]
-#[command(name = "disasm", version, about)]
-struct Args {
-    /// Bytecode file to disassemble. Reads from stdin when omitted.
+pub(crate) struct Args {
+    /// Bytecode file to disassemble.  Reads from stdin when omitted.
     file: Option<PathBuf>,
 }
 
-fn main() -> Result<()> {
-    let args = Args::parse();
-
+/// Execute the `dism` subcommand.
+pub(crate) fn exec(args: Args) -> miette::Result<()> {
     let bytes = match args.file {
-        Some(path) => fs::read(&path)
+        Some(ref path) => std::fs::read(path)
             .into_diagnostic()
             .wrap_err_with(|| format!("failed to read '{}'", path.display()))?,
         None => {

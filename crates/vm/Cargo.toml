@@ -15,7 +15,6 @@ std = [
     "aglais-xqvm-asm",
     "aglais-xqvm-bytecode/std",
     "aglais-xqvm-disasm",
-    "clap",
     "miette",
     "thiserror/std",
 ]
@@ -31,10 +30,4 @@ thiserror.workspace  = true
 # std-only optional dependencies (activated by the `std` feature above)
 aglais-xqvm-asm    = { workspace = true, optional = true }
 aglais-xqvm-disasm = { workspace = true, optional = true }
-clap               = { workspace = true, optional = true }
 miette             = { workspace = true, optional = true }
-
-[[bin]]
-name              = "xqvm"
-path              = "src/bin/xqvm.rs"
-required-features = [ "std" ]

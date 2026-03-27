@@ -15,21 +15,18 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `xqasm` -- XQVM assembler CLI.
-//!
-//! Reads an XQVM assembly source file and writes the binary bytecode to an
-//! output file (default: `<input>.xqb`) or stdout when `--stdout` is given.
+//! `xq asm` subcommand -- assembles XQVM source into bytecode.
 
+use std::io::Write as _;
 use std::path::PathBuf;
 
 use clap::Parser;
 use miette::{IntoDiagnostic, WrapErr};
 
 /// Assemble an XQVM assembly source file into binary bytecode.
-#[derive(Parser, Debug)]
-#[command(name = "xqasm", version, about)]
-struct Args {
-    /// Input assembly source file (`.asm`).
+#[derive(Debug, Parser)]
+pub(crate) struct Args {
+    /// Input assembly source file.
     input: PathBuf,
 
     /// Output file.  Defaults to `<input>.xqb` when omitted.
@@ -41,9 +38,8 @@ struct Args {
     stdout: bool,
 }
 
-fn main() -> miette::Result<()> {
-    let args = Args::parse();
-
+/// Execute the `asm` subcommand.
+pub(crate) fn exec(args: Args) -> miette::Result<()> {
     let source = std::fs::read_to_string(&args.input)
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to read '{}'", args.input.display()))?;
@@ -54,7 +50,6 @@ fn main() -> miette::Result<()> {
     let encoded = program.encode();
 
     if args.stdout {
-        use std::io::Write as _;
         std::io::stdout()
             .write_all(&encoded)
             .into_diagnostic()
@@ -79,7 +74,7 @@ fn main() -> miette::Result<()> {
     Ok(())
 }
 
-/// Estimate the number of instructions by decoding the buffer.
+/// Count instructions by walking the encoded buffer.
 fn instruction_count(buf: &[u8]) -> usize {
     aglais_xqvm_bytecode::InstructionStream::new(buf)
         .filter(|r| r.is_ok())

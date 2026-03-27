@@ -15,23 +15,14 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `xqvm` -- XQVM bytecode interpreter CLI.
-//!
-//! Interprets a bytecode program from a binary file (default) or an
-//! assembly text file (`--text`). Writes outputs to stdout.
-//!
-//! # Usage
-//!
-//! ```text
-//! xqvm [OPTIONS] <FILE>
-//! ```
+//! `xq run` subcommand -- runs XQVM bytecode with optional tracing.
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 use clap::Parser;
-use miette::{IntoDiagnostic, Result, WrapErr};
+use miette::{IntoDiagnostic, WrapErr};
 
 use aglais_xqvm_asm::assemble_source;
 use aglais_xqvm_bytecode::Program;
@@ -46,14 +37,14 @@ enum TraceFormat {
     Json,
 }
 
-/// Interpret XQVM bytecode.
+/// Run XQVM bytecode or assembly.
 ///
-/// Reads a bytecode program from FILE and executes it. Use --text to
-/// accept assembly source instead of a binary file.
+/// Reads a program from FILE and executes it.  Use `--text` to accept
+/// assembly source instead of a binary bytecode file.  Add `--trace` for
+/// a step-by-step execution log.
 #[derive(Debug, Parser)]
-#[command(name = "xqvm", version, about)]
-struct Args {
-    /// Treat FILE as assembly text and assemble before interpreting.
+pub(crate) struct Args {
+    /// Treat FILE as assembly text and assemble before running.
     #[arg(long)]
     text: bool,
 
@@ -69,7 +60,7 @@ struct Args {
     #[arg(long, default_value = "10000000")]
     step_limit: u64,
 
-    /// Enable execution tracing.
+    /// Enable step-by-step execution tracing.
     #[arg(long)]
     trace: bool,
 
@@ -81,14 +72,13 @@ struct Args {
     #[arg(long, requires = "trace")]
     trace_file: Option<PathBuf>,
 
-    /// Bytecode (or assembly) file to interpret.
+    /// Bytecode (or assembly) file to run.
     file: PathBuf,
 }
 
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let source = fs::read(&args.file)
+/// Execute the `run` subcommand.
+pub(crate) fn exec(args: Args) -> miette::Result<()> {
+    let source = std::fs::read(&args.file)
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to read '{}'", args.file.display()))?;
 
@@ -113,6 +103,7 @@ fn main() -> Result<()> {
         let _ = vm.set_step_limit(args.step_limit);
     }
 
+    let file_name = args.file.to_string_lossy();
     if args.trace {
         let writer: Box<dyn Write> = match &args.trace_file {
             Some(path) => {
@@ -127,19 +118,25 @@ fn main() -> Result<()> {
             TraceFormat::Text => {
                 let mut tracer = TextTracer::new(writer);
                 vm.run_trace(&mut tracer, &program)
-                    .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
+                    .map_err(|e| e.into_diagnostic(&program, &file_name))?;
             }
             TraceFormat::Json => {
                 let mut tracer = JsonTracer::new(writer);
                 vm.run_trace(&mut tracer, &program)
-                    .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
+                    .map_err(|e| e.into_diagnostic(&program, &file_name))?;
             }
         }
     } else {
         vm.run(&program)
-            .map_err(|e| e.into_diagnostic(&program, &args.file.to_string_lossy()))?;
-    };
+            .map_err(|e| e.into_diagnostic(&program, &file_name))?;
+    }
 
+    print_results(&vm);
+    Ok(())
+}
+
+/// Print VM output slots and remaining stack to stdout.
+fn print_results(vm: &Vm) {
     let outputs = vm.outputs();
     let has_outputs = outputs.iter().any(|v| v != &RegVal::default());
     if has_outputs {
@@ -156,6 +153,4 @@ fn main() -> Result<()> {
             println!("  {v}");
         }
     }
-
-    Ok(())
 }
