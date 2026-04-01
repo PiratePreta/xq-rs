@@ -137,6 +137,7 @@ pub struct Vm {
     calldata: Vec<RegVal>,
     outputs: Vec<RegVal>,
     step_limit: u64,
+    steps: u64,
 }
 
 impl Default for Vm {
@@ -159,6 +160,7 @@ impl Vm {
             calldata: Vec::new(),
             outputs: Vec::new(),
             step_limit: DEFAULT_STEP_LIMIT,
+            steps: 0,
         }
     }
 
@@ -250,11 +252,17 @@ impl Vm {
         self
     }
 
+    /// Return the number of steps executed by the last [`run`](Self::run) call.
+    pub fn steps(&self) -> u64 {
+        self.steps
+    }
+
     /// Reset the VM to its initial state (stack, registers, loops cleared).
     pub fn reset(&mut self) {
         self.stack.clear();
         self.regs.iter_mut().for_each(|r| *r = RegVal::default());
         self.loop_stack.clear();
+        self.steps = 0;
     }
 
     /// Execute a [`Program`].
@@ -288,15 +296,15 @@ impl Vm {
     {
         let mut stream = InstructionStream::from_program(program);
         let table = program.jump_table();
-        let mut steps: u64 = 0;
+        self.steps = 0;
 
         loop {
-            if steps >= self.step_limit {
+            if self.steps >= self.step_limit {
                 return Err(Error::StepLimitExceeded {
                     limit: self.step_limit,
                 });
             }
-            steps += 1;
+            self.steps += 1;
 
             let Some(item) = stream.next_instruction() else {
                 break;
@@ -336,7 +344,7 @@ impl Vm {
 
                 let state = StepState {
                     pos,
-                    step: steps,
+                    step: self.steps,
                     instruction: &instr,
                     stack: &self.stack,
                     read_regs: &read_regs,

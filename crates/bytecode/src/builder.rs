@@ -70,7 +70,7 @@
 //! ```
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use thiserror::Error;
 
