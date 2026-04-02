@@ -3,7 +3,7 @@ Copyright (C) 2026 Postquant Labs Incorporated
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
-# Aglais XQVM
+# XQVM
 
 > **Work in progress.** The instruction set, binary format, and public API are
 > unstable and will change without notice until a stable release is tagged.
@@ -29,9 +29,10 @@ Think of it as LLVM for quantum computing.
 | Crate | Binary | Description |
 |---|---|---|
 | `aglais-xqvm-bytecode` | -- | Opcode table, instruction types, builder, binary codec, stream reader |
-| `aglais-xqvm-asm` | `xqasm` | Text assembler: `.xqasm` source -> bytecode |
-| `aglais-xqvm-disasm` | `xqdism` | Bytecode -> human-readable listing |
-| `aglais-xqvm-vm` | `xqvm` | Bytecode interpreter: stack, register file, QUBO/Ising model execution |
+| `aglais-xqvm-asm` | -- | Text assembler: `.xqasm` source -> bytecode |
+| `aglais-xqvm-disasm` | -- | Bytecode -> human-readable listing |
+| `aglais-xqvm-vm` | -- | Bytecode interpreter: stack, register file, QUBO/Ising model execution |
+| `aglais-xqvm-cli` | `xq` | Unified CLI driver (`xq asm`, `xq dism`, `xq run`) |
 
 ## Getting Started
 
@@ -51,20 +52,19 @@ make deps
 cargo build --release
 ```
 
-The binaries are placed at `target/release/xqasm`, `target/release/xqdism`,
-and `target/release/xqvm`.
+The binary is placed at `target/release/xq`.
 
 ### Run an example
 
 ```sh
 # Assemble a source file
-xqasm program.xqasm -o program.xqbc
+xq asm program.xqasm -o program.xqbc
 
 # Disassemble to inspect the encoding
-xqdism program.xqbc
+xq dism program.xqbc
 
 # Execute
-xqvm program.xqbc
+xq run program.xqbc
 ```
 
 ### A minimal program
@@ -80,7 +80,7 @@ HALT
 Assemble and run:
 
 ```sh
-xqasm add.xqasm -o add.xqbc && xqvm add.xqbc
+xq asm add.xqasm -o add.xqbc && xq run add.xqbc
 ```
 
 ## Architecture
