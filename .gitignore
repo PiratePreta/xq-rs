@@ -35,3 +35,8 @@ credentials.json
 certs/
 *.crt
 *.csr
+
+### mdBook ###
+docs/book/build/
+mermaid.min.js
+mermaid-init.js

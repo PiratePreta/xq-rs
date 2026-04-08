@@ -19,6 +19,7 @@ variables:
 stages:
     - lint
     - test
+    - docs
 
 # -- Formatting -------------------------------------------------------------
 
@@ -67,3 +68,16 @@ test:integration:
         - *install-deps
     script:
         - make test-integration
+
+# -- Documentation ----------------------------------------------------------
+
+docs:build:
+    stage: docs
+    before_script:
+        - export PATH="${CARGO_HOME}/bin:${PATH}"
+        - make deps-docs
+    script:
+        - make docs
+    artifacts:
+        paths:
+            - docs/book/build/

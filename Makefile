@@ -1,16 +1,20 @@
 .PHONY: all \
-        deps deps-miri \
+        deps deps-docs deps-miri \
         lint lint-clippy lint-doc lint-deny \
         fmt fmt-rust fmt-taplo fmt-check fmt-check-rust fmt-check-taplo \
-        test test-unit test-integration test-miri
+        test test-unit test-integration test-miri \
+        docs docs-serve
 
 all: fmt lint test
 
 # -- Dependencies -----------------------------------------------------------
 
-deps:
+deps: deps-docs
 	rustup component add clippy rustfmt
 	cargo install taplo-cli cargo-deny cargo-nextest --locked
+
+deps-docs:
+	cargo install mdbook mdbook-mermaid --locked
 
 deps-miri:
 	rustup toolchain install nightly --component miri
@@ -59,3 +63,13 @@ test-integration:
 
 test-miri:
 	cargo +nightly miri test --workspace --all-features
+
+# -- Documentation ----------------------------------------------------------
+
+docs:
+	mdbook-mermaid install .
+	mdbook build
+
+docs-serve:
+	mdbook-mermaid install .
+	mdbook serve --open
