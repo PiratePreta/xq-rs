@@ -1,8 +1,8 @@
 [book]
-title = "XQVM Documentation"
-authors = ["Postquant Labs Incorporated"]
+title    = "XQVM Documentation"
+authors  = [ "Postquant Labs Incorporated" ]
 language = "en"
-src = "docs/book/src"
+src      = "docs/book/src"
 
 [build]
 build-dir = "docs/book/build"
@@ -12,6 +12,6 @@ command = "mdbook-mermaid"
 
 [output.html]
 git-repository-url = "https://gitlab.com/quip.network/xq-rs"
-edit-url-template = "https://gitlab.com/quip.network/xq-rs/-/edit/main/{path}"
-mathjax-support = true
-additional-js = ["mermaid.min.js", "mermaid-init.js"]
+edit-url-template  = "https://gitlab.com/quip.network/xq-rs/-/edit/main/{path}"
+mathjax-support    = true
+additional-js      = [ "mermaid.min.js", "mermaid-init.js" ]
