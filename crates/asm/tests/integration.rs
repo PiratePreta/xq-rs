@@ -125,12 +125,12 @@ fn energy_instruction() {
 
 #[test]
 fn forward_jump_resolves() {
-    // JUMP .0  (3 bytes, site=0)
-    // NOP      (1 byte,  site=3)
+    // JUMP .0  (2 bytes, site=0: Jump1 + u8 because label id 0 fits in u8)
+    // NOP      (1 byte,  site=2)
     // .0:
-    // HALT     (1 byte,  site=4)
+    // HALT     (1 byte,  site=3)
     let instrs = asm("JUMP .0\nNOP\n.0:\nHALT");
-    assert_eq!(instrs[0], Instruction::Jump { label: 0 });
+    assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Halt {});
 }
@@ -141,9 +141,9 @@ fn backward_jumpi_resolves() {
     // PUSH -1  (2 bytes, site=0: Push1 0xFF)
     // ADD      (1 byte,  site=2)
     // COPY     (1 byte,  site=3)
-    // JUMPI .0 (3 bytes, site=4)
+    // JUMPI .0 (2 bytes, site=4: JumpI1 + u8)
     let instrs = asm(".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0");
-    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { label: 0 });
+    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI1 { label: 0 });
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn label_on_same_line_as_instruction() {
     // JUMP .0
     let instrs = asm(".0: NOP\nJUMP .0");
     assert_eq!(instrs[0], Instruction::Nop {});
-    assert_eq!(instrs[1], Instruction::Jump { label: 0 });
+    assert_eq!(instrs[1], Instruction::Jump1 { label: 0 });
 }
 
 #[test]
@@ -166,7 +166,8 @@ fn multiple_labels_and_jumps() {
     ";
     let instrs = asm(src);
     assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
-    assert!(matches!(instrs[1], Instruction::JumpI { .. }));
+    // Label .0 has id 0, fits in u8 -> JumpI1 narrow form.
+    assert!(matches!(instrs[1], Instruction::JumpI1 { .. }));
     assert_eq!(instrs[2], Instruction::Push1 { val: [42] });
     assert_eq!(instrs[3], Instruction::Halt {});
 }
@@ -264,7 +265,7 @@ fn mixed_case_produces_same_bytecode_as_uppercase() {
 #[test]
 fn case_insensitive_jump_mnemonics() {
     let instrs = asm("jump .0\nnop\n.0:\nhalt");
-    assert_eq!(instrs[0], Instruction::Jump { label: 0 });
+    assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Halt {});
 }

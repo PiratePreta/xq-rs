@@ -59,9 +59,9 @@ macro_rules! opcodes {
              {}),
             (0x01, Target,  "TARGET",   "Mark a valid jump destination.",
              {}),
-            (0x02, Jump,    "JUMP",     "Unconditionally jump to a basic block by label index.",
+            (0x02, Jump2,   "JUMP2",    "Unconditionally jump to a basic block by u16 label index (wide form).",
              {label: u16}),
-            (0x03, JumpI,   "JUMPI",    "Jump to a basic block by label index if the top of the stack is non-zero.",
+            (0x03, JumpI2,  "JUMPI2",   "Jump to a basic block by u16 label index if the top of the stack is non-zero (wide form).",
              {label: u16}),
             (0x04, Next,    "NEXT",     "Advance the loop index; jump back or exit the current loop.",
              {}),
@@ -266,6 +266,16 @@ macro_rules! opcodes {
              {reg: $crate::Register}),
             (0x7F, Energy,  "ENERGY",   "Compute the Hamiltonian energy of a sample against a model; push the result.",
              {model: $crate::Register, sample: $crate::Register}),
+            // ---------------------------------------------------------------
+            // JUMP / JUMPI narrow encodings (u8 label index)
+            //
+            // Placed at 0x80/0x81 as a temporary slot until the umbrella
+            // control-flow opcode realignment moves them next to JUMP2/JUMPI2.
+            // ---------------------------------------------------------------
+            (0x80, Jump1,   "JUMP1",    "Unconditionally jump to a basic block by u8 label index (narrow form).",
+             {label: u8}),
+            (0x81, JumpI1,  "JUMPI1",   "Jump to a basic block by u8 label index if the top of the stack is non-zero (narrow form).",
+             {label: u8}),
         }
     };
 }

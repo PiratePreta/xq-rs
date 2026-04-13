@@ -299,19 +299,33 @@ impl InstructionBuilder {
     // Control flow (jump instructions use labels, not raw indices)
     // -----------------------------------------------------------------------
 
-    /// Emit a `JUMP` instruction targeting `label`.
+    /// Emit a `JUMP` instruction targeting `label`, auto-selecting the
+    /// narrowest encoding that can represent the label index.
     ///
-    /// The `u16` label index is filled in during [`build`](Self::build).
+    /// Labels with `id < 256` use the `JUMP1` (u8) encoding (2 bytes); larger
+    /// label IDs use `JUMP2` (u16, 3 bytes). The label index is filled in
+    /// during [`build`](Self::build); the placeholder bytes written here are
+    /// overwritten with the resolved index.
     pub fn jump(&mut self, label: LabelId) -> &mut Self {
-        self.emit_with_fixup(Instruction::Jump { label: u16::MAX }, label)
+        if label.0 < usize::from(u8::MAX) + 1 {
+            self.emit_with_fixup(Instruction::Jump1 { label: u8::MAX }, label)
+        } else {
+            self.emit_with_fixup(Instruction::Jump2 { label: u16::MAX }, label)
+        }
     }
 
-    /// Emit a `JUMPI` instruction targeting `label`.
+    /// Emit a `JUMPI` instruction targeting `label`, auto-selecting the
+    /// narrowest encoding that can represent the label index.
     ///
-    /// Jumps if the top of the stack is non-zero. The `u16` label index is
-    /// filled in during [`build`](Self::build).
+    /// Labels with `id < 256` use the `JUMPI1` (u8) encoding; larger label
+    /// IDs use `JUMPI2` (u16). Pops the top of the stack and jumps if the
+    /// value is non-zero.
     pub fn jump_if(&mut self, label: LabelId) -> &mut Self {
-        self.emit_with_fixup(Instruction::JumpI { label: u16::MAX }, label)
+        if label.0 < usize::from(u8::MAX) + 1 {
+            self.emit_with_fixup(Instruction::JumpI1 { label: u8::MAX }, label)
+        } else {
+            self.emit_with_fixup(Instruction::JumpI2 { label: u16::MAX }, label)
+        }
     }
 
     fn emit_with_fixup(&mut self, instr: Instruction, label: LabelId) -> &mut Self {
@@ -445,12 +459,36 @@ impl InstructionBuilder {
         }
         let jump_table = JumpTable::new(entries);
 
-        // 4. Patch fixups: write u16 label index into the instruction bytes.
+        // 4. Patch fixups: write the label index into the instruction bytes
+        //    using the correct width (`u8` for `JUMP1`/`JUMPI1`, `u16` for
+        //    `JUMP2`/`JUMPI2`). The narrow form is selected up-front by
+        //    `jump`/`jump_if` based on `label.0 < 256`, so the `u8::try_from`
+        //    conversions below cannot fail at runtime.
         for fixup in &self.fixups {
-            let label_idx = fixup.label.0 as u16;
+            let label_idx_u16 = fixup.label.0 as u16;
             let instr = match fixup.opcode {
-                Opcode::Jump => Instruction::Jump { label: label_idx },
-                Opcode::JumpI => Instruction::JumpI { label: label_idx },
+                Opcode::Jump1 => Instruction::Jump1 {
+                    label: u8::try_from(fixup.label.0).unwrap_or_else(|_| {
+                        unreachable!(
+                            "jump/jump_if only emits Jump1 for label.0 < 256, got {}",
+                            fixup.label.0
+                        )
+                    }),
+                },
+                Opcode::Jump2 => Instruction::Jump2 {
+                    label: label_idx_u16,
+                },
+                Opcode::JumpI1 => Instruction::JumpI1 {
+                    label: u8::try_from(fixup.label.0).unwrap_or_else(|_| {
+                        unreachable!(
+                            "jump/jump_if only emits JumpI1 for label.0 < 256, got {}",
+                            fixup.label.0
+                        )
+                    }),
+                },
+                Opcode::JumpI2 => Instruction::JumpI2 {
+                    label: label_idx_u16,
+                },
                 _ => unreachable!("fixups are emitted only for jumps"),
             };
             let encoded = codec::encode(&instr);
@@ -593,7 +631,7 @@ mod tests {
 
     #[test]
     fn backward_jump_resolves_correctly() {
-        // Push1 (2 bytes) at 0; JUMPI (3 bytes) at 2; target label = 0.
+        // Push1 (2 bytes) at 0; JUMPI1 (2 bytes) at 2; target label = 0.
         let mut b = InstructionBuilder::new();
         let top = b.label();
         b.place(top).push(0).jump_if(top);
@@ -601,7 +639,8 @@ mod tests {
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
         assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
-        assert_eq!(instrs[1], Instruction::JumpI { label: 0 });
+        // Label id 0 fits in u8 -> JumpI1 narrow form.
+        assert_eq!(instrs[1], Instruction::JumpI1 { label: 0 });
 
         // Jump table entry for label 0 starts at byte 0.
         let entry = program.jump_table().get(0).unwrap();
@@ -610,22 +649,23 @@ mod tests {
 
     #[test]
     fn forward_jump_resolves_correctly() {
-        // JUMP (3 bytes) at 0; NOP (1 byte) at 3; HALT (1 byte) at 4.
-        // jump target = label 0, placed at offset 4.
+        // JUMP1 (2 bytes) at 0; NOP (1 byte) at 2; HALT (1 byte) at 3.
+        // jump target = label 0, placed at offset 3.
         let mut b = InstructionBuilder::new();
         let done = b.label();
         b.jump(done).nop().place(done).halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[0], Instruction::Jump { label: 0 });
+        // Label id 0 fits in u8 -> Jump1 narrow form.
+        assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Halt {});
 
-        // Jump table entry for label 0 starts at byte 4, ends at 5.
+        // Jump table entry for label 0 starts at byte 3, ends at 4.
         let entry = program.jump_table().get(0).unwrap();
-        assert_eq!(entry.start, 4);
-        assert_eq!(entry.end, 5);
+        assert_eq!(entry.start, 3);
+        assert_eq!(entry.end, 4);
     }
 
     #[test]
@@ -644,9 +684,44 @@ mod tests {
         assert_eq!(*instrs.last().unwrap(), Instruction::Halt {});
         assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
         assert_eq!(instrs[2], Instruction::Push1 { val: [0x00] });
-        assert!(matches!(instrs[1], Instruction::JumpI { label: 0 }));
-        assert!(matches!(instrs[3], Instruction::JumpI { label: 0 }));
+        // Label id 0 fits in u8 -> both jumps use the JumpI1 narrow form.
+        assert!(matches!(instrs[1], Instruction::JumpI1 { label: 0 }));
+        assert!(matches!(instrs[3], Instruction::JumpI1 { label: 0 }));
         assert_eq!(instrs[4], Instruction::Halt {});
+    }
+
+    #[test]
+    fn jump_uses_wide_form_for_label_id_above_255() {
+        // Allocate 257 labels so the last one has id 256, which does not
+        // fit in u8. The corresponding `jump`/`jump_if` should pick the
+        // wide `Jump2`/`JumpI2` encoding.
+        let mut b = InstructionBuilder::new();
+        let mut labels = Vec::with_capacity(257);
+        for _ in 0..257 {
+            labels.push(b.label());
+        }
+        let target = *labels.last().unwrap();
+        b.jump(target).place(target).halt();
+
+        let program = b.build().unwrap();
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::Jump2 { label: 256 });
+        assert_eq!(instrs[1], Instruction::Halt {});
+    }
+
+    #[test]
+    fn jump_if_uses_wide_form_for_label_id_above_255() {
+        let mut b = InstructionBuilder::new();
+        let mut labels = Vec::with_capacity(257);
+        for _ in 0..257 {
+            labels.push(b.label());
+        }
+        let target = *labels.last().unwrap();
+        b.push(1).jump_if(target).place(target).halt();
+
+        let program = b.build().unwrap();
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[1], Instruction::JumpI2 { label: 256 });
     }
 
     #[test]
@@ -726,11 +801,11 @@ mod tests {
         let program = b.build().unwrap();
         let e0 = program.jump_table().get(0).unwrap();
         let e1 = program.jump_table().get(1).unwrap();
-        // .0 block: NOP (1 byte) + JUMP (3 bytes) = 4 bytes starting at 0.
+        // .0 block: NOP (1 byte) + JUMP1 (2 bytes) = 3 bytes starting at 0.
         assert_eq!(e0.start, 0);
-        assert_eq!(e0.end, 4);
-        // .1 block: HALT (1 byte) starting at 4.
-        assert_eq!(e1.start, 4);
-        assert_eq!(e1.end, 5);
+        assert_eq!(e0.end, 3);
+        // .1 block: HALT (1 byte) starting at 3.
+        assert_eq!(e1.start, 3);
+        assert_eq!(e1.end, 4);
     }
 }

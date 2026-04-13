@@ -53,8 +53,8 @@ All other byte values outside the assigned ranges are likewise illegal.
 |------|----------|----------|---------------------|
 | `0x00` | `NOP` | [Control Flow](control-flow.md) | No operation |
 | `0x01` | `TARGET` | [Control Flow](control-flow.md) | Mark valid jump destination |
-| `0x02` | `JUMP` | [Control Flow](control-flow.md) | Unconditional jump by label |
-| `0x03` | `JUMPI` | [Control Flow](control-flow.md) | Conditional jump (if non-zero) |
+| `0x02` | `JUMP2` | [Control Flow](control-flow.md) | Unconditional jump by u16 label (wide form) |
+| `0x03` | `JUMPI2` | [Control Flow](control-flow.md) | Conditional jump (if non-zero) by u16 label (wide form) |
 | `0x04` | `NEXT` | [Control Flow](control-flow.md) | Advance loop; jump back or exit |
 | `0x05` | `LVAL` | [Control Flow](control-flow.md) | Copy loop value to register |
 | `0x06` | `RANGE` | [Control Flow](control-flow.md) | Start range loop |
@@ -129,3 +129,5 @@ All other byte values outside the assigned ranges are likewise illegal.
 | `0x72` | `EXCLUDE` | [Constraints](constraints.md) | Mutual exclusion |
 | `0x73` | `IMPLIES` | [Constraints](constraints.md) | Implication constraint |
 | `0x7F` | `ENERGY` | [Energy](energy.md) | Evaluate Hamiltonian |
+| `0x80` | `JUMP1` | [Control Flow](control-flow.md) | Unconditional jump by u8 label (narrow form) |
+| `0x81` | `JUMPI1` | [Control Flow](control-flow.md) | Conditional jump (if non-zero) by u8 label (narrow form) |

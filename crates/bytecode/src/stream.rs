@@ -406,10 +406,10 @@ mod tests {
 
     #[test]
     fn jump_table_labels_are_assigned() {
-        // Build byte buffer: PushC1 (2 bytes) + Jump (3 bytes) + Halt (1 byte)
+        // Build byte buffer: Push1 (2 bytes) + Jump2 (3 bytes) + Halt (1 byte)
         let buf = assemble(&[
             Instruction::Push1 { val: [3] },
-            Instruction::Jump { label: 0 },
+            Instruction::Jump2 { label: 0 },
             Instruction::Halt {},
         ]);
         let table = JumpTable::new(vec![JumpEntry {
@@ -474,10 +474,10 @@ mod tests {
 
     #[test]
     fn seek_back_simulates_jump() {
-        // PushC1 { val: [3] } at offset 0 (2 bytes), Jump to label 0 at offset 2 (3 bytes).
+        // Push1 { val: [3] } at offset 0 (2 bytes), Jump2 to label 0 at offset 2 (3 bytes).
         let buf = assemble(&[
             Instruction::Push1 { val: [3] },
-            Instruction::Jump { label: 0 },
+            Instruction::Jump2 { label: 0 },
         ]);
         let table = JumpTable::new(vec![JumpEntry {
             label: 0,
@@ -490,10 +490,10 @@ mod tests {
         let (_, _, jump) = stream.next_instruction().unwrap().unwrap();
 
         // Look up the target from the jump table.
-        let target = if let Instruction::Jump { label } = jump {
+        let target = if let Instruction::Jump2 { label } = jump {
             table.get(label).unwrap().start as usize
         } else {
-            panic!("expected Jump");
+            panic!("expected Jump2");
         };
 
         stream.seek(target).unwrap();

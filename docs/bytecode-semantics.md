@@ -57,8 +57,8 @@ Each register holds one variant:
 |------|----------|-----------|--------------|-----------------|----------------|
 | `0x00` | `NOP` | — | `[...] → [...]` | — | No operation. |
 | `0x01` | `TARGET` | — | `[...] → [...]` | — | Mark a valid jump destination. Required at every label that `JUMP`/`JUMPI` may target; treated as `NOP` at runtime. |
-| `0x02` | `JUMP` | `label: u16` | `[...] → [...]` | — | Seek the instruction stream to `jump_table[label].start`. Unconditional. |
-| `0x03` | `JUMPI` | `label: u16` | `[..., cond] → [...]` | — | Pop `cond`. If `cond != 0`, seek to `jump_table[label].start`; otherwise fall through. |
+| `0x02` | `JUMP2` | `label: u16` | `[...] → [...]` | — | Seek the instruction stream to `jump_table[label].start`. Unconditional. Wide form (`u16` label index). |
+| `0x03` | `JUMPI2` | `label: u16` | `[..., cond] → [...]` | — | Pop `cond`. If `cond != 0`, seek to `jump_table[label].start`; otherwise fall through. Wide form (`u16` label index). |
 | `0x04` | `NEXT` | — | `[...] → [...]` | — | Advance the active loop frame. For `Range`: increment `current`; if `current < end`, seek to `body_start`, else pop frame and fall through. For `Iter`: increment `index`; if `index < len(reg)`, seek to `body_start`, else pop frame and fall through. Errors if no loop frame is active. |
 | `0x05` | `LVAL` | `reg: Register` | `[...] → [...]` | `write` — `reg ← Int(current)` for Range; `reg ← VecInt[index]` or `reg ← VecXqmx[index]` for Iter | Copy the current loop value into `reg`. For `Range`: `reg ← Int(current)`. For `Iter`: `reg ← vec[index]` (element type preserved: `Int` or `Model`). |
 | `0x06` | `RANGE` | — | `[..., start, count] → [...]` | — | Pop `count`, then `start`. Push a `Range { current: start, end: start.wrapping_add(count) }` loop frame; the next instruction's byte offset becomes `body_start`. |
@@ -348,6 +348,17 @@ E = Σᵢ linear[i] * x[i]  +  Σ_{i<j} quad[i,j] * x[i] * x[j]
 Push the result as `i64`. Errors with `SizeMismatch` if `len(sample) != model.size`.
 
 `ENERGY` is the only instruction with two register operands.
+
+---
+
+## Narrow JUMP / JUMPI Encodings
+
+| Code | Mnemonic | Operands | Stack effect | Description |
+|------|----------|----------|--------------|-------------|
+| `0x80` | `JUMP1` | `label: u8` | `[...] → [...]` | Same semantics as `JUMP2` (`0x02`) but uses a single-byte `u8` label index. The assembler emits this whenever the label id fits in `u8` (id `< 256`) so the wire encoding is one byte shorter at each call site. |
+| `0x81` | `JUMPI1` | `label: u8` | `[..., cond] → [...]` | Same semantics as `JUMPI2` (`0x03`) but with a `u8` label index. |
+
+The assembly source spells these as `JUMP .N` / `JUMPI .N`; the assembler picks the narrow or wide encoding based on the label id and is transparent to authors. Disassembled output prints the explicit form (`JUMP1`, `JUMP2`, `JUMPI1`, `JUMPI2`) so the round-tripped source preserves the exact wire encoding.
 
 ---
 
