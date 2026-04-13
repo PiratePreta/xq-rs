@@ -63,6 +63,7 @@ Each register holds one variant:
 | `0x05` | `LVAL` | `reg: Register` | `[...] → [...]` | `write` — `reg ← Int(current)` for Range; `reg ← VecInt[index]` or `reg ← VecXqmx[index]` for Iter | Copy the current loop value into `reg`. For `Range`: `reg ← Int(current)`. For `Iter`: `reg ← vec[index]` (element type preserved: `Int` or `Model`). |
 | `0x06` | `RANGE` | — | `[..., start, count] → [...]` | — | Pop `count`, then `start`. Push a `Range { current: start, end: start.wrapping_add(count) }` loop frame; the next instruction's byte offset becomes `body_start`. |
 | `0x07` | `ITER` | `reg: Register` | `[...] → [...]` | `read` — validates `reg` holds `VecInt` or `VecXqmx` | Validate that `reg` holds a `VecInt` or `VecXqmx`; push an `Iter { reg, index: 0 }` loop frame. The next instruction's byte offset becomes `body_start`. |
+| `0x08` | `LIDX` | `reg: Register` | `[...] → [...]` | `write` — `reg ← Int(current)` for Range; `reg ← Int(index)` for Iter | Copy the current loop *index* into `reg` as `Int`. For `Range` the values are themselves indices, so this is identical to `LVAL`. For `Iter` it returns the position of the current element within the iterated vec. Errors with `NoActiveLoop` if no loop frame is active. |
 | `0x09` | `HALT` | — | `[...] → [...]` | — | Stop execution immediately. |
 
 ---

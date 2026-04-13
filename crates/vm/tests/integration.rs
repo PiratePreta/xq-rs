@@ -476,6 +476,73 @@ fn iter_loop_over_vec_int() {
     assert_eq!(vm.stack(), &[60]);
 }
 
+#[test]
+fn lidx_in_range_loop_returns_current_value() {
+    // Iterate 5..8 and capture LIDX into r0 each step. The first iteration
+    // is observable on the stack via LOAD r0 before NEXT runs.
+    let vm = run(|b| {
+        b.push(5).push(3).range();
+        b.lidx(Register(0));
+        b.load(Register(0));
+        b.next();
+        b.halt();
+    });
+    // Stack accumulates the LIDX values for each iteration in order.
+    assert_eq!(vm.stack(), &[5, 6, 7]);
+}
+
+#[test]
+fn lidx_matches_lval_in_range_loop() {
+    // For RANGE loops the spec says LIDX is equivalent to LVAL because the
+    // loop values are themselves indices. Verify by capturing both and
+    // comparing.
+    let vm = run(|b| {
+        b.push(10).push(3).range();
+        b.lidx(Register(0));
+        b.l_val(Register(1));
+        b.load(Register(0));
+        b.load(Register(1));
+        b.next();
+        b.halt();
+    });
+    // Each iteration pushes [LIDX, LVAL]; the identity holds for every
+    // iteration in [10, 11, 12].
+    assert_eq!(vm.stack(), &[10, 10, 11, 11, 12, 12]);
+}
+
+#[test]
+fn lidx_in_iter_loop_returns_position() {
+    // For ITER loops LIDX returns the current position within the iterated
+    // vec. ITER does not yet support slicing in xq-rs (QUI-407), so the
+    // position is the raw vec index 0..len.
+    let vm = run(|b| {
+        b.vec_i(Register(0));
+        b.push(100).vec_push(Register(0));
+        b.push(200).vec_push(Register(0));
+        b.push(300).vec_push(Register(0));
+        b.iter(Register(0));
+        b.lidx(Register(1));
+        b.load(Register(1));
+        b.next();
+        b.halt();
+    });
+    assert_eq!(vm.stack(), &[0, 1, 2]);
+}
+
+#[test]
+fn lidx_outside_loop_errors() {
+    // No active loop -> LIDX must surface NoActiveLoop, mirroring how
+    // LVAL/NEXT behave.
+    let err = run_err(|b| {
+        b.lidx(Register(0));
+        b.halt();
+    });
+    assert!(
+        matches!(err, Error::NoActiveLoop { .. }),
+        "expected NoActiveLoop, got {err:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // VEC/VECI operations
 // ---------------------------------------------------------------------------

@@ -505,14 +505,14 @@ mod tests {
 
     #[test]
     fn unknown_opcode_returns_error_and_advances() {
-        let buf = [0x08u8, Instruction::Halt {}.opcode() as u8];
+        let buf = [0x0Du8, Instruction::Halt {}.opcode() as u8];
         let mut stream = InstructionStream::new(&buf);
 
         assert_eq!(
             stream.next_instruction(),
             Some(Err(Error::UnknownOpcode {
                 offset: 0,
-                byte: 0x08
+                byte: 0x0D,
             })),
         );
         assert_eq!(
