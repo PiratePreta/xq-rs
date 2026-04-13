@@ -221,6 +221,18 @@ pub enum AssembleError {
         #[label("unused label")]
         span: SourceSpan,
     },
+
+    /// The program contains more than `u16::MAX + 1` labels (`TARGET`s),
+    /// which exceeds the wire-format limit on sequential target ids.
+    #[error("too many TARGETs: {count} (max {})", u16::MAX as usize + 1)]
+    #[diagnostic(code(xqasm::too_many_targets))]
+    TooManyTargets {
+        /// Total number of placed labels in the program.
+        count: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+    },
 }
 
 // ---------------------------------------------------------------------------

@@ -367,6 +367,10 @@ fn convert_build_error(
                 span: make_span(0, label_str.len()),
             }
         }
+        BuilderError::TooManyTargets { count } => AssembleError::TooManyTargets {
+            count,
+            src: make_src(src),
+        },
     }
 }
 
@@ -638,42 +642,39 @@ mod tests {
     fn forward_jump_label() {
         // After QUI-404, the `.0:` label compiles to an inline TARGET
         // followed by the next user instruction:
-        //   JUMP1 .0  (2 bytes at site 0: Jump1 + u8)
-        //   NOP       (1 byte  at site 2)
+        //   JUMP2 .0  (3 bytes at site 0: always wide after QUI-405)
+        //   NOP       (1 byte  at site 3)
         //   .0:
-        //   TARGET    (1 byte  at site 3, emitted by place())
-        //   HALT      (1 byte  at site 4)
-        // Jump table entry for .0 starts at byte 3 (the TARGET).
+        //   TARGET    (1 byte  at site 4, emitted by place())
+        //   HALT      (1 byte  at site 5)
         let src = "JUMP .0\nNOP\n.0:\nHALT";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
-        // Label .0 has id 0, fits in u8 -> assembler picks the narrow Jump1 form.
-        assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
+        assert_eq!(instrs[0], Instruction::Jump2 { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Target {});
         assert_eq!(instrs[3], Instruction::Halt {});
-        assert_eq!(program.jump_table().get(0).unwrap().start, 3);
+        // Sequential id 0 -> the first (and only) TARGET at byte 4.
+        assert_eq!(program.jump_table().get(0), Some(4));
     }
 
     #[test]
     fn backward_jumpi_label() {
-        // After QUI-404, the leading `.0:` becomes an inline TARGET:
+        // After QUI-404 + QUI-405:
         //   .0:
         //   TARGET    (1 byte  at 0, emitted by place())
-        //   PUSH -1   (2 bytes at 1: Push1 0xFF)
+        //   PUSH -1   (2 bytes at 1)
         //   ADD       (1 byte  at 3)
         //   COPY      (1 byte  at 4)
-        //   JUMPI1 .0 (2 bytes at 5)
+        //   JUMPI2 .0 (3 bytes at 5)
         let src = ".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
         assert_eq!(instrs[0], Instruction::Target {});
-        // Label .0 has id 0, fits in u8 -> JumpI1 narrow form.
-        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI1 { label: 0 });
-        // Jump table entry for .0 starts at byte 0 (the TARGET).
-        assert_eq!(program.jump_table().get(0).unwrap().start, 0);
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI2 { label: 0 });
+        assert_eq!(program.jump_table().get(0), Some(0));
     }
 
     #[test]
@@ -692,11 +693,11 @@ mod tests {
         // source must work and resolve cleanly.
         let program = assemble_source("TARGET .0\nNOP\nJUMP .0").expect("forward TARGET");
         let instrs = decode_all(program.code());
-        // Layout: TARGET (1) + NOP (1) + Jump1 (2)
+        // Layout: TARGET (1) + NOP (1) + Jump2 (3)
         assert_eq!(instrs[0], Instruction::Target {});
         assert_eq!(instrs[1], Instruction::Nop {});
-        assert_eq!(instrs[2], Instruction::Jump1 { label: 0 });
-        assert_eq!(program.jump_table().get(0).unwrap().start, 0);
+        assert_eq!(instrs[2], Instruction::Jump2 { label: 0 });
+        assert_eq!(program.jump_table().get(0), Some(0));
     }
 
     #[test]
@@ -720,14 +721,17 @@ mod tests {
     #[test]
     fn bare_target_emits_raw_opcode_without_label_binding() {
         // `TARGET` with no operand is the existing zero-arg form: it emits
-        // a Target opcode but does NOT place any label. This is mostly
-        // useful for raw bytecode construction; user-facing programs should
-        // prefer `.N:` or `TARGET .N`.
+        // a Target opcode but does NOT bind a source-level label. After
+        // QUI-405 every TARGET in the stream still ends up in the runtime
+        // jump table (the runtime scan does not distinguish labelled from
+        // unlabelled TARGETs), but no label name is associated with it in
+        // the assembler's symbol table.
         let program = assemble_source("TARGET\nHALT").expect("bare TARGET");
         let instrs = decode_all(program.code());
         assert_eq!(instrs[0], Instruction::Target {});
         assert_eq!(instrs[1], Instruction::Halt {});
-        assert_eq!(program.jump_table().len(), 0);
+        assert_eq!(program.jump_table().len(), 1);
+        assert_eq!(program.jump_table().get(0), Some(0));
     }
 
     #[test]

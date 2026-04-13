@@ -360,7 +360,7 @@ impl fmt::Display for Disassembly<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aglais_xqvm_bytecode::{Instruction, JumpEntry, JumpTable, Program, Register, codec};
+    use aglais_xqvm_bytecode::{Instruction, JumpTable, Program, Register, codec};
 
     fn assemble(program: &[Instruction]) -> Vec<u8> {
         program.iter().flat_map(codec::encode).collect()
@@ -393,21 +393,16 @@ mod tests {
 
     #[test]
     fn backward_jump_gets_label() {
-        // Build a program with a jump table entry for label .0 at offset 0.
-        // Labels < 256 use the narrow JUMPI1 encoding.
+        // TARGET at offset 0 + body + JUMPI1 0 + HALT. After QUI-405 the
+        // jump table is built by scanning the buffer for TARGET opcodes.
         let code = assemble(&[
+            Instruction::Target {},
             Instruction::Push1 { val: [5] },
             Instruction::Gt {},
             Instruction::JumpI1 { label: 0u8 },
             Instruction::Halt {},
         ]);
-        let code_len = code.len() as u32;
-        let table = JumpTable::new(vec![JumpEntry {
-            label: 0,
-            start: 0,
-            end: code_len,
-        }]);
-        let program = Program::new_with_table(table, code);
+        let program = Program::new(code);
         let text = Disassembly::from_program(&program).to_string();
         assert!(text.contains(".0:"), "missing label .0 in:\n{text}");
         assert!(
@@ -418,18 +413,14 @@ mod tests {
 
     #[test]
     fn forward_jump_gets_label() {
-        // JUMP1 label .0; NOP; HALT. Label .0 points at HALT (offset 3).
+        // JUMP1 .0 at offset 0; NOP; TARGET (the label) at offset 3; HALT.
         let code = assemble(&[
             Instruction::Jump1 { label: 0u8 },
             Instruction::Nop {},
+            Instruction::Target {},
             Instruction::Halt {},
         ]);
-        let table = JumpTable::new(vec![JumpEntry {
-            label: 0,
-            start: 3,
-            end: code.len() as u32,
-        }]);
-        let program = Program::new_with_table(table, code);
+        let program = Program::new(code);
         let text = Disassembly::from_program(&program).to_string();
         assert!(text.contains(".0:"), "missing label in:\n{text}");
         assert!(
@@ -440,26 +431,18 @@ mod tests {
 
     #[test]
     fn two_distinct_labels_appear() {
-        // Two labels: .0 at offset 0, .1 at the HALT.
+        // Two TARGETs in the stream -> sequential ids 0 and 1.
         let code = assemble(&[
+            Instruction::Target {},
             Instruction::JumpI1 { label: 0u8 },
             Instruction::Jump1 { label: 1u8 },
+            Instruction::Target {},
             Instruction::Halt {},
         ]);
-        let halt_offset = code.len() as u32 - 1;
-        let table = JumpTable::new(vec![
-            JumpEntry {
-                label: 0,
-                start: 0,
-                end: 3,
-            },
-            JumpEntry {
-                label: 1,
-                start: halt_offset,
-                end: code.len() as u32,
-            },
-        ]);
-        let program = Program::new_with_table(table, code);
+        let program = Program::new(code);
+        // Sanity: the scan found both TARGETs.
+        assert_eq!(program.jump_table().len(), 2);
+        let _ = JumpTable::default(); // keep import live
         let text = Disassembly::from_program(&program).to_string();
         assert!(text.contains(".0:"), "missing .0 in:\n{text}");
         assert!(text.contains(".1:"), "missing .1 in:\n{text}");

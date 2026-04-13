@@ -440,8 +440,8 @@ impl Vm {
                 StepResult::Continue => {}
                 StepResult::Halt => break,
                 StepResult::Jump(label) => {
-                    let entry = table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
-                    stream.seek(entry.start as usize).map_err(Error::from)?;
+                    let target = table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
+                    stream.seek(target).map_err(Error::from)?;
                 }
                 StepResult::Seek(target) => {
                     stream.seek(target).map_err(Error::from)?;

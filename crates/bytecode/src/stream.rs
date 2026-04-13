@@ -171,12 +171,15 @@ impl<'a> InstructionStream<'a> {
 
     /// Create a stream with labels derived from a [`JumpTable`].
     ///
-    /// Each entry's start offset maps to `.{label}` in the label map.
+    /// Each `TARGET` byte offset is mapped to `.{seq_id}` in the label map,
+    /// where `seq_id` is the sequential id of that `TARGET` in stream order
+    /// (the same id that `JUMP`/`JUMPI` operands reference).
     pub fn with_jump_table(bytes: &'a [u8], table: &JumpTable) -> Self {
         let labels = table
-            .entries()
+            .targets()
             .iter()
-            .map(|e| (e.start as usize, format!(".{}", e.label)))
+            .enumerate()
+            .map(|(seq_id, &offset)| (offset, format!(".{seq_id}")))
             .collect();
         Self {
             bytes,
@@ -349,7 +352,6 @@ fn map_decode_error(_err: oxicode::Error, offset: usize, byte: u8) -> Error {
 #[allow(unused_results, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use crate::jump_table::JumpEntry;
     use crate::types::{Instruction, Register};
 
     fn assemble(program: &[Instruction]) -> Vec<u8> {
@@ -412,11 +414,10 @@ mod tests {
             Instruction::Jump2 { label: 0 },
             Instruction::Halt {},
         ]);
-        let table = JumpTable::new(vec![JumpEntry {
-            label: 0,
-            start: 5, // Halt at offset 5
-            end: 6,
-        }]);
+        // Hand-construct a jump table with the HALT at byte 5 marked as
+        // sequential id 0 (rather than calling JumpTable::scan which would
+        // find no TARGETs in this buffer).
+        let table = JumpTable::new(vec![5]);
         let mut stream = InstructionStream::with_jump_table(&buf, &table);
 
         let (_, label0, _) = stream.next_instruction().unwrap().unwrap();
@@ -479,11 +480,9 @@ mod tests {
             Instruction::Push1 { val: [3] },
             Instruction::Jump2 { label: 0 },
         ]);
-        let table = JumpTable::new(vec![JumpEntry {
-            label: 0,
-            start: 0,
-            end: 2,
-        }]);
+        // Treat the Push1 byte (offset 0) as the synthetic TARGET id 0 so
+        // the jump label resolves back to it.
+        let table = JumpTable::new(vec![0]);
         let mut stream = InstructionStream::with_jump_table(&buf, &table);
 
         let (_, _, _push) = stream.next_instruction().unwrap().unwrap();
@@ -491,7 +490,7 @@ mod tests {
 
         // Look up the target from the jump table.
         let target = if let Instruction::Jump2 { label } = jump {
-            table.get(label).unwrap().start as usize
+            table.get(label).unwrap()
         } else {
             panic!("expected Jump2");
         };

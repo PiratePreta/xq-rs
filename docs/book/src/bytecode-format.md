@@ -107,19 +107,16 @@ Consider this program:
 
 ### Encoded Bytes
 
-**Jump table** (12 bytes):
-```
-00 01           ; entry_count = 1
-00 00           ; label = 0
-00 00 00 00     ; start = 0
-00 00 00 04     ; end = 4
-```
+After QUI-405 the wire format is just the instruction stream -- no jump
+table header. The runtime scans for `TARGET` opcodes when the program is
+loaded and assigns each one a sequential id (0, 1, 2, ...) which `JUMP` /
+`JUMPI` operands reference.
 
-**Instruction stream** (4 bytes):
+**Instruction stream** (5 bytes):
 ```
-01              ; TARGET (0x01)
+01              ; TARGET (0x01) -- becomes runtime target id 0
 11 2A           ; PUSH1 42 (0x11, 0x2A)
-80 00           ; JUMP1 .0 (0x80, 0x00) -- assembler picks the narrow form because label id 0 fits in u8
+02 00 00        ; JUMP2 .0 (0x02, 0x00, 0x00) -- wide form, references target id 0
 ```
 
-**Total program:** 16 bytes.
+**Total program:** 5 bytes (down from 16 -- the 11-byte header is gone).
