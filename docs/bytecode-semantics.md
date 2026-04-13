@@ -174,7 +174,7 @@ uses size `0`.
 |------|----------|-----------|--------------|-----------------|----------------|
 | `0x40` | `BQMX` | `reg: Register` | `[..., size] → [...]` | `write` — `reg ← Model(domain: Binary, size)` | Pop `size`. `reg ← Model(XqmxModel { domain: Binary, size, linear: {}, quad: {} })`. Variable domain: `{0, 1}`. |
 | `0x41` | `SQMX` | `reg: Register` | `[..., size] → [...]` | `write` — `reg ← Model(domain: Spin, size)` | Pop `size`. `reg ← Model(XqmxModel { domain: Spin, size, ... })`. Variable domain: `{-1, 1}`. |
-| `0x42` | `XQMX` | `reg: Register` | `[..., size, k] → [...]` | `write` — `reg ← Model(domain: Discrete(k), size)` | Pop `k`, then `size`. `reg ← Model(XqmxModel { domain: Discrete(k), size, ... })`. Variable domain: `{0, …, k-1}`. |
+| `0x42` | `XQMX` | `reg: Register` | `[..., size, k] → [...]` | `write` — `reg ← Model(domain: Discrete(k), size)` | Pop `k`, then `size`. `reg ← Model(XqmxModel { domain: Discrete(k), size, ... })`. Variable domain: `{-k, -(k-1), …, k-2, k-1}` (signed, centered, chromatic). Errors with `InvalidDiscreteK` when `k < 2`. |
 
 ### Sample Allocators
 
@@ -182,7 +182,7 @@ uses size `0`.
 |------|----------|-----------|--------------|-----------------|----------------|
 | `0x43` | `BSMX` | `reg: Register` | `[..., size] → [...]` | `write` — `reg ← Sample(domain: Binary, values: [0; size])` | Pop `size`. `reg ← Sample(XqmxSample { domain: Binary, values: vec![0; size] })`. |
 | `0x44` | `SSMX` | `reg: Register` | `[..., size] → [...]` | `write` — `reg ← Sample(domain: Spin, values: [-1; size])` | Pop `size`. `reg ← Sample(XqmxSample { domain: Spin, values: vec![-1; size] })`. Default value is `-1` (spin-down). |
-| `0x45` | `XSMX` | `reg: Register` | `[..., size, k] → [...]` | `write` — `reg ← Sample(domain: Discrete(k), values: [0; size])` | Pop `k`, then `size`. `reg ← Sample(XqmxSample { domain: Discrete(k), values: vec![0; size] })`. |
+| `0x45` | `XSMX` | `reg: Register` | `[..., size, k] → [...]` | `write` — `reg ← Sample(domain: Discrete(k), values: [0; size])` | Pop `k`, then `size`. `reg ← Sample(XqmxSample { domain: Discrete(k), values: vec![0; size] })`. Variable domain: `{-k, -(k-1), …, k-2, k-1}` (signed, centered). Errors with `InvalidDiscreteK` when `k < 2`. The default value `0` is always in-domain. |
 
 ### Vec Allocators
 
