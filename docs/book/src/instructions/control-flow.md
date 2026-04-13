@@ -11,8 +11,8 @@ Instructions for branching, looping, and program termination.
 | `0x04` | `NEXT` | -- | \\([\ldots] \to [\ldots]\\) | -- | Advance the active loop frame. For Range: increment current; if \\(\text{current} < \text{end}\\), seek to body start, else pop frame. For Iter: increment index; if \\(\text{index} < \text{len}\\), seek to body start, else pop frame. Errors if no loop frame is active. |
 | `0x05` | `LVAL` | `reg: Register` | \\([\ldots] \to [\ldots]\\) | `write` | Copy the current loop value into `reg`. For Range: \\(\text{reg} \leftarrow \text{Int}(\text{current})\\). For Iter: \\(\text{reg} \leftarrow \text{vec}[\text{index}]\\). |
 | `0x06` | `RANGE` | -- | \\([\ldots, s, n] \to [\ldots]\\) | -- | Pop \\(n\\) (count), then \\(s\\) (start). Push a Range loop frame with \\(\text{current} = s,\; \text{end} = s + n\\). |
-| `0x07` | `ITER` | `reg: Register` | \\([\ldots] \to [\ldots]\\) | `read` | Validate that `reg` holds `VecInt` or `VecXqmx`; push an Iter loop frame with \\(\text{index} = 0\\). |
-| `0x08` | `LIDX` | `reg: Register` | \\([\ldots] \to [\ldots]\\) | `write` | Copy the current loop *index* into `reg` as `Int`. For Range: \\(\text{reg} \leftarrow \text{Int}(\text{current})\\) (equivalent to `LVAL` because Range values are already indices). For Iter: \\(\text{reg} \leftarrow \text{Int}(\text{position in the iterated vec})\\). Errors with `NoActiveLoop` if no loop frame is active. |
+| `0x07` | `ITER` | `reg: Register` | \\([\ldots, s, e] \to [\ldots]\\) | `read` | Pop \\(e\\) (`end_idx`), then \\(s\\) (`start_idx`). Validate that `reg` holds `VecInt` or `VecXqmx`, copy `vec[s..e]` into a new Iter loop frame with \\(\text{start\\_offset} = s\\) and \\(\text{index} = 0\\). The slice is *copied*, so mutations to the source vec inside the loop body do not affect what `LVAL` sees. Errors with `IndexOutOfBounds` if either index is negative, exceeds `vec.len()`, or if `s > e`. |
+| `0x08` | `LIDX` | `reg: Register` | \\([\ldots] \to [\ldots]\\) | `write` | Copy the current loop *index* into `reg` as `Int`. For Range: \\(\text{reg} \leftarrow \text{Int}(\text{current})\\) (equivalent to `LVAL` because Range values are already indices). For Iter: \\(\text{reg} \leftarrow \text{Int}(\text{start\\_offset} + \text{index})\\), i.e. the absolute position inside the *source* vec, not the 0-based slice position. Errors with `NoActiveLoop` if no loop frame is active. |
 | `0x09` | `HALT` | -- | \\([\ldots] \to [\ldots]\\) | -- | Stop execution immediately. |
 
 ## Branching
@@ -47,15 +47,29 @@ NEXT
 
 ### Iterator Loops
 
-`ITER` takes a register holding a `VecInt` or `VecXqmx` and iterates over its
-elements:
+`ITER` takes a register holding a `VecInt` or `VecXqmx` plus two stack
+operands `start_idx` and `end_idx` (with `end_idx` on top), and iterates over
+the half-open slice `vec[start_idx..end_idx]`:
 
 ```asm
+PUSH 0       ; start_idx
+PUSH 4       ; end_idx
 ITER r1      ; r1 must hold a VecInt or VecXqmx
-  LVAL r2    ; r2 = current element
+  LVAL r2    ; r2 = current element (from the slice copy)
+  LIDX r3    ; r3 = absolute position in r1 (start_idx + index)
   ; ... loop body ...
 NEXT
 ```
+
+Both indices must satisfy \\(0 \le \text{start} \le \text{end} \le \text{vec.len()}\\); otherwise
+`ITER` raises `IndexOutOfBounds`. To iterate the entire vec, push
+\\(\text{start} = 0\\) and \\(\text{end} = \text{vec.len()}\\) (use `VECLEN` for
+the latter).
+
+`ITER` *copies* the slice into the loop frame at the time it runs, so
+subsequent in-loop mutations of the source vec via `VECSET`/`VECPUSH` are not
+visible to `LVAL` or `LIDX`. This makes loop bodies safe to mutate the
+register they iterate over.
 
 Loops can be nested. Each `RANGE` or `ITER` pushes a frame onto the loop stack;
 `NEXT` pops the frame when the loop completes.
@@ -70,15 +84,18 @@ overlapping but distinct semantics:
 | Loop kind | `LVAL` | `LIDX` |
 |-----------|--------|--------|
 | `RANGE` | `Int(current)` | `Int(current)` -- identical to `LVAL`, because the values *are* indices |
-| `ITER`  | the vec element at the current index (`Int` or `Model`) | `Int(position in the iterated vec)` |
+| `ITER`  | the slice element at the current index (`Int` or `Model`) | `Int(start_offset + index)` -- the absolute position in the source vec |
 
 Use `LIDX` inside an `ITER` loop when you need to know *where* the current
 element lives in the source vec -- typically for index-based lookups or
-constraint generation:
+constraint generation. With slicing, `LIDX` reports the absolute index in
+the source vec, not the 0-based position within the slice:
 
 ```asm
+PUSH 2       ; iterate r1[2..5]
+PUSH 5
 ITER r1
-  LIDX r2    ; r2 = position in r1 (0, 1, 2, ...)
+  LIDX r2    ; r2 = 2, 3, 4 (absolute position in r1)
   LVAL r3    ; r3 = element value at that position
   ; ... loop body uses both r2 and r3 ...
 NEXT
