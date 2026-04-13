@@ -262,7 +262,19 @@ impl InstructionBuilder {
         LabelId(id)
     }
 
-    /// Anchor `label` to the current write position.
+    /// Anchor `label` to the current write position and emit an inline
+    /// `TARGET` opcode there.
+    ///
+    /// Per `XQVM_SPEC.md`, every jump destination must contain a `TARGET`
+    /// instruction (a no-op at runtime, but required as a validation marker
+    /// so jumps cannot land in the middle of a multi-byte instruction). The
+    /// recorded label position is the byte offset of the `TARGET` opcode
+    /// itself, so `JUMP .N` seeks to the `TARGET` and then falls through to
+    /// the user code that follows.
+    ///
+    /// `place` is the only place that emits `TARGET` automatically; if you
+    /// need a bare `TARGET` (e.g. for direct opcode emission via
+    /// [`emit`](Self::emit)), use `b.target()` instead.
     ///
     /// # Panics
     ///
@@ -279,7 +291,7 @@ impl InstructionBuilder {
             id = label.0,
         );
         *slot = Some(self.buf.len());
-        self
+        self.emit(Instruction::Target {})
     }
 
     // -----------------------------------------------------------------------
@@ -631,26 +643,33 @@ mod tests {
 
     #[test]
     fn backward_jump_resolves_correctly() {
-        // Push1 (2 bytes) at 0; JUMPI1 (2 bytes) at 2; target label = 0.
+        // After QUI-404, place() emits an inline TARGET, so the layout is:
+        //   TARGET   (1 byte at 0)
+        //   Push1    (2 bytes at 1)
+        //   JumpI1   (2 bytes at 3)
         let mut b = InstructionBuilder::new();
         let top = b.label();
         b.place(top).push(0).jump_if(top);
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
+        assert_eq!(instrs[0], Instruction::Target {});
+        assert_eq!(instrs[1], Instruction::Push1 { val: [0x00] });
         // Label id 0 fits in u8 -> JumpI1 narrow form.
-        assert_eq!(instrs[1], Instruction::JumpI1 { label: 0 });
+        assert_eq!(instrs[2], Instruction::JumpI1 { label: 0 });
 
-        // Jump table entry for label 0 starts at byte 0.
+        // Jump table entry for label 0 still starts at byte 0 (the TARGET).
         let entry = program.jump_table().get(0).unwrap();
         assert_eq!(entry.start, 0);
     }
 
     #[test]
     fn forward_jump_resolves_correctly() {
-        // JUMP1 (2 bytes) at 0; NOP (1 byte) at 2; HALT (1 byte) at 3.
-        // jump target = label 0, placed at offset 3.
+        // Layout after QUI-404:
+        //   Jump1    (2 bytes at 0)
+        //   Nop      (1 byte  at 2)
+        //   TARGET   (1 byte  at 3) <- emitted by place()
+        //   Halt     (1 byte  at 4)
         let mut b = InstructionBuilder::new();
         let done = b.label();
         b.jump(done).nop().place(done).halt();
@@ -660,12 +679,14 @@ mod tests {
         // Label id 0 fits in u8 -> Jump1 narrow form.
         assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
-        assert_eq!(instrs[2], Instruction::Halt {});
+        assert_eq!(instrs[2], Instruction::Target {});
+        assert_eq!(instrs[3], Instruction::Halt {});
 
-        // Jump table entry for label 0 starts at byte 3, ends at 4.
+        // Jump table entry for label 0 starts at byte 3 (the TARGET), ends
+        // at the buffer end (5).
         let entry = program.jump_table().get(0).unwrap();
         assert_eq!(entry.start, 3);
-        assert_eq!(entry.end, 4);
+        assert_eq!(entry.end, 5);
     }
 
     #[test]
@@ -681,32 +702,51 @@ mod tests {
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
+        // Layout (post-QUI-404, place() emits TARGET):
+        //   Push1 .. JumpI1 .0 .. Push1 .. JumpI1 .0 .. Target .. Halt
         assert_eq!(*instrs.last().unwrap(), Instruction::Halt {});
         assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
         assert_eq!(instrs[2], Instruction::Push1 { val: [0x00] });
         // Label id 0 fits in u8 -> both jumps use the JumpI1 narrow form.
         assert!(matches!(instrs[1], Instruction::JumpI1 { label: 0 }));
         assert!(matches!(instrs[3], Instruction::JumpI1 { label: 0 }));
-        assert_eq!(instrs[4], Instruction::Halt {});
+        // place() inserts an inline TARGET before HALT.
+        assert_eq!(instrs[4], Instruction::Target {});
+        assert_eq!(instrs[5], Instruction::Halt {});
     }
 
     #[test]
     fn jump_uses_wide_form_for_label_id_above_255() {
         // Allocate 257 labels so the last one has id 256, which does not
         // fit in u8. The corresponding `jump`/`jump_if` should pick the
-        // wide `Jump2`/`JumpI2` encoding.
+        // wide `Jump2`/`JumpI2` encoding. Also verify that place() emits
+        // the inline TARGET marker.
         let mut b = InstructionBuilder::new();
         let mut labels = Vec::with_capacity(257);
         for _ in 0..257 {
             labels.push(b.label());
         }
         let target = *labels.last().unwrap();
+        // Reference every other label so the build() unused-label check
+        // passes; only `target` is actually placed.
+        for label in labels.iter().take(256) {
+            let _ = b.jump(*label);
+        }
         b.jump(target).place(target).halt();
+        // Now place the unreferenced labels too so build() does not error
+        // on UnplacedLabel for the earlier jumps.
+        for label in labels.iter().take(256).copied().collect::<Vec<_>>() {
+            let _ = b.place(label);
+        }
+        b.halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[0], Instruction::Jump2 { label: 256 });
-        assert_eq!(instrs[1], Instruction::Halt {});
+        // The first 256 jumps target labels 0..255, all narrow.
+        assert!(matches!(instrs[0], Instruction::Jump1 { label: 0 }));
+        assert!(matches!(instrs[255], Instruction::Jump1 { label: 255 }));
+        // Jump #257 targets label 256 -> wide form.
+        assert_eq!(instrs[256], Instruction::Jump2 { label: 256 });
     }
 
     #[test]
@@ -717,11 +757,20 @@ mod tests {
             labels.push(b.label());
         }
         let target = *labels.last().unwrap();
+        for label in labels.iter().take(256) {
+            let _ = b.jump_if(*label);
+        }
         b.push(1).jump_if(target).place(target).halt();
+        for label in labels.iter().take(256).copied().collect::<Vec<_>>() {
+            let _ = b.place(label);
+        }
+        b.halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[1], Instruction::JumpI2 { label: 256 });
+        // Jump_if 257 (after the PUSH 1) is the 258th instruction at
+        // index 257; it targets label 256 -> wide form.
+        assert_eq!(instrs[257], Instruction::JumpI2 { label: 256 });
     }
 
     #[test]
@@ -801,11 +850,13 @@ mod tests {
         let program = b.build().unwrap();
         let e0 = program.jump_table().get(0).unwrap();
         let e1 = program.jump_table().get(1).unwrap();
-        // .0 block: NOP (1 byte) + JUMP1 (2 bytes) = 3 bytes starting at 0.
+        // After QUI-404 every place() emits an inline TARGET, so each block
+        // gains one byte at its start.
+        // .0 block: TARGET (1) + NOP (1) + JUMP1 (2) = 4 bytes starting at 0.
         assert_eq!(e0.start, 0);
-        assert_eq!(e0.end, 3);
-        // .1 block: HALT (1 byte) starting at 3.
-        assert_eq!(e1.start, 3);
-        assert_eq!(e1.end, 4);
+        assert_eq!(e0.end, 4);
+        // .1 block: TARGET (1) + HALT (1) = 2 bytes starting at 4.
+        assert_eq!(e1.start, 4);
+        assert_eq!(e1.end, 6);
     }
 }

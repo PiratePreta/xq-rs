@@ -150,6 +150,9 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
                 "PUSH" | "PUSHC" => {
                     assemble_push(instr, &mut b, src)?;
                 }
+                "TARGET" if !instr.operands.is_empty() => {
+                    assemble_target(instr, &mut b, &mut label_map, src)?;
+                }
                 _ => {
                     let _ = b.emit(build_instr(instr, src)?);
                 }
@@ -242,6 +245,67 @@ fn assemble_jump(
         }
     }
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// TARGET .N (label-bearing form)
+// ---------------------------------------------------------------------------
+
+/// Compile `TARGET .N` -- the explicit form of the `.N:` label syntax.
+///
+/// Both spellings resolve to the same builder action (`b.place(label_id)`),
+/// which records the label's byte position and emits an inline `TARGET`
+/// opcode there. A bare `TARGET` (no operand) bypasses this path and emits
+/// a raw `Target` instruction with no label binding -- that's only useful
+/// when manually constructing bytecode where you do not need a corresponding
+/// jump destination. Mixing both spellings for the same label is a
+/// `DuplicateLabel` error, the same as defining `.N:` twice.
+fn assemble_target(
+    instr: &ParsedInstr,
+    b: &mut InstructionBuilder,
+    label_map: &mut LabelMap,
+    src: Source<'_>,
+) -> Result<(), AssembleError> {
+    check_operand_count(instr, 1, src)?;
+
+    let label_idx = match instr
+        .operands
+        .first()
+        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
+    {
+        Operand::LabelRef(idx) => *idx,
+        Operand::Integer(_) | Operand::Register(_) => {
+            return Err(err_wrong_kind(
+                instr,
+                "label",
+                "label reference (e.g. .0)",
+                src,
+            ));
+        }
+    };
+
+    let id = match label_map.entry(label_idx) {
+        Entry::Occupied(e) => {
+            let (id, placed_at) = e.into_mut();
+            if let Some(prev_offset) = *placed_at {
+                return Err(AssembleError::DuplicateLabel {
+                    label: label_idx,
+                    src: make_src(src),
+                    span: make_span(prev_offset, format!(".{label_idx}").len()),
+                });
+            }
+            *placed_at = Some(instr.offset);
+            *id
+        }
+        Entry::Vacant(e) => {
+            let id = b.label();
+            let _ = e.insert((id, Some(instr.offset)));
+            id
+        }
+    };
+
+    let _ = b.place(id);
     Ok(())
 }
 
@@ -514,6 +578,7 @@ opcodes!(impl_build_instr);
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+    use crate::assemble_source;
     use crate::parser::parse;
     use aglais_xqvm_bytecode::{Instruction, InstructionStream};
 
@@ -571,12 +636,14 @@ mod tests {
 
     #[test]
     fn forward_jump_label() {
-        // JUMP .0 (3 bytes at site 0)
-        // JUMP .0   (2 bytes at site 0: Jump1 + u8)
-        // NOP       (1 byte  at site 2)
-        // .0:
-        // HALT      (1 byte  at site 3)
-        // label 0 should be at byte 3
+        // After QUI-404, the `.0:` label compiles to an inline TARGET
+        // followed by the next user instruction:
+        //   JUMP1 .0  (2 bytes at site 0: Jump1 + u8)
+        //   NOP       (1 byte  at site 2)
+        //   .0:
+        //   TARGET    (1 byte  at site 3, emitted by place())
+        //   HALT      (1 byte  at site 4)
+        // Jump table entry for .0 starts at byte 3 (the TARGET).
         let src = "JUMP .0\nNOP\n.0:\nHALT";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
@@ -584,26 +651,83 @@ mod tests {
         // Label .0 has id 0, fits in u8 -> assembler picks the narrow Jump1 form.
         assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
-        assert_eq!(instrs[2], Instruction::Halt {});
-        // Jump table entry for .0 starts at byte 3.
+        assert_eq!(instrs[2], Instruction::Target {});
+        assert_eq!(instrs[3], Instruction::Halt {});
         assert_eq!(program.jump_table().get(0).unwrap().start, 3);
     }
 
     #[test]
     fn backward_jumpi_label() {
-        // .0:
-        // PUSH -1   (2 bytes at 0: Push1 0xFF)
-        // ADD       (1 byte  at 2)
-        // COPY      (1 byte  at 3)
-        // JUMPI .0  (2 bytes at 4: JumpI1 + u8)
+        // After QUI-404, the leading `.0:` becomes an inline TARGET:
+        //   .0:
+        //   TARGET    (1 byte  at 0, emitted by place())
+        //   PUSH -1   (2 bytes at 1: Push1 0xFF)
+        //   ADD       (1 byte  at 3)
+        //   COPY      (1 byte  at 4)
+        //   JUMPI1 .0 (2 bytes at 5)
         let src = ".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::Target {});
         // Label .0 has id 0, fits in u8 -> JumpI1 narrow form.
         assert_eq!(instrs.last().unwrap(), &Instruction::JumpI1 { label: 0 });
-        // Jump table entry for .0 starts at byte 0.
+        // Jump table entry for .0 starts at byte 0 (the TARGET).
         assert_eq!(program.jump_table().get(0).unwrap().start, 0);
+    }
+
+    #[test]
+    fn target_directive_is_sugar_for_label() {
+        // Both `.0:` and `TARGET .0` compile to the same byte sequence:
+        // the `place()` call emits an inline TARGET opcode and records the
+        // jump-table entry. The two forms are interchangeable spellings.
+        let with_label = assemble_source("JUMP .0\n.0:\nHALT").expect("label form");
+        let with_target = assemble_source("JUMP .0\nTARGET .0\nHALT").expect("TARGET form");
+        assert_eq!(with_label.code(), with_target.code());
+    }
+
+    #[test]
+    fn target_directive_with_undefined_label_errors() {
+        // Defining `TARGET .0` and then jumping to it from later in the
+        // source must work and resolve cleanly.
+        let program = assemble_source("TARGET .0\nNOP\nJUMP .0").expect("forward TARGET");
+        let instrs = decode_all(program.code());
+        // Layout: TARGET (1) + NOP (1) + Jump1 (2)
+        assert_eq!(instrs[0], Instruction::Target {});
+        assert_eq!(instrs[1], Instruction::Nop {});
+        assert_eq!(instrs[2], Instruction::Jump1 { label: 0 });
+        assert_eq!(program.jump_table().get(0).unwrap().start, 0);
+    }
+
+    #[test]
+    fn target_directive_duplicate_definition_errors() {
+        // Defining a label twice -- whether via `.N:` or `TARGET .N` --
+        // must surface DuplicateLabel.
+        use crate::Error;
+        let err1 = assemble_source(".0:\nTARGET .0\nHALT").expect_err("duplicate def");
+        assert!(matches!(
+            err1,
+            Error::Assemble(AssembleError::DuplicateLabel { label: 0, .. }),
+        ));
+
+        let err2 = assemble_source("TARGET .0\nTARGET .0\nHALT").expect_err("two TARGETs");
+        assert!(matches!(
+            err2,
+            Error::Assemble(AssembleError::DuplicateLabel { label: 0, .. }),
+        ));
+    }
+
+    #[test]
+    fn bare_target_emits_raw_opcode_without_label_binding() {
+        // `TARGET` with no operand is the existing zero-arg form: it emits
+        // a Target opcode but does NOT place any label. This is mostly
+        // useful for raw bytecode construction; user-facing programs should
+        // prefer `.N:` or `TARGET .N`.
+        let program = assemble_source("TARGET\nHALT").expect("bare TARGET");
+        let instrs = decode_all(program.code());
+        assert_eq!(instrs[0], Instruction::Target {});
+        assert_eq!(instrs[1], Instruction::Halt {});
+        assert_eq!(program.jump_table().len(), 0);
     }
 
     #[test]

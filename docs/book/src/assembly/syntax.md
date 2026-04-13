@@ -86,12 +86,28 @@ operands for `JUMP` and `JUMPI` instructions.
 
 ## Labels
 
-Labels are defined by placing a label identifier followed by a colon:
+Labels are defined either with the `.N:` shorthand or the explicit `TARGET .N`
+directive:
 
 ```asm
-.0: TARGET         ; define label .0 at this position
+.0: NOP            ; shorthand: define label .0 at this position
 .1:                ; label on its own line (useful for readability)
+
+TARGET .2          ; explicit form: identical to ".2:"
+HALT
 ```
+
+Both forms compile to the same bytecode: the assembler emits an inline
+`TARGET` opcode at the label position *and* records the position in the jump
+table. `.0:` and `TARGET .0` are interchangeable spellings for the same
+operation; pick whichever reads better in context. Defining the same label
+with both forms is a `DuplicateLabel` error, the same as defining `.N:`
+twice.
+
+A bare `TARGET` (no operand) emits a raw `Target` opcode without binding any
+label. That's useful only for hand-built bytecode where you do not need a
+corresponding jump destination; user-facing programs should use the labelled
+forms.
 
 Labels must be defined before or after they are referenced -- both forward and
 backward references are resolved by the assembler. Every label used as a
@@ -99,7 +115,7 @@ backward references are resolved by the assembler. Every label used as a
 
 The assembler converts labels to jump table entries. At runtime, `JUMP .N` looks
 up the byte offset of label `.N` in the jump table and seeks the instruction
-stream to that position.
+stream to that position (which is the byte holding the inline `TARGET`).
 
 ## Whitespace
 

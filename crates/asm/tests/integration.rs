@@ -125,14 +125,16 @@ fn energy_instruction() {
 
 #[test]
 fn forward_jump_resolves() {
-    // JUMP .0  (2 bytes, site=0: Jump1 + u8 because label id 0 fits in u8)
-    // NOP      (1 byte,  site=2)
-    // .0:
-    // HALT     (1 byte,  site=3)
+    // After QUI-404 the label `.0:` compiles to an inline TARGET:
+    //   JUMP1 .0  (2 bytes at 0)
+    //   NOP       (1 byte  at 2)
+    //   TARGET    (1 byte  at 3, emitted by place())
+    //   HALT      (1 byte  at 4)
     let instrs = asm("JUMP .0\nNOP\n.0:\nHALT");
     assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
-    assert_eq!(instrs[2], Instruction::Halt {});
+    assert_eq!(instrs[2], Instruction::Target {});
+    assert_eq!(instrs[3], Instruction::Halt {});
 }
 
 #[test]
@@ -148,11 +150,11 @@ fn backward_jumpi_resolves() {
 
 #[test]
 fn label_on_same_line_as_instruction() {
-    // .0: NOP -- label at byte 0, NOP follows
-    // JUMP .0
+    // After QUI-404, place() emits an inline TARGET before the trailing NOP.
     let instrs = asm(".0: NOP\nJUMP .0");
-    assert_eq!(instrs[0], Instruction::Nop {});
-    assert_eq!(instrs[1], Instruction::Jump1 { label: 0 });
+    assert_eq!(instrs[0], Instruction::Target {});
+    assert_eq!(instrs[1], Instruction::Nop {});
+    assert_eq!(instrs[2], Instruction::Jump1 { label: 0 });
 }
 
 #[test]
@@ -169,7 +171,9 @@ fn multiple_labels_and_jumps() {
     // Label .0 has id 0, fits in u8 -> JumpI1 narrow form.
     assert!(matches!(instrs[1], Instruction::JumpI1 { .. }));
     assert_eq!(instrs[2], Instruction::Push1 { val: [42] });
-    assert_eq!(instrs[3], Instruction::Halt {});
+    // place() inserts an inline TARGET before HALT.
+    assert_eq!(instrs[3], Instruction::Target {});
+    assert_eq!(instrs[4], Instruction::Halt {});
 }
 
 #[test]
@@ -267,7 +271,8 @@ fn case_insensitive_jump_mnemonics() {
     let instrs = asm("jump .0\nnop\n.0:\nhalt");
     assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
-    assert_eq!(instrs[2], Instruction::Halt {});
+    assert_eq!(instrs[2], Instruction::Target {});
+    assert_eq!(instrs[3], Instruction::Halt {});
 }
 
 // ---------------------------------------------------------------------------
