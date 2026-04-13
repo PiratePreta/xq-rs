@@ -2,7 +2,7 @@
         deps deps-docs deps-miri \
         lint lint-clippy lint-doc lint-deny \
         fmt fmt-rust fmt-taplo fmt-check fmt-check-rust fmt-check-taplo \
-        test test-unit test-integration test-miri \
+        test test-unit test-integration test-doc test-miri \
         docs docs-serve
 
 all: fmt lint test
@@ -53,13 +53,18 @@ lint-deny:
 
 # -- Tests ------------------------------------------------------------------
 
-test: test-unit test-integration
+test: test-unit test-integration test-doc
 
 test-unit:
 	cargo nextest run --workspace --all-features --lib --cargo-profile ci-test
 
 test-integration:
 	cargo nextest run --workspace --all-features --test '*' --cargo-profile ci-test
+
+# nextest cannot execute rustdoc doctests, so they are driven by the
+# built-in test harness on a dedicated target.
+test-doc:
+	cargo test --doc --workspace --all-features --profile ci-test
 
 test-miri:
 	cargo +nightly miri test --workspace --all-features

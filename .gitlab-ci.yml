@@ -69,6 +69,13 @@ test:integration:
     script:
         - make test-integration
 
+test:doc:
+    stage: test
+    before_script:
+        - *install-deps
+    script:
+        - make test-doc
+
 # -- Documentation ----------------------------------------------------------
 
 docs:build:
