@@ -46,7 +46,7 @@
 //! }
 //!
 //! let mnemonics = aglais_xqvm_bytecode::opcodes!(list_mnemonics);
-//! assert_eq!(mnemonics.len(), 85);
+//! assert_eq!(mnemonics.len(), 87);
 //! assert!(mnemonics.contains(&"ENERGY"));
 //! assert!(mnemonics.contains(&"PUSH1"));
 //! ```
@@ -64,7 +64,7 @@
 //!     Instruction::Load   { reg: Register(0) },
 //!     Instruction::Push1  { val: [5] },
 //!     Instruction::Gt     {},
-//!     Instruction::JumpI  { label: 0u16 },
+//!     Instruction::JumpI1 { label: 0u8 },
 //!     Instruction::Next   {},
 //!     Instruction::Target {},
 //!     Instruction::Halt   {},

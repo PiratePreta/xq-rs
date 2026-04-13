@@ -124,8 +124,10 @@ impl Instruction {
             // Control flow
             Self::Nop { .. }
             | Self::Target { .. }
-            | Self::Jump { .. }
-            | Self::JumpI { .. }
+            | Self::Jump1 { .. }
+            | Self::Jump2 { .. }
+            | Self::JumpI1 { .. }
+            | Self::JumpI2 { .. }
             | Self::Next { .. }
             | Self::Range { .. }
             | Self::Halt { .. }
@@ -235,8 +237,10 @@ impl Instruction {
             // Control flow
             Self::Nop { .. }
             | Self::Target { .. }
-            | Self::Jump { .. }
-            | Self::JumpI { .. }
+            | Self::Jump1 { .. }
+            | Self::Jump2 { .. }
+            | Self::JumpI1 { .. }
+            | Self::JumpI2 { .. }
             | Self::Next { .. }
             | Self::Range { .. }
             | Self::Halt { .. }
@@ -363,8 +367,10 @@ impl fmt::Display for Instruction {
             Self::Push8 { val } => write!(f, "PUSH8 {}", sign_extend_be(val)),
 
             // Jump variants: show label index with dot prefix.
-            Self::Jump { label } => write!(f, "JUMP .{label}"),
-            Self::JumpI { label } => write!(f, "JUMPI .{label}"),
+            Self::Jump1 { label } => write!(f, "JUMP1 .{label}"),
+            Self::Jump2 { label } => write!(f, "JUMP2 .{label}"),
+            Self::JumpI1 { label } => write!(f, "JUMPI1 .{label}"),
+            Self::JumpI2 { label } => write!(f, "JUMPI2 .{label}"),
 
             // Energy: two register operands.
             Self::Energy { model, sample } => {
@@ -467,8 +473,8 @@ mod tests {
     }
 
     #[test]
-    fn instruction_count_is_85() {
-        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 85);
+    fn instruction_count_is_87() {
+        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 87);
     }
 
     #[test]
@@ -573,7 +579,16 @@ mod tests {
 
     #[test]
     fn display_jump() {
-        assert_eq!(format!("{}", Instruction::Jump { label: 3 }), "JUMP .3",);
+        assert_eq!(format!("{}", Instruction::Jump1 { label: 3 }), "JUMP1 .3",);
+        assert_eq!(
+            format!("{}", Instruction::Jump2 { label: 300 }),
+            "JUMP2 .300",
+        );
+        assert_eq!(format!("{}", Instruction::JumpI1 { label: 3 }), "JUMPI1 .3",);
+        assert_eq!(
+            format!("{}", Instruction::JumpI2 { label: 300 }),
+            "JUMPI2 .300",
+        );
     }
 
     #[test]

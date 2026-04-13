@@ -6,8 +6,10 @@ Instructions for branching, looping, and program termination.
 |------|----------|-----------|--------------|-----------------|-------------|
 | `0x00` | `NOP` | -- | \\([\ldots] \to [\ldots]\\) | -- | No operation. |
 | `0x01` | `TARGET` | -- | \\([\ldots] \to [\ldots]\\) | -- | Mark a valid jump destination. Required at every label that `JUMP`/`JUMPI` may target; treated as `NOP` at runtime. |
-| `0x02` | `JUMP` | `label: u16` | \\([\ldots] \to [\ldots]\\) | -- | Seek the instruction stream to `jump_table[label].start`. Unconditional. |
-| `0x03` | `JUMPI` | `label: u16` | \\([\ldots, c] \to [\ldots]\\) | -- | Pop \\(c\\). If \\(c \neq 0\\), seek to `jump_table[label].start`; otherwise fall through. |
+| `0x02` | `JUMP2` | `label: u16` | \\([\ldots] \to [\ldots]\\) | -- | Seek the instruction stream to `jump_table[label].start`. Unconditional. Wide form: takes a `u16` label index. |
+| `0x03` | `JUMPI2` | `label: u16` | \\([\ldots, c] \to [\ldots]\\) | -- | Pop \\(c\\). If \\(c \neq 0\\), seek to `jump_table[label].start`; otherwise fall through. Wide form: takes a `u16` label index. |
+| `0x80` | `JUMP1` | `label: u8` | \\([\ldots] \to [\ldots]\\) | -- | Same as `JUMP2` but with a single-byte `u8` label index. Used by the assembler when the label id fits in `u8` to save one byte per call site. |
+| `0x81` | `JUMPI1` | `label: u8` | \\([\ldots, c] \to [\ldots]\\) | -- | Same as `JUMPI2` but with a single-byte `u8` label index. |
 | `0x04` | `NEXT` | -- | \\([\ldots] \to [\ldots]\\) | -- | Advance the active loop frame. For Range: increment current; if \\(\text{current} < \text{end}\\), seek to body start, else pop frame. For Iter: increment index; if \\(\text{index} < \text{len}\\), seek to body start, else pop frame. Errors if no loop frame is active. |
 | `0x05` | `LVAL` | `reg: Register` | \\([\ldots] \to [\ldots]\\) | `write` | Copy the current loop value into `reg`. For Range: \\(\text{reg} \leftarrow \text{Int}(\text{current})\\). For Iter: \\(\text{reg} \leftarrow \text{vec}[\text{index}]\\). |
 | `0x06` | `RANGE` | -- | \\([\ldots, s, n] \to [\ldots]\\) | -- | Pop \\(n\\) (count), then \\(s\\) (start). Push a Range loop frame with \\(\text{current} = s,\; \text{end} = s + n\\). |
@@ -17,10 +19,22 @@ Instructions for branching, looping, and program termination.
 
 ## Branching
 
-`JUMP` and `JUMPI` use label indices, not raw byte offsets. The label index is a
-`u16` value that maps to a byte range via the program's jump table. At the
-assembly level, labels are written as `.N` (e.g. `.0`, `.1`); the assembler
-resolves them to indices automatically.
+`JUMP` and `JUMPI` use label indices, not raw byte offsets. The label index
+maps to a byte range via the program's jump table. At the assembly level,
+labels are written as `.N` (e.g. `.0`, `.1`); the assembler resolves them to
+indices automatically and picks the narrowest encoding:
+
+- `JUMP1` / `JUMPI1` (`0x80` / `0x81`) use a single-byte `u8` label index.
+  The assembler emits these whenever the label id is `< 256`, so most
+  programs will use them exclusively (each call site saves one byte).
+- `JUMP2` / `JUMPI2` (`0x02` / `0x03`) use a two-byte `u16` label index.
+  The assembler falls back to these only for labels with id `>= 256`.
+
+The assembly source still spells these as `JUMP .N` and `JUMPI .N`; the
+narrow-vs-wide selection happens at assembly time and is transparent to
+authors. Disassembled output, on the other hand, shows the explicit form
+(`JUMP1 .N`, `JUMP2 .N`, etc.) so the round-tripped source preserves the
+exact wire encoding.
 
 `TARGET` must appear at every label destination. It is a no-op at runtime but
 serves as a validation marker -- the VM verifies that jump targets land on

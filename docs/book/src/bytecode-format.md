@@ -68,7 +68,8 @@ All multi-byte values are **big-endian**.
 |-------------|-------------|--------|
 | No-operand (NOP, HALT, ADD, POP, ...) | 1 | `[opcode]` |
 | Single register (LOAD, STOW, BQMX, ...) | 2 | `[opcode, reg]` |
-| Label (JUMP, JUMPI) | 3 | `[opcode, label_hi, label_lo]` |
+| Label, narrow (JUMP1, JUMPI1) | 2 | `[opcode, label]` |
+| Label, wide   (JUMP2, JUMPI2) | 3 | `[opcode, label_hi, label_lo]` |
 | PUSH1 | 2 | `[0x11, val]` |
 | PUSH2 | 3 | `[0x12, val_hi, val_lo]` |
 | PUSH3--PUSH7 | 4--8 | `[opcode, val_bytes...]` |
@@ -111,14 +112,14 @@ Consider this program:
 00 01           ; entry_count = 1
 00 00           ; label = 0
 00 00 00 00     ; start = 0
-00 00 00 05     ; end = 5
+00 00 00 04     ; end = 4
 ```
 
-**Instruction stream** (5 bytes):
+**Instruction stream** (4 bytes):
 ```
 01              ; TARGET (0x01)
 11 2A           ; PUSH1 42 (0x11, 0x2A)
-02 00 00        ; JUMP .0 (0x02, 0x00, 0x00)
+80 00           ; JUMP1 .0 (0x80, 0x00) -- assembler picks the narrow form because label id 0 fits in u8
 ```
 
-**Total program:** 17 bytes.
+**Total program:** 16 bytes.

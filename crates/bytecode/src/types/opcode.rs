@@ -137,8 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn opcode_count_is_85() {
-        assert_eq!(opcodes!(all_opcodes_array).len(), 85);
+    fn opcode_count_is_87() {
+        assert_eq!(opcodes!(all_opcodes_array).len(), 87);
     }
 
     #[test]

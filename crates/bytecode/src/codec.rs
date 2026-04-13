@@ -257,7 +257,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn encode_decode_roundtrip_all_84() {
+    fn encode_decode_roundtrip_all_87() {
         for instr in opcodes!(all_instructions) {
             let bytes = encode(&instr);
             let (decoded, consumed) = decode(&bytes).expect("decode failed");
@@ -318,10 +318,23 @@ mod tests {
     }
 
     #[test]
-    fn jump_label_fixint_be() {
-        // u16(5) in BE = 0x0005
-        let bytes = encode(&Instruction::Jump { label: 5u16 });
+    fn jump2_label_fixint_be() {
+        // Jump2 (wide form) at byte 0x02; u16(5) in BE = 0x0005
+        let bytes = encode(&Instruction::Jump2 { label: 5u16 });
         assert_eq!(bytes, [0x02, 0x00, 0x05]);
+    }
+
+    #[test]
+    fn jump1_label_is_two_bytes() {
+        // Jump1 (narrow form) at byte 0x80; u8 label is one byte
+        let bytes = encode(&Instruction::Jump1 { label: 7u8 });
+        assert_eq!(bytes, [0x80, 0x07]);
+    }
+
+    #[test]
+    fn jumpi1_label_is_two_bytes() {
+        let bytes = encode(&Instruction::JumpI1 { label: 0u8 });
+        assert_eq!(bytes, [0x81, 0x00]);
     }
 
     #[test]
@@ -336,8 +349,8 @@ mod tests {
 
     #[test]
     fn unknown_opcode_returns_error() {
-        // 0x08 is a gap opcode (not assigned)
-        assert!(decode(&[0x08u8]).is_err());
+        // 0x0D is a reserved gap (not assigned).
+        assert!(decode(&[0x0Du8]).is_err());
     }
 
     #[test]
@@ -401,11 +414,20 @@ mod tests {
     }
 
     #[test]
-    fn json_roundtrip_jump() {
-        // Jump: opcode 0x02=2, label -> [2, 10]
-        let instr = Instruction::Jump { label: 10u16 };
+    fn json_roundtrip_jump2() {
+        // Jump2: opcode 0x02=2, u16 label -> [2, 10]
+        let instr = Instruction::Jump2 { label: 10u16 };
         let json = serde_json::to_string(&instr).unwrap();
         assert_eq!(json, "[2,10]");
+        assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
+    }
+
+    #[test]
+    fn json_roundtrip_jump1() {
+        // Jump1: opcode 0x80=128, u8 label -> [128, 5]
+        let instr = Instruction::Jump1 { label: 5u8 };
+        let json = serde_json::to_string(&instr).unwrap();
+        assert_eq!(json, "[128,5]");
         assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
     }
 

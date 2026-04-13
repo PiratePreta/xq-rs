@@ -529,11 +529,24 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
-    fn exec_jump(&mut self, _pos: usize, label: u16) -> Result<StepResult, Error> {
+    fn exec_jump1(&mut self, _pos: usize, label: u8) -> Result<StepResult, Error> {
+        Ok(StepResult::Jump(u16::from(label)))
+    }
+
+    fn exec_jump2(&mut self, _pos: usize, label: u16) -> Result<StepResult, Error> {
         Ok(StepResult::Jump(label))
     }
 
-    fn exec_jump_i(&mut self, pos: usize, label: u16) -> Result<StepResult, Error> {
+    fn exec_jump_i1(&mut self, pos: usize, label: u8) -> Result<StepResult, Error> {
+        let cond = self.pop(pos)?;
+        if cond != 0 {
+            Ok(StepResult::Jump(u16::from(label)))
+        } else {
+            Ok(StepResult::Continue)
+        }
+    }
+
+    fn exec_jump_i2(&mut self, pos: usize, label: u16) -> Result<StepResult, Error> {
         let cond = self.pop(pos)?;
         if cond != 0 {
             Ok(StepResult::Jump(label))

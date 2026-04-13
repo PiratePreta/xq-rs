@@ -148,7 +148,19 @@ macro_rules! impl_fmt_operand_byte_array {
 impl_fmt_operand_byte_array!(1, 2, 3, 4, 5, 6, 7, 8);
 
 impl FmtOperand for u16 {
-    /// Format a label index as `.N`.
+    /// Format a `JUMP2`/`JUMPI2` label index as `.N`.
+    fn fmt_operand(
+        &self,
+        f: &mut dyn io::Write,
+        _labels: &BTreeMap<usize, String>,
+        _instr_offset: usize,
+    ) -> io::Result<()> {
+        write!(f, ".{self}")
+    }
+}
+
+impl FmtOperand for u8 {
+    /// Format a `JUMP1`/`JUMPI1` (narrow) label index as `.N`.
     fn fmt_operand(
         &self,
         f: &mut dyn io::Write,
@@ -382,10 +394,11 @@ mod tests {
     #[test]
     fn backward_jump_gets_label() {
         // Build a program with a jump table entry for label .0 at offset 0.
+        // Labels < 256 use the narrow JUMPI1 encoding.
         let code = assemble(&[
             Instruction::Push1 { val: [5] },
             Instruction::Gt {},
-            Instruction::JumpI { label: 0u16 },
+            Instruction::JumpI1 { label: 0u8 },
             Instruction::Halt {},
         ]);
         let code_len = code.len() as u32;
@@ -398,30 +411,30 @@ mod tests {
         let text = Disassembly::from_program(&program).to_string();
         assert!(text.contains(".0:"), "missing label .0 in:\n{text}");
         assert!(
-            text.contains("JUMPI   .0"),
-            "expected 'JUMPI   .0' in:\n{text}"
+            text.contains("JUMPI1  .0"),
+            "expected 'JUMPI1  .0' in:\n{text}"
         );
     }
 
     #[test]
     fn forward_jump_gets_label() {
-        // JUMP label .0; NOP; HALT. Label .0 points at HALT (offset 4).
+        // JUMP1 label .0; NOP; HALT. Label .0 points at HALT (offset 3).
         let code = assemble(&[
-            Instruction::Jump { label: 0u16 },
+            Instruction::Jump1 { label: 0u8 },
             Instruction::Nop {},
             Instruction::Halt {},
         ]);
         let table = JumpTable::new(vec![JumpEntry {
             label: 0,
-            start: 4,
+            start: 3,
             end: code.len() as u32,
         }]);
         let program = Program::new_with_table(table, code);
         let text = Disassembly::from_program(&program).to_string();
         assert!(text.contains(".0:"), "missing label in:\n{text}");
         assert!(
-            text.contains("JUMP    .0"),
-            "expected 'JUMP    .0' in:\n{text}"
+            text.contains("JUMP1   .0"),
+            "expected 'JUMP1   .0' in:\n{text}"
         );
     }
 
@@ -429,8 +442,8 @@ mod tests {
     fn two_distinct_labels_appear() {
         // Two labels: .0 at offset 0, .1 at the HALT.
         let code = assemble(&[
-            Instruction::JumpI { label: 0u16 },
-            Instruction::Jump { label: 1u16 },
+            Instruction::JumpI1 { label: 0u8 },
+            Instruction::Jump1 { label: 1u8 },
             Instruction::Halt {},
         ]);
         let halt_offset = code.len() as u32 - 1;

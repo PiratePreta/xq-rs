@@ -392,10 +392,10 @@ macro_rules! impl_from_operand_byte_array {
 
 impl_from_operand_byte_array!(1, 2, 3, 4, 5, 6, 7, 8);
 
-/// `u16` is used for `JUMP`/`JUMPI` label operands, which are handled
-/// separately by `assemble_jump`. This impl covers the `impl_build_instr`
-/// macro's generated arms (unreachable at runtime because the caller routes
-/// JUMP/JUMPI to `assemble_jump` first).
+/// `u16` is used for `JUMP2`/`JUMPI2` (wide) label operands, which are
+/// handled separately by `assemble_jump`. This impl covers the
+/// `impl_build_instr` macro's generated arms (unreachable at runtime because
+/// the caller routes `JUMP`/`JUMPI` to `assemble_jump` first).
 impl FromOperand for u16 {
     fn from_operand(
         op: &Operand,
@@ -406,6 +406,41 @@ impl FromOperand for u16 {
     ) -> Result<Self, AssembleError> {
         match op {
             Operand::LabelRef(idx) => Ok(*idx),
+            _ => Err(AssembleError::WrongOperandKind {
+                mnemonic: mnemonic.to_string(),
+                field: field.to_string(),
+                expected_kind: "label reference (e.g. .0)".to_string(),
+                src: make_src(src),
+                span: make_span(offset, mnemonic.len()),
+            }),
+        }
+    }
+}
+
+/// `u8` is used for `JUMP1`/`JUMPI1` (narrow) label operands. Like the `u16`
+/// impl above, this exists so the macro-generated `build_instr` arms compile;
+/// `JUMP`/`JUMPI` are intercepted by `assemble_jump` before reaching this
+/// path. The conversion from the parsed label index to `u8` errors with
+/// `LabelOutOfRange` when the index does not fit, mirroring how a hand-coded
+/// caller would behave.
+impl FromOperand for u8 {
+    fn from_operand(
+        op: &Operand,
+        field: &str,
+        mnemonic: &str,
+        offset: usize,
+        src: Source<'_>,
+    ) -> Result<Self, AssembleError> {
+        match op {
+            Operand::LabelRef(idx) => {
+                Self::try_from(*idx).map_err(|_| AssembleError::WrongOperandKind {
+                    mnemonic: mnemonic.to_string(),
+                    field: field.to_string(),
+                    expected_kind: "u8 label reference (id < 256, e.g. .0)".to_string(),
+                    src: make_src(src),
+                    span: make_span(offset, mnemonic.len()),
+                })
+            }
             _ => Err(AssembleError::WrongOperandKind {
                 mnemonic: mnemonic.to_string(),
                 field: field.to_string(),
@@ -537,19 +572,21 @@ mod tests {
     #[test]
     fn forward_jump_label() {
         // JUMP .0 (3 bytes at site 0)
-        // NOP       (1 byte  at site 3)
+        // JUMP .0   (2 bytes at site 0: Jump1 + u8)
+        // NOP       (1 byte  at site 2)
         // .0:
-        // HALT      (1 byte  at site 4)
-        // label 0 should be at byte 4
+        // HALT      (1 byte  at site 3)
+        // label 0 should be at byte 3
         let src = "JUMP .0\nNOP\n.0:\nHALT";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[0], Instruction::Jump { label: 0 });
+        // Label .0 has id 0, fits in u8 -> assembler picks the narrow Jump1 form.
+        assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Halt {});
-        // Jump table entry for .0 starts at byte 4.
-        assert_eq!(program.jump_table().get(0).unwrap().start, 4);
+        // Jump table entry for .0 starts at byte 3.
+        assert_eq!(program.jump_table().get(0).unwrap().start, 3);
     }
 
     #[test]
@@ -558,12 +595,13 @@ mod tests {
         // PUSH -1   (2 bytes at 0: Push1 0xFF)
         // ADD       (1 byte  at 2)
         // COPY      (1 byte  at 3)
-        // JUMPI .0  (3 bytes at 4)
+        // JUMPI .0  (2 bytes at 4: JumpI1 + u8)
         let src = ".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI { label: 0 });
+        // Label .0 has id 0, fits in u8 -> JumpI1 narrow form.
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI1 { label: 0 });
         // Jump table entry for .0 starts at byte 0.
         assert_eq!(program.jump_table().get(0).unwrap().start, 0);
     }
