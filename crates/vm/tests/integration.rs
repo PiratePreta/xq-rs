@@ -617,6 +617,53 @@ fn energy_spin_ising_all_minus_one() {
     assert_eq!(vm.stack(), &[1]);
 }
 
+#[test]
+fn energy_rejects_model_in_sample_slot() {
+    // Both slots hold a Model; ENERGY must reject because xq-py requires
+    // the second register to hold an XQMX in SAMPLE mode (which xq-rs
+    // models as RegVal::Sample). The shortcut that allowed Model-as-sample
+    // was removed in QUI-410.
+    let err = run_err(|b| {
+        b.push(2).bqmx(Register(0));
+        b.push(2).bqmx(Register(1));
+        b.energy(Register(0), Register(1));
+        b.halt();
+    });
+    match err {
+        Error::RegisterType {
+            reg: 1,
+            expected: "sample",
+            got: "model",
+        } => {}
+        other => panic!(
+            "expected RegisterType {{ expected: \"sample\", got: \"model\" }}, got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn energy_rejects_int_in_sample_slot() {
+    // Non-XQMX values in the sample slot still produce a clear RegisterType
+    // error.
+    let err = run_err(|b| {
+        b.push(2).bqmx(Register(0));
+        b.push(0).stow(Register(1));
+        b.energy(Register(0), Register(1));
+        b.halt();
+    });
+    assert!(
+        matches!(
+            err,
+            Error::RegisterType {
+                reg: 1,
+                expected: "sample",
+                ..
+            }
+        ),
+        "expected RegisterType expected=sample, got {err:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // INPUT/OUTPUT
 // ---------------------------------------------------------------------------

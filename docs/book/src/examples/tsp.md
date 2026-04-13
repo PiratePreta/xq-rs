@@ -31,8 +31,8 @@ config:
 flowchart TD
     Input["N cities + distance matrix"]
     Encoder["**ENCODER**<br/>&mdash; calldata: [N, distances_vec]<br/>&mdash; output: [QUBO model]"]
-    Verifier["**VERIFIER**<br/>&mdash; calldata: [model, sample, N]<br/>&mdash; output: [energy, valid_flag]"]
-    Decoder["**DECODER**<br/>&mdash; calldata: [sample, N]<br/>&mdash; output: [tour_vec]"]
+    Verifier["**VERIFIER**<br/>&mdash; calldata: [qubo_model, sample_grid_model, sample, N]<br/>&mdash; output: [energy, valid_flag]"]
+    Decoder["**DECODER**<br/>&mdash; calldata: [sample_grid_model, N]<br/>&mdash; output: [tour_vec]"]
     Output["Ordered tour"]
 
     Input --> Encoder --> Verifier --> Decoder --> Output
@@ -121,13 +121,25 @@ The full encoder source is in `crates/vm/examples/tsp/encoder.xqasm`.
 
 ## Verifier Program
 
-The verifier receives the model, a sample, and N. It checks one-hot constraints
-using `ROWSUM` and `COLFIND`, then evaluates the Hamiltonian energy.
+The verifier receives the QUBO model, the sample in two shapes, and N:
+
+1. **`sample_grid_model`** -- an `XqmxModel` whose linear table holds
+   `linear[city*N + position] = 1`. The grid instructions (`ROWSUM`,
+   `COLSUM`, `COLFIND`) only operate on `Model` registers, so the one-hot
+   row/column scans need this shape.
+2. **`sample`** -- the same dense values vector packaged as an `XqmxSample`.
+   `ENERGY` requires an `XqmxSample` in its sample slot after QUI-410, so the
+   harness builds both shapes from the same source values to keep them in
+   sync.
+
+The verifier checks one-hot constraints using `ROWSUM` (over the grid model)
+and then evaluates the Hamiltonian energy via `ENERGY model sample`.
 
 Key instructions used:
-- `ROWSUM` -- sum linear coefficients in each row to check assignment.
-- `COLFIND` -- find which city occupies each position.
-- `ENERGY` -- evaluate the full Hamiltonian.
+- `ROWSUM` / `COLSUM` -- sum linear coefficients in each row/column of
+  `sample_grid_model` to check that exactly one variable per row/column is
+  selected.
+- `ENERGY` -- evaluate the full Hamiltonian on `(model, sample)`.
 
 ## Decoder Program
 

@@ -331,12 +331,12 @@ quad[i, j]   += -penalty
 **Stack:** `[...] → [..., E]`
 **Register effect:** `read` — `model` and `sample` are both read-only
 
-The `model` register must hold `Model`. The `sample` register may hold either:
-
-- `Sample(s)` — `s.values` is used directly as the variable assignment vector.
-- `Model(s)` — `linear[i]` of the sample model is used as `x_i` for each `i`
-  in `0..size`. This allows a model built via `SETLINE`/`ADDLINE` to act as a
-  sample.
+The `model` register must hold a `Model`, and the `sample` register must hold
+a `Sample` -- xq-rs no longer accepts a `Model` in the sample slot (the
+"model-as-sample" shortcut was removed in QUI-410 to align with `XQVM_SPEC.md`
+and the xq-py reference). Construct the sample explicitly via `BSMX` / `SSMX`
+/ `XSMX`, or pass an `XqmxSample` through calldata. A `RegisterType` error is
+raised if either register holds the wrong kind of value.
 
 Evaluate the Hamiltonian:
 
@@ -344,7 +344,7 @@ Evaluate the Hamiltonian:
 E = Σᵢ linear[i] * x[i]  +  Σ_{i<j} quad[i,j] * x[i] * x[j]
 ```
 
-Push the result as `i64`. Errors if `len(sample) != model.size`.
+Push the result as `i64`. Errors with `SizeMismatch` if `len(sample) != model.size`.
 
 `ENERGY` is the only instruction with two register operands.
 
