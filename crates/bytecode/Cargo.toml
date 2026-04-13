@@ -11,13 +11,8 @@ workspace = true
 
 [features]
 default = [ "std" ]
-std     = [ "oxicode/std", "thiserror/std" ]
-
-[dev-dependencies]
-serde_json = "1"
+std     = [ "thiserror/std" ]
 
 [dependencies]
 pastey.workspace    = true
-oxicode             = { version = "0.1", default-features = false, features = [ "serde", "alloc" ] }
-serde.workspace     = true
 thiserror.workspace = true

@@ -18,13 +18,26 @@
 //! Binary codec for XQVM instructions.
 //!
 //! [`Instruction`] is encoded as a fixed-width big-endian sequence
-//! `[opcode: u8, operands...]`:
+//! `[opcode: u8, operands...]`. Each operand field is written at its natural
+//! width in big-endian byte order:
 //!
-//! * **Binary format** (oxicode BE fixint): opcode as one raw byte, then
-//!   operand fields in declaration order, each at its natural width in
-//!   big-endian byte order -- `i16` as 2 bytes, `i64` as 8 bytes, `u8`/[`Register`]
-//!   as 1 byte, `[u8; N]` as N consecutive bytes.  No varints, no length prefixes.
-//! * **Sequence-based formats** (JSON arrays, ...): `[opcode, val, ...]`.
+//! | Field type | Bytes |
+//! |---|---|
+//! | `u8` / [`Register`] | 1 |
+//! | `u16` | 2 |
+//! | `i16` | 2 |
+//! | `i64` | 8 |
+//! | `[u8; N]` | `N` (raw bytes, no length prefix) |
+//!
+//! There are no varints, no length prefixes, and no out-of-band framing -- the
+//! opcode byte alone determines how many operand bytes follow. The codec is
+//! generated from the [`crate::opcodes`] X-macro by an in-module declarative
+//! macro, so adding a new opcode automatically extends both directions of the
+//! codec with no further code changes.
+//!
+//! Prior to QUI-411 the codec went through `serde` + the `oxicode` crate; this
+//! file now talks bytes directly. The `serde` dependency is dropped from
+//! `crates/bytecode` entirely.
 //!
 //! # Examples
 //!
@@ -34,206 +47,284 @@
 //!
 //! let instr = Instruction::Pop {};
 //! let bytes = codec::encode(&instr);
-//! assert_eq!(bytes[0], 0x10); // PUSHC_0 opcode byte
-//! assert_eq!(bytes.len(), 1);
+//! assert_eq!(bytes, [0x10]);
 //!
-//! let instr2 = Instruction::PushC1 { val: [42] };
-//! let bytes2 = codec::encode(&instr2);
-//! assert_eq!(bytes2, [0x18, 42]);
+//! let with_imm = Instruction::Push1 { val: [42] };
+//! assert_eq!(codec::encode(&with_imm), [0x11, 42]);
 //!
-//! let (decoded, consumed) = codec::decode(&bytes2).unwrap();
-//! assert_eq!(decoded, instr2);
-//! assert_eq!(consumed, bytes2.len());
+//! let (decoded, consumed) = codec::decode(&[0x11, 42]).unwrap();
+//! assert_eq!(decoded, with_imm);
+//! assert_eq!(consumed, 2);
 //! ```
 
-use core::fmt;
-
 #[cfg(not(feature = "std"))]
-use alloc::{format, vec::Vec};
+use alloc::vec::Vec;
 
-use serde::de::{self, SeqAccess, Visitor};
-use serde::ser::SerializeTuple;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use thiserror::Error;
 
 use crate::types::{Instruction, Register};
 
 // ---------------------------------------------------------------------------
-// Wire format configuration
+// Decode error
 // ---------------------------------------------------------------------------
 
-/// The canonical binary codec configuration: big-endian, fixed-width integers.
-const CODEC_CONFIG: oxicode::config::Configuration<
-    oxicode::config::BigEndian,
-    oxicode::config::Fixint,
-> = oxicode::config::standard()
-    .with_big_endian()
-    .with_fixed_int_encoding();
+/// Errors returned by [`decode`].
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum DecodeError {
+    /// The input is empty.
+    #[error("instruction stream truncated: empty input")]
+    EmptyInput,
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+    /// The opcode byte does not match any known XQVM opcode.
+    #[error("unknown XQVM opcode 0x{byte:02X}")]
+    UnknownOpcode {
+        /// The unrecognised byte.
+        byte: u8,
+    },
 
-/// Encode a single instruction to a `Vec<u8>` in the wire format
-/// `[opcode: u8][operand fields]`.
-///
-/// Integer operands are encoded big-endian at their natural width (`i16` = 2
-/// bytes, `i64` = 8 bytes).  Register operands are a single byte.
-/// `[u8; N]` operands are encoded as N consecutive bytes.
-///
-/// # Examples
-///
-/// ```rust
-/// use aglais_xqvm_bytecode::Instruction;
-/// use aglais_xqvm_bytecode::codec;
-///
-/// assert_eq!(codec::encode(&Instruction::Halt {}), [0x09]);
-/// assert_eq!(codec::encode(&Instruction::Nop {}),  [0x00]);
-/// assert_eq!(codec::encode(&Instruction::Pop {}), [0x10]);
-/// assert_eq!(codec::encode(&Instruction::Push1 { val: [42] }), [0x11, 42]);
-/// ```
-pub fn encode(instr: &Instruction) -> Vec<u8> {
-    // SAFETY: oxicode serialization of a statically-known Rust type with a
-    // VecWriter is infallible -- no I/O errors or allocator exhaustion can
-    // occur for in-memory encoding.
-    oxicode::serde::encode_to_vec(instr, CODEC_CONFIG).unwrap_or_else(|_| unreachable!())
-}
-
-/// Decode a single instruction from the start of `bytes`.
-///
-/// Returns `(instruction, bytes_consumed)` on success.
-///
-/// # Errors
-///
-/// Returns an [`oxicode::Error`] when the byte slice is too short or the
-/// opcode byte is not a known XQVM opcode.
-///
-/// # Examples
-///
-/// ```rust
-/// use aglais_xqvm_bytecode::{Instruction, Register};
-/// use aglais_xqvm_bytecode::codec;
-///
-/// // LOAD r3 -> [0x0A, 0x03]
-/// let bytes: &[u8] = &[0x0A, 0x03];
-/// let (instr, n) = codec::decode(bytes).unwrap();
-/// assert_eq!(instr, Instruction::Load { reg: Register(3) });
-/// assert_eq!(n, 2);
-/// ```
-pub fn decode(bytes: &[u8]) -> Result<(Instruction, usize), oxicode::Error> {
-    oxicode::serde::decode_from_slice(bytes, CODEC_CONFIG)
+    /// The buffer ended before all operand bytes for the matched opcode could
+    /// be read.
+    #[error(
+        "instruction stream truncated: opcode 0x{opcode:02X} needs {needed} more byte(s), got {available}"
+    )]
+    TruncatedOperand {
+        /// The opcode byte whose operands could not be fully read.
+        opcode: u8,
+        /// Number of additional bytes the operand needed.
+        needed: usize,
+        /// Number of bytes that were actually available after the opcode.
+        available: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
-// Register: serialize as a single raw byte, deserialize from a single byte
+// EncodeOperand / DecodeOperand
 // ---------------------------------------------------------------------------
 
-impl Serialize for Register {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u8(self.0)
+/// Append an operand field's wire bytes to `buf`.
+///
+/// Used by the [`impl_codec!`] macro to assemble instruction payloads. Each
+/// operand type writes itself in big-endian order at its natural width.
+trait EncodeOperand {
+    /// Append the wire bytes for `self` to `buf`.
+    fn encode_into(&self, buf: &mut Vec<u8>);
+}
+
+/// Read an operand field's wire bytes from the start of `bytes`.
+///
+/// Returns the decoded value and the number of bytes consumed. Used by
+/// [`impl_codec!`] to dispatch on each variant's operand list.
+trait DecodeOperand: Sized {
+    /// Decode an operand of this type from the start of `bytes`.
+    ///
+    /// `opcode` identifies the instruction being decoded and is included in
+    /// truncation errors so callers can surface a precise diagnostic.
+    fn decode_from(bytes: &[u8], opcode: u8) -> Result<(Self, usize), DecodeError>;
+}
+
+impl EncodeOperand for u8 {
+    fn encode_into(&self, buf: &mut Vec<u8>) {
+        buf.push(*self);
     }
 }
 
-impl<'de> Deserialize<'de> for Register {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        u8::deserialize(deserializer).map(Self)
+impl DecodeOperand for u8 {
+    fn decode_from(bytes: &[u8], opcode: u8) -> Result<(Self, usize), DecodeError> {
+        bytes
+            .first()
+            .copied()
+            .map(|v| (v, 1))
+            .ok_or(DecodeError::TruncatedOperand {
+                opcode,
+                needed: 1,
+                available: bytes.len(),
+            })
+    }
+}
+
+impl EncodeOperand for u16 {
+    fn encode_into(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_be_bytes());
+    }
+}
+
+impl DecodeOperand for u16 {
+    fn decode_from(bytes: &[u8], opcode: u8) -> Result<(Self, usize), DecodeError> {
+        let slice = bytes.get(..2).ok_or(DecodeError::TruncatedOperand {
+            opcode,
+            needed: 2,
+            available: bytes.len(),
+        })?;
+        // SAFETY: get(..2) returned Some, so the slice has length 2.
+        let arr: [u8; 2] = slice
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("slice length 2 always converts to [u8; 2]"));
+        Ok((Self::from_be_bytes(arr), 2))
+    }
+}
+
+impl EncodeOperand for i16 {
+    fn encode_into(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_be_bytes());
+    }
+}
+
+impl DecodeOperand for i16 {
+    fn decode_from(bytes: &[u8], opcode: u8) -> Result<(Self, usize), DecodeError> {
+        let slice = bytes.get(..2).ok_or(DecodeError::TruncatedOperand {
+            opcode,
+            needed: 2,
+            available: bytes.len(),
+        })?;
+        let arr: [u8; 2] = slice
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("slice length 2 always converts to [u8; 2]"));
+        Ok((Self::from_be_bytes(arr), 2))
+    }
+}
+
+impl EncodeOperand for i64 {
+    fn encode_into(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_be_bytes());
+    }
+}
+
+impl DecodeOperand for i64 {
+    fn decode_from(bytes: &[u8], opcode: u8) -> Result<(Self, usize), DecodeError> {
+        let slice = bytes.get(..8).ok_or(DecodeError::TruncatedOperand {
+            opcode,
+            needed: 8,
+            available: bytes.len(),
+        })?;
+        let arr: [u8; 8] = slice
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("slice length 8 always converts to [u8; 8]"));
+        Ok((Self::from_be_bytes(arr), 8))
+    }
+}
+
+impl EncodeOperand for Register {
+    fn encode_into(&self, buf: &mut Vec<u8>) {
+        buf.push(self.0);
+    }
+}
+
+impl DecodeOperand for Register {
+    fn decode_from(bytes: &[u8], opcode: u8) -> Result<(Self, usize), DecodeError> {
+        let (slot, n) = u8::decode_from(bytes, opcode)?;
+        Ok((Self(slot), n))
+    }
+}
+
+impl<const N: usize> EncodeOperand for [u8; N] {
+    fn encode_into(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(self);
+    }
+}
+
+impl<const N: usize> DecodeOperand for [u8; N] {
+    fn decode_from(bytes: &[u8], opcode: u8) -> Result<(Self, usize), DecodeError> {
+        let slice = bytes.get(..N).ok_or(DecodeError::TruncatedOperand {
+            opcode,
+            needed: N,
+            available: bytes.len(),
+        })?;
+        let arr: Self = slice
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("slice length N always converts to [u8; N]"));
+        Ok((arr, N))
     }
 }
 
 // ---------------------------------------------------------------------------
-// Instruction: sequence [opcode: u8, operands...]
+// Macro-generated encode / decode
 // ---------------------------------------------------------------------------
 
-macro_rules! impl_instruction_serde {
+/// Generate the public `encode` and `decode` functions from the X-macro
+/// opcode table. Each variant's operand list expands to a sequence of
+/// [`EncodeOperand`] / [`DecodeOperand`] calls in declaration order.
+macro_rules! impl_codec {
     ( $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
           {$($fname:ident: $ftype:ty),*}) ),* $(,)? ) => {
 
-        // ---- Serialize -------------------------------------------------
-        //
-        // Each variant becomes a fixed-length tuple:
-        //   (opcode: u8, field0, field1, ...)
-        //
-        // oxicode BE fixint: [opcode raw byte][field bytes in BE...]
-        // JSON:              [opcode, val, ...]
-
-        impl Serialize for Instruction {
-            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                match self {
-                    $(
-                        Self::$variant { $($fname,)* } => {
-                            // Count operand fields at compile time.
-                            const N: usize = 1 $( + { let _ = stringify!($fname); 1 })*;
-                            let mut tup = serializer.serialize_tuple(N)?;
-                            tup.serialize_element(&($code as u8))?;
-                            $( tup.serialize_element($fname)?; )*
-                            tup.end()
-                        }
-                    )*
-                }
+        /// Encode a single instruction to a `Vec<u8>` in the wire format
+        /// `[opcode: u8][operand fields]`.
+        ///
+        /// Integer operands are encoded big-endian at their natural width,
+        /// `Register` operands are a single raw byte, and `[u8; N]` operands
+        /// are written as `N` consecutive bytes with no length prefix.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// use aglais_xqvm_bytecode::Instruction;
+        /// use aglais_xqvm_bytecode::codec;
+        ///
+        /// assert_eq!(codec::encode(&Instruction::Halt {}), [0x09]);
+        /// assert_eq!(codec::encode(&Instruction::Nop {}),  [0x00]);
+        /// assert_eq!(codec::encode(&Instruction::Pop {}),  [0x10]);
+        /// assert_eq!(codec::encode(&Instruction::Push1 { val: [42] }), [0x11, 42]);
+        /// ```
+        pub fn encode(instr: &Instruction) -> Vec<u8> {
+            let mut buf = Vec::new();
+            match instr {
+                $(
+                    Instruction::$variant { $($fname,)* } => {
+                        buf.push($code as u8);
+                        $( EncodeOperand::encode_into($fname, &mut buf); )*
+                    }
+                )*
             }
+            buf
         }
 
-        // ---- Deserialize -----------------------------------------------
-        //
-        // Read the opcode element first, then dispatch to read the operands
-        // for the matching variant.  Works for any format that calls visit_seq
-        // (oxicode, bincode, JSON arrays, ...).
-
-        impl<'de> Deserialize<'de> for Instruction {
-            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                struct InstrVisitor;
-
-                impl<'de> Visitor<'de> for InstrVisitor {
-                    type Value = Instruction;
-
-                    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                        write!(f, "an XQVM instruction as [opcode: u8, operands...]")
+        /// Decode a single instruction from the start of `bytes`.
+        ///
+        /// Returns `(instruction, bytes_consumed)` on success.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DecodeError`] when the opcode byte is missing,
+        /// unknown, or when the buffer ends before the matched opcode's
+        /// operands have been fully read.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// use aglais_xqvm_bytecode::{Instruction, Register};
+        /// use aglais_xqvm_bytecode::codec;
+        ///
+        /// // LOAD r3 -> [0x0A, 0x03]
+        /// let bytes: &[u8] = &[0x0A, 0x03];
+        /// let (instr, n) = codec::decode(bytes).unwrap();
+        /// assert_eq!(instr, Instruction::Load { reg: Register(3) });
+        /// assert_eq!(n, 2);
+        /// ```
+        pub fn decode(bytes: &[u8]) -> Result<(Instruction, usize), DecodeError> {
+            let opcode = *bytes.first().ok_or(DecodeError::EmptyInput)?;
+            let payload = bytes.get(1..).unwrap_or(&[]);
+            #[allow(unused_mut, unused_variables)]
+            let mut pos = 0usize;
+            match opcode {
+                $(
+                    $code => {
+                        $(
+                            let ($fname, _n) = <$ftype as DecodeOperand>::decode_from(
+                                payload.get(pos..).unwrap_or(&[]),
+                                opcode,
+                            )?;
+                            pos += _n;
+                        )*
+                        Ok((Instruction::$variant { $($fname,)* }, pos + 1))
                     }
-
-                    fn visit_seq<S: SeqAccess<'de>>(
-                        self,
-                        mut seq: S,
-                    ) -> Result<Instruction, S::Error> {
-                        let opcode: u8 = seq
-                            .next_element()?
-                            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                        match opcode {
-                            $(
-                                $code => {
-                                    $(
-                                        let $fname: $ftype = seq
-                                            .next_element()?
-                                            .ok_or_else(|| de::Error::missing_field(
-                                                stringify!($fname)
-                                            ))?;
-                                    )*
-                                    Ok(Instruction::$variant { $($fname,)* })
-                                }
-                            )*
-                            _ => Err(de::Error::custom(
-                                format!("unknown XQVM opcode 0x{opcode:02X}")
-                            )),
-                        }
-                    }
-                }
-
-                // Always use deserialize_tuple: binary formats (oxicode,
-                // bincode, ...) provide elements on demand with no length
-                // prefix; JSON array formats treat the length as a hint only
-                // and work correctly with variable-length arrays too.
-                //
-                // The length hint is the widest variant: opcode (1) plus the
-                // number of operand fields in each variant.
-                let max_fields = [$(1usize $( + { let _ = stringify!($fname); 1 })*),*]
-                    .into_iter()
-                    .max()
-                    .unwrap_or(1);
-                deserializer.deserialize_tuple(max_fields, InstrVisitor)
+                )*
+                unknown => Err(DecodeError::UnknownOpcode { byte: unknown }),
             }
         }
     };
 }
 
-opcodes!(impl_instruction_serde);
+opcodes!(impl_codec);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -251,10 +342,6 @@ mod tests {
             [ $( Instruction::$variant { $($fname: <$ftype as Default>::default(),)* } ),* ]
         };
     }
-
-    // -----------------------------------------------------------------------
-    // Binary (oxicode BE fixint) roundtrip tests
-    // -----------------------------------------------------------------------
 
     #[test]
     fn encode_decode_roundtrip_all_87() {
@@ -339,7 +426,7 @@ mod tests {
 
     #[test]
     fn energy_two_register_bytes() {
-        // Register serializes as raw u8
+        // Register serializes as raw u8.
         let bytes = encode(&Instruction::Energy {
             model: Register(2),
             sample: Register(3),
@@ -350,13 +437,46 @@ mod tests {
     #[test]
     fn unknown_opcode_returns_error() {
         // 0x0D is a reserved gap (not assigned).
-        assert!(decode(&[0x0Du8]).is_err());
+        assert!(matches!(
+            decode(&[0x0Du8]),
+            Err(DecodeError::UnknownOpcode { byte: 0x0D })
+        ));
     }
 
     #[test]
-    fn truncated_input_returns_error() {
-        // Push8 opcode (0x18) without the required 8 operand bytes -- truncated.
-        assert!(decode(&[0x18u8]).is_err());
+    fn empty_input_returns_error() {
+        assert!(matches!(decode(&[]), Err(DecodeError::EmptyInput)));
+    }
+
+    #[test]
+    fn truncated_operand_returns_error() {
+        // Push8 opcode (0x18) needs 8 operand bytes; supply only the opcode.
+        assert!(matches!(
+            decode(&[0x18u8]),
+            Err(DecodeError::TruncatedOperand {
+                opcode: 0x18,
+                needed: 8,
+                available: 0,
+            })
+        ));
+        // LOAD opcode needs one register byte.
+        assert!(matches!(
+            decode(&[0x0Au8]),
+            Err(DecodeError::TruncatedOperand {
+                opcode: 0x0A,
+                needed: 1,
+                available: 0,
+            })
+        ));
+        // JUMP2 needs two label bytes.
+        assert!(matches!(
+            decode(&[0x02u8, 0x00]),
+            Err(DecodeError::TruncatedOperand {
+                opcode: 0x02,
+                needed: 2,
+                available: 1,
+            })
+        ));
     }
 
     #[test]
@@ -378,90 +498,5 @@ mod tests {
             pos += n;
         }
         assert_eq!(pos, buf.len());
-    }
-
-    // -----------------------------------------------------------------------
-    // JSON (sequence-based) roundtrip tests
-    //
-    // Instructions serialize as JSON arrays: [opcode, val, ...]
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn json_roundtrip_nop() {
-        // Nop: opcode 0x00 -> [0]
-        let instr = Instruction::Nop {};
-        let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[0]");
-        assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
-    }
-
-    #[test]
-    fn json_roundtrip_pop() {
-        // Pop: opcode 0x10=16, no operands -> [16]
-        let instr = Instruction::Pop {};
-        let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[16]");
-        assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
-    }
-
-    #[test]
-    fn json_roundtrip_load() {
-        // Load: opcode 0x0A=10, reg -> [10, 7]
-        let instr = Instruction::Load { reg: Register(7) };
-        let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[10,7]");
-        assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
-    }
-
-    #[test]
-    fn json_roundtrip_jump2() {
-        // Jump2: opcode 0x02=2, u16 label -> [2, 10]
-        let instr = Instruction::Jump2 { label: 10u16 };
-        let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[2,10]");
-        assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
-    }
-
-    #[test]
-    fn json_roundtrip_jump1() {
-        // Jump1: opcode 0x80=128, u8 label -> [128, 5]
-        let instr = Instruction::Jump1 { label: 5u8 };
-        let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[128,5]");
-        assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
-    }
-
-    #[test]
-    fn json_roundtrip_energy() {
-        // Energy: opcode 0x7F=127, model, sample -> [127, 2, 3]
-        let instr = Instruction::Energy {
-            model: Register(2),
-            sample: Register(3),
-        };
-        let json = serde_json::to_string(&instr).unwrap();
-        assert_eq!(json, "[127,2,3]");
-        assert_eq!(serde_json::from_str::<Instruction>(&json).unwrap(), instr);
-    }
-
-    #[test]
-    fn json_roundtrip_all_84() {
-        for instr in opcodes!(all_instructions) {
-            let json = serde_json::to_string(&instr)
-                .unwrap_or_else(|e| panic!("serialize failed for {instr:?}: {e}"));
-            let decoded: Instruction = serde_json::from_str(&json)
-                .unwrap_or_else(|e| panic!("deserialize failed for {instr:?}: {e}"));
-            assert_eq!(decoded, instr, "roundtrip mismatch for {instr:?}");
-        }
-    }
-
-    #[test]
-    fn json_unknown_opcode_returns_error() {
-        assert!(serde_json::from_str::<Instruction>("[254]").is_err());
-    }
-
-    #[test]
-    fn json_register_out_of_range_returns_error() {
-        // LOAD opcode=10, reg=256 overflows u8
-        assert!(serde_json::from_str::<Instruction>("[10, 256]").is_err());
     }
 }
