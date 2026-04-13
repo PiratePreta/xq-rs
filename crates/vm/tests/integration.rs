@@ -452,7 +452,8 @@ fn range_loop_do_while_semantics() {
 
 #[test]
 fn iter_loop_over_vec_int() {
-    // Build [10, 20, 30] in r0, then ITER and sum elements into r1.
+    // Build [10, 20, 30] in r0, then ITER over the full slice [0, 3) and sum
+    // elements into r1.
     let mut b = InstructionBuilder::new();
 
     b.vec_i(Register(0)); // r0 = []
@@ -461,7 +462,7 @@ fn iter_loop_over_vec_int() {
     b.push(30).vec_push(Register(0));
 
     b.push(0).stow(Register(1)); // r1 = 0 (accumulator)
-    b.iter(Register(0)); // ITER r0
+    b.push(0).push(3).iter(Register(0)); // ITER r0 over [0, 3)
     b.l_val(Register(2)); // r2 = current element
     b.load(Register(2))
         .load(Register(1))
@@ -474,6 +475,93 @@ fn iter_loop_over_vec_int() {
     let mut vm = Vm::new();
     vm.run(&bytecode).unwrap();
     assert_eq!(vm.stack(), &[60]);
+}
+
+#[test]
+fn iter_loop_over_slice_skips_outside_range() {
+    // Iterate vec[1..3] of [10, 20, 30, 40, 50], summing 20 + 30 + 40 = 90.
+    let vm = run(|b| {
+        b.vec_i(Register(0));
+        for v in [10, 20, 30, 40, 50] {
+            b.push(v).vec_push(Register(0));
+        }
+        b.push(0).stow(Register(1));
+        b.push(1).push(4).iter(Register(0));
+        b.l_val(Register(2));
+        b.load(Register(2))
+            .load(Register(1))
+            .add()
+            .stow(Register(1));
+        b.next();
+        b.load(Register(1)).halt();
+    });
+    assert_eq!(vm.stack(), &[20 + 30 + 40]);
+}
+
+#[test]
+fn iter_lval_uses_slice_copy_not_source_vec() {
+    // ITER copies the slice, so mutating the source vec inside the body
+    // must not be visible to subsequent LVAL calls. Set vec[0] = 999 in
+    // the first iteration and check that the second iteration still sees
+    // the original 20.
+    let vm = run(|b| {
+        b.vec_i(Register(0));
+        b.push(10).vec_push(Register(0));
+        b.push(20).vec_push(Register(0));
+        b.push(0).push(2).iter(Register(0));
+        b.l_val(Register(1));
+        b.load(Register(1));
+        // Overwrite vec[0] to 999 mid-loop.
+        b.push(0).push(999).vec_set(Register(0));
+        b.next();
+        b.halt();
+    });
+    // First iteration should yield 10, second should yield 20 (not 999),
+    // so the stack ends up as [10, 20].
+    assert_eq!(vm.stack(), &[10, 20]);
+}
+
+#[test]
+fn iter_rejects_negative_start() {
+    let err = run_err(|b| {
+        b.vec_i(Register(0));
+        b.push(1).vec_push(Register(0));
+        b.push(-1).push(1).iter(Register(0));
+        b.next().halt();
+    });
+    assert!(
+        matches!(err, Error::IndexOutOfBounds { index: -1, .. }),
+        "expected IndexOutOfBounds with index=-1, got {err:?}"
+    );
+}
+
+#[test]
+fn iter_rejects_end_past_len() {
+    let err = run_err(|b| {
+        b.vec_i(Register(0));
+        b.push(1).vec_push(Register(0));
+        b.push(0).push(5).iter(Register(0));
+        b.next().halt();
+    });
+    assert!(
+        matches!(err, Error::IndexOutOfBounds { index: 5, .. }),
+        "expected IndexOutOfBounds with index=5, got {err:?}"
+    );
+}
+
+#[test]
+fn iter_rejects_inverted_range() {
+    let err = run_err(|b| {
+        b.vec_i(Register(0));
+        b.push(1).vec_push(Register(0));
+        b.push(2).vec_push(Register(0));
+        b.push(2).push(1).iter(Register(0));
+        b.next().halt();
+    });
+    assert!(
+        matches!(err, Error::IndexOutOfBounds { index: 1, .. }),
+        "expected IndexOutOfBounds rejecting inverted range, got {err:?}"
+    );
 }
 
 #[test]
@@ -512,21 +600,39 @@ fn lidx_matches_lval_in_range_loop() {
 
 #[test]
 fn lidx_in_iter_loop_returns_position() {
-    // For ITER loops LIDX returns the current position within the iterated
-    // vec. ITER does not yet support slicing in xq-rs (QUI-407), so the
-    // position is the raw vec index 0..len.
+    // For ITER loops LIDX returns the current position within the *source*
+    // vec, i.e. start_offset + index. Iterate the full vec so positions
+    // start at 0.
     let vm = run(|b| {
         b.vec_i(Register(0));
         b.push(100).vec_push(Register(0));
         b.push(200).vec_push(Register(0));
         b.push(300).vec_push(Register(0));
-        b.iter(Register(0));
+        b.push(0).push(3).iter(Register(0));
         b.lidx(Register(1));
         b.load(Register(1));
         b.next();
         b.halt();
     });
     assert_eq!(vm.stack(), &[0, 1, 2]);
+}
+
+#[test]
+fn lidx_in_iter_slice_reports_absolute_position() {
+    // Iterating vec[2..5] should give LIDX values 2, 3, 4 -- the original
+    // vec positions, not 0, 1, 2.
+    let vm = run(|b| {
+        b.vec_i(Register(0));
+        for v in [10, 20, 30, 40, 50] {
+            b.push(v).vec_push(Register(0));
+        }
+        b.push(2).push(5).iter(Register(0));
+        b.lidx(Register(1));
+        b.load(Register(1));
+        b.next();
+        b.halt();
+    });
+    assert_eq!(vm.stack(), &[2, 3, 4]);
 }
 
 #[test]

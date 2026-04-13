@@ -58,8 +58,36 @@ use crate::value::RegVal;
 pub(crate) enum LoopKind {
     /// A range loop started by `RANGE`. Iterates current..end.
     Range { current: i64, end: i64 },
-    /// A vec-iteration loop started by `ITER`. Iterates over register's vec.
-    Iter { reg: u8, index: usize },
+    /// A vec-iteration loop started by `ITER`. The frame owns a copy of the
+    /// slice `vec[start_offset..start_offset + elements.len()]` taken at the
+    /// time `ITER` ran, so subsequent mutations to the source register do
+    /// not affect the iteration. `start_offset` is reported by `LIDX` so
+    /// loop bodies can recover the original vec position.
+    Iter {
+        elements: IterElements,
+        start_offset: usize,
+        index: usize,
+    },
+}
+
+/// Storage for the slice copied by `ITER`.
+///
+/// Vecs in xq-rs hold either `Int` or `Model` elements, so the loop frame
+/// carries one of two parallel buffers rather than a `Vec<RegVal>` (which
+/// would force `RegVal::default()` placeholders into every slot).
+#[derive(Debug)]
+pub(crate) enum IterElements {
+    Int(Vec<i64>),
+    Xqmx(Vec<XqmxModel>),
+}
+
+impl IterElements {
+    fn len(&self) -> usize {
+        match self {
+            Self::Int(v) => v.len(),
+            Self::Xqmx(v) => v.len(),
+        }
+    }
 }
 
 /// A single frame on the loop stack.
@@ -94,6 +122,52 @@ pub(crate) enum StepResult {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Validate `start`/`end` against `len` and return `(start_usize, range)`.
+///
+/// `ITER` accepts the indices via the value stack as `i64`. The accepted
+/// range is `0 <= start <= end` and `0 <= end <= len`; anything outside
+/// produces an `IndexOutOfBounds` error pointing at the offending value.
+/// `start == end` is permitted and produces an empty range.
+fn resolve_iter_slice(
+    pos: usize,
+    start: i64,
+    end: i64,
+    len: usize,
+) -> Result<(usize, core::ops::Range<usize>), Error> {
+    let start_us = usize::try_from(start).map_err(|_| Error::IndexOutOfBounds {
+        pos,
+        index: start,
+        len,
+    })?;
+    let end_us = usize::try_from(end).map_err(|_| Error::IndexOutOfBounds {
+        pos,
+        index: end,
+        len,
+    })?;
+    if start_us > len {
+        return Err(Error::IndexOutOfBounds {
+            pos,
+            index: start,
+            len,
+        });
+    }
+    if end_us > len {
+        return Err(Error::IndexOutOfBounds {
+            pos,
+            index: end,
+            len,
+        });
+    }
+    if start_us > end_us {
+        return Err(Error::IndexOutOfBounds {
+            pos,
+            index: end,
+            len,
+        });
+    }
+    Ok((start_us, start_us..end_us))
+}
 
 /// Sign-extend a big-endian byte slice (1..=8 bytes) to `i64`.
 fn sign_extend_be(bytes: &[u8]) -> i64 {
@@ -481,24 +555,11 @@ impl Vm {
                     let looping = *current < *end;
                     (looping, frame.body_start)
                 }
-                LoopKind::Iter { reg, index } => {
-                    let len = match self
-                        .regs
-                        .get(usize::from(*reg))
-                        .unwrap_or_else(|| unreachable!("register slot {} always valid", reg))
-                    {
-                        RegVal::VecInt(v) => v.len(),
-                        RegVal::VecXqmx(v) => v.len(),
-                        other => {
-                            return Err(Error::RegisterType {
-                                reg: *reg,
-                                expected: "vec",
-                                got: other.type_name(),
-                            });
-                        }
-                    };
+                LoopKind::Iter {
+                    elements, index, ..
+                } => {
                     *index += 1;
-                    let looping = *index < len;
+                    let looping = *index < elements.len();
                     (looping, frame.body_start)
                 }
             }
@@ -516,13 +577,17 @@ impl Vm {
         // Per `XQVM_SPEC.md` (`LIDX`), copy the current loop index into `reg`.
         // For `RANGE` loops the values *are* indices, so `LIDX` and `LVAL`
         // produce the same result. For `ITER` loops `LIDX` reports the
-        // position inside the source vec; once `ITER` learns slicing
-        // (QUI-407) this will become `start_idx + index`, but the slice
-        // machinery does not exist yet so the raw vec index is correct.
+        // *original* vec position (`start_offset + index`), so loop bodies
+        // can reach back into the source vec by absolute index even after
+        // `ITER` slicing.
         let frame = self.loop_stack.last().ok_or(Error::NoActiveLoop { pos })?;
         let value = match &frame.kind {
             LoopKind::Range { current, .. } => *current,
-            LoopKind::Iter { index, .. } => i64::try_from(*index).unwrap_or(i64::MAX),
+            LoopKind::Iter {
+                start_offset,
+                index,
+                ..
+            } => i64::try_from(start_offset.saturating_add(*index)).unwrap_or(i64::MAX),
         };
         *self
             .regs
@@ -541,37 +606,27 @@ impl Vm {
                     .unwrap_or_else(|| unreachable!("register slot always valid")) =
                     RegVal::Int(*current);
             }
-            LoopKind::Iter { reg: src, index } => {
-                let src_reg = *src;
+            LoopKind::Iter {
+                elements, index, ..
+            } => {
                 let idx = *index;
-                let val = match self
-                    .regs
-                    .get(usize::from(src_reg))
-                    .unwrap_or_else(|| unreachable!("register slot {} always valid", src_reg))
-                {
-                    RegVal::VecInt(v) => {
+                let val = match elements {
+                    IterElements::Int(v) => {
                         RegVal::Int(*v.get(idx).ok_or(Error::IndexOutOfBounds {
                             pos,
-                            index: idx as i64,
+                            index: i64::try_from(idx).unwrap_or(i64::MAX),
                             len: v.len(),
                         })?)
                     }
-                    RegVal::VecXqmx(v) => RegVal::Model(
+                    IterElements::Xqmx(v) => RegVal::Model(
                         v.get(idx)
                             .ok_or(Error::IndexOutOfBounds {
                                 pos,
-                                index: idx as i64,
+                                index: i64::try_from(idx).unwrap_or(i64::MAX),
                                 len: v.len(),
                             })?
                             .clone(),
                     ),
-                    other => {
-                        return Err(Error::RegisterType {
-                            reg: src_reg,
-                            expected: "vec",
-                            got: other.type_name(),
-                        });
-                    }
                 };
                 *self
                     .regs
@@ -593,24 +648,60 @@ impl Vm {
         })
     }
 
-    fn exec_iter(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
-        // Validate the register holds a vec before starting.
+    fn exec_iter(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        // Per `XQVM_SPEC.md` (`ITER`): pop `end_idx`, then `start_idx`, read
+        // the source vec from `reg`, and copy `vec[start_idx..end_idx]` into
+        // the loop frame. The slice is duplicated so that mutations to the
+        // source vec inside the loop body do not affect what `LVAL` sees.
+        // `LIDX` later reports `start_offset + index` as the absolute vec
+        // position. Errors:
+        //
+        //   * `RegisterType`        -- `reg` does not hold a vec
+        //   * `IndexOutOfBounds`    -- `start_idx` or `end_idx` is negative
+        //                              or greater than `vec.len()`
+        //
+        // If `start_idx == end_idx` the resulting slice is empty; xq-rs
+        // keeps do-while semantics, so the loop body still runs once before
+        // `NEXT` pops the frame, mirroring the existing `RANGE` behaviour.
+        let end = self.pop(pos)?;
+        let start = self.pop(pos)?;
         match self.reg(reg) {
-            RegVal::VecInt(_) | RegVal::VecXqmx(_) => {}
-            other => {
-                return Err(Error::RegisterType {
-                    reg: reg.slot(),
-                    expected: "vec",
-                    got: other.type_name(),
-                });
+            RegVal::VecInt(v) => {
+                let len = v.len();
+                let (start_offset, range) = resolve_iter_slice(pos, start, end, len)?;
+                let copy = v
+                    .get(range)
+                    .map(<[i64]>::to_vec)
+                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"));
+                Ok(StepResult::StartLoop {
+                    kind: LoopKind::Iter {
+                        elements: IterElements::Int(copy),
+                        start_offset,
+                        index: 0,
+                    },
+                })
             }
-        }
-        Ok(StepResult::StartLoop {
-            kind: LoopKind::Iter {
+            RegVal::VecXqmx(v) => {
+                let len = v.len();
+                let (start_offset, range) = resolve_iter_slice(pos, start, end, len)?;
+                let copy = v
+                    .get(range)
+                    .map(<[XqmxModel]>::to_vec)
+                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"));
+                Ok(StepResult::StartLoop {
+                    kind: LoopKind::Iter {
+                        elements: IterElements::Xqmx(copy),
+                        start_offset,
+                        index: 0,
+                    },
+                })
+            }
+            other => Err(Error::RegisterType {
                 reg: reg.slot(),
-                index: 0,
-            },
-        })
+                expected: "vec",
+                got: other.type_name(),
+            }),
+        }
     }
 
     fn exec_halt(&mut self, _pos: usize) -> Result<StepResult, Error> {

@@ -39,33 +39,61 @@ NEXT
 
 ```
 LoopKind::Iter {
-    reg: Register,   // register holding the vector
-    index: usize,    // current element index
+    elements: IterElements,  // slice copy of vec[start..end]
+    start_offset: usize,     // original `start` index, used by LIDX
+    index: usize,            // current position within `elements`
+}
+
+enum IterElements {
+    Int(Vec<i64>),
+    Xqmx(Vec<XqmxModel>),
 }
 ```
 
-`ITER reg` validates that `reg` holds `VecInt` or `VecXqmx`, then pushes a
-frame with `index = 0`. On each `NEXT`, `index` is incremented. If
-`index < len(reg)`, execution seeks back; otherwise the frame is popped.
+`ITER reg` pops `end_idx`, then `start_idx`, validates that `reg` holds
+`VecInt` or `VecXqmx`, and copies `vec[start_idx..end_idx]` into a new
+frame with `index = 0`. The slice is *duplicated* so that mutations to the
+source vec inside the loop body do not affect what `LVAL` sees.
+
+On each `NEXT`, `index` is incremented. If `index < elements.len()`,
+execution seeks back to `body_start`; otherwise the frame is popped.
 
 ```asm
-; Assume r1 holds VecInt([10, 20, 30])
-ITER r1
-  LVAL r2    ; r2 ← vec[index] (10, 20, 30 in turn)
+; Assume r1 holds VecInt([10, 20, 30, 40, 50])
+PUSH 1
+PUSH 4
+ITER r1            ; iterate r1[1..4] -> values 20, 30, 40
+  LVAL r2          ; r2 -> Int(20), Int(30), Int(40)
+  LIDX r3          ; r3 -> Int(1), Int(2), Int(3) (absolute positions)
   ; ... body ...
 NEXT
 ```
+
+`ITER` errors with `IndexOutOfBounds` if either index is negative, exceeds
+`vec.len()`, or if `start_idx > end_idx`.
 
 ## LVAL -- Reading the Loop Value
 
 `LVAL reg` copies the current loop value into a register:
 
 - **Range:** `reg ← Int(current)`
-- **Iter over VecInt:** `reg ← Int(vec[index])`
-- **Iter over VecXqmx:** `reg ← Model(vec[index])`
+- **Iter over VecInt:** `reg ← Int(elements[index])` (the slice copy, not the source vec)
+- **Iter over VecXqmx:** `reg ← Model(elements[index])` (cloned)
 
 The element type is preserved: iterating over a `VecXqmx` yields `Model`
-values, not integers.
+values, not integers. Because `elements` is a slice copy taken at `ITER`
+time, mutating the source vec inside the loop body never changes what
+subsequent `LVAL` calls return.
+
+## LIDX -- Reading the Loop Index
+
+`LIDX reg` copies the current loop *index* into a register:
+
+- **Range:** `reg ← Int(current)` (identical to `LVAL` because Range values
+  are themselves indices).
+- **Iter:** `reg ← Int(start_offset + index)` -- the absolute position in
+  the source vec, not the 0-based slice position. This lets loop bodies
+  reach back into the source vec by absolute index even after slicing.
 
 ## Nesting
 
