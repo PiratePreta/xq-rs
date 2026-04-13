@@ -919,8 +919,10 @@ impl Vm {
         if !(0..64).contains(&b) {
             return Err(Error::InvalidShift { pos, amount: b });
         }
-        // Logical (unsigned) right shift.
-        self.push_stack(((a as u64) >> (b as u64)) as i64, pos)?;
+        // Arithmetic (sign-preserving) right shift, matching xq-py: the sign
+        // bit is replicated, so negative values stay negative and `i64::MIN >> 1`
+        // halves the magnitude rather than overflowing.
+        self.push_stack(a >> b, pos)?;
         Ok(StepResult::Continue)
     }
 

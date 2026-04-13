@@ -180,7 +180,7 @@ macro_rules! opcodes {
              {}),
             (0x3E, Shl,     "SHL",      "Pop b and a; push a << b.",
              {}),
-            (0x3F, Shr,     "SHR",      "Pop b and a; push a >> b (logical right shift).",
+            (0x3F, Shr,     "SHR",      "Pop b and a; push a >> b (arithmetic right shift, sign-preserving).",
              {}),
             // ---------------------------------------------------------------
             // Allocators

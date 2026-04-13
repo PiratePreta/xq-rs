@@ -158,7 +158,7 @@ Operate on raw `i64` bit patterns.
 | `0x3C` | `BXOR` | `[..., a, b] → [..., a ^ b]` | — | Bitwise XOR. |
 | `0x3D` | `BNOT` | `[..., a] → [..., ~a]` | — | Bitwise NOT (one's complement). |
 | `0x3E` | `SHL` | `[..., a, b] → [..., a << b]` | — | Left shift. `b` must satisfy `0 ≤ b < 64`; otherwise errors. Signed `i64` left shift, wrapping behaviour on overflow. |
-| `0x3F` | `SHR` | `[..., a, b] → [..., (a as u64 >> b) as i64]` | — | Logical (unsigned) right shift. `b` must satisfy `0 ≤ b < 64`. The high bit is always filled with `0`. |
+| `0x3F` | `SHR` | `[..., a, b] → [..., a >> b]` | — | Arithmetic (sign-preserving) right shift on `i64`. `b` must satisfy `0 ≤ b < 64`. The sign bit is replicated, matching `XQVM_SPEC.md` and Rust's native `i64 >> b` operator. |
 
 ---
 

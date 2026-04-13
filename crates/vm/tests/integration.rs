@@ -283,11 +283,39 @@ fn shl_basic() {
 
 #[test]
 fn shr_basic() {
-    // Logical right shift: sign bit is not replicated.
+    // Arithmetic right shift on a positive value matches integer division by 2^b.
+    let vm = run(|b| {
+        b.push(16i64).push(2).shr().halt();
+    });
+    assert_eq!(vm.stack(), &[4]);
+}
+
+#[test]
+fn shr_preserves_sign_on_negative() {
+    // `-1 >> 1` is `-1` under arithmetic shift: every bit is set, sign-extended.
     let vm = run(|b| {
         b.push(-1i64).push(1).shr().halt();
     });
-    assert_eq!(vm.stack(), &[i64::MAX]);
+    assert_eq!(vm.stack(), &[-1]);
+}
+
+#[test]
+fn shr_arithmetic_negative_value() {
+    // `-8 >> 1` == `-4`: the sign bit is replicated.
+    let vm = run(|b| {
+        b.push(-8i64).push(1).shr().halt();
+    });
+    assert_eq!(vm.stack(), &[-4]);
+}
+
+#[test]
+fn shr_i64_min_does_not_overflow() {
+    // Arithmetic SHR halves `i64::MIN` instead of producing `i64::MAX` (which
+    // is what the old logical-shift implementation returned).
+    let vm = run(|b| {
+        b.push(i64::MIN).push(1).shr().halt();
+    });
+    assert_eq!(vm.stack(), &[i64::MIN / 2]);
 }
 
 // ---------------------------------------------------------------------------
