@@ -28,11 +28,17 @@ use std::collections::BTreeMap;
 /// Variable domain for an XQMX model or sample.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Domain {
-    /// Binary domain: variables take values in {0, 1}.
+    /// Binary domain: variables take values in `{0, 1}`.
     Binary,
-    /// Spin domain: variables take values in {-1, 1}.
+    /// Spin domain: variables take values in `{-1, 1}`.
     Spin,
-    /// Discrete domain: variables take values in {0, ..., k-1}.
+    /// Discrete (chromatic) domain: variables take values in the signed
+    /// centered range `{-k, -(k-1), ..., k-2, k-1}`.
+    ///
+    /// `k` is required to be at least 2; the VM rejects `XQMX`/`XSMX`
+    /// allocations with smaller `k` via [`crate::Error::InvalidDiscreteK`].
+    /// This range matches the `XQVM_SPEC.md` reference and is symmetric
+    /// around zero, so the default sample value `0` is always in-domain.
     Discrete(i64),
 }
 

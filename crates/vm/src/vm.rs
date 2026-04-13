@@ -943,6 +943,9 @@ impl Vm {
     fn exec_xqmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let k = self.pop(pos)?;
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        if k < 2 {
+            return Err(Error::InvalidDiscreteK { pos, k });
+        }
         *self.reg_mut(reg) = RegVal::Model(XqmxModel::new(Domain::Discrete(k), size));
         Ok(StepResult::Continue)
     }
@@ -962,6 +965,9 @@ impl Vm {
     fn exec_xsmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let k = self.pop(pos)?;
         let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        if k < 2 {
+            return Err(Error::InvalidDiscreteK { pos, k });
+        }
         *self.reg_mut(reg) = RegVal::Sample(XqmxSample::new(Domain::Discrete(k), vec![0; size]));
         Ok(StepResult::Continue)
     }

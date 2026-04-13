@@ -877,6 +877,87 @@ fn xqmx_discrete_model() {
 }
 
 #[test]
+fn xqmx_minimum_k_is_two() {
+    // k = 2 is the smallest legal discrete domain ([-2, 1]).
+    let vm = run(|b| {
+        b.push(4).push(2).xqmx(Register(0));
+        b.halt();
+    });
+    if let RegVal::Model(m) = vm.register(0) {
+        assert_eq!(m.domain, Domain::Discrete(2));
+        assert_eq!(m.size, 4);
+    } else {
+        panic!("expected model register");
+    }
+}
+
+#[test]
+fn xqmx_rejects_k_one() {
+    // k = 1 collapses the [-k, k-1] range to a single value (-1) and is
+    // explicitly forbidden by the spec.
+    let err = run_err(|b| {
+        b.push(2).push(1).xqmx(Register(0));
+        b.halt();
+    });
+    assert!(
+        matches!(err, Error::InvalidDiscreteK { k: 1, .. }),
+        "expected InvalidDiscreteK, got {err:?}"
+    );
+}
+
+#[test]
+fn xqmx_rejects_zero_k() {
+    let err = run_err(|b| {
+        b.push(2).push(0).xqmx(Register(0));
+        b.halt();
+    });
+    assert!(
+        matches!(err, Error::InvalidDiscreteK { k: 0, .. }),
+        "expected InvalidDiscreteK, got {err:?}"
+    );
+}
+
+#[test]
+fn xqmx_rejects_negative_k() {
+    let err = run_err(|b| {
+        b.push(2).push(-3).xqmx(Register(0));
+        b.halt();
+    });
+    assert!(
+        matches!(err, Error::InvalidDiscreteK { k: -3, .. }),
+        "expected InvalidDiscreteK, got {err:?}"
+    );
+}
+
+#[test]
+fn xsmx_allocates_discrete_sample() {
+    // XSMX: pops k (top) then size. Default values are zero, which lies in
+    // the centered domain [-k, k-1] for any k >= 2.
+    let vm = run(|b| {
+        b.push(3).push(4).xsmx(Register(0));
+        b.halt();
+    });
+    if let RegVal::Sample(s) = vm.register(0) {
+        assert_eq!(s.domain, Domain::Discrete(4));
+        assert_eq!(s.values, vec![0, 0, 0]);
+    } else {
+        panic!("expected sample register");
+    }
+}
+
+#[test]
+fn xsmx_rejects_k_below_two() {
+    let err = run_err(|b| {
+        b.push(3).push(1).xsmx(Register(0));
+        b.halt();
+    });
+    assert!(
+        matches!(err, Error::InvalidDiscreteK { k: 1, .. }),
+        "expected InvalidDiscreteK, got {err:?}"
+    );
+}
+
+#[test]
 fn resize_sets_grid_dims() {
     // RESIZE: pops cols (top) then rows. push rows=3, cols=3.
     let vm = run(|b| {

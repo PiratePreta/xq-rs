@@ -127,6 +127,13 @@ pub enum Error {
     #[error("invalid grid dimensions {rows}x{cols} at byte {pos:#06x}")]
     InvalidGridDimensions { pos: usize, rows: i64, cols: i64 },
 
+    /// `XQMX`/`XSMX` was called with a discrete-domain `k` smaller than 2.
+    /// The signed domain `[-k, k-1]` collapses to a single value at `k = 1`
+    /// and is empty at `k <= 0`, so neither carries useful semantics; the
+    /// reference (`XQVM_SPEC.md`) requires `k >= 2`.
+    #[error("XQMX/XSMX requires k >= 2 for the [-k, k-1] domain, got k = {k} at byte {pos:#06x}")]
+    InvalidDiscreteK { pos: usize, k: i64 },
+
     /// A tracer callback returned an error (e.g. I/O write failure).
     #[error("trace failed at byte {pos:#06x}: {message}")]
     TraceFailed { pos: usize, message: String },
@@ -187,6 +194,7 @@ impl Error {
             | Self::TruncatedInstruction { pos }
             | Self::InvalidShift { pos, .. }
             | Self::InvalidGridDimensions { pos, .. }
+            | Self::InvalidDiscreteK { pos, .. }
             | Self::TraceFailed { pos, .. }
             | Self::BadJumpTarget { pos, .. }
             | Self::InvalidLabel { pos, .. }

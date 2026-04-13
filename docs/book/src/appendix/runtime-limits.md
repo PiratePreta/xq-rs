@@ -57,3 +57,4 @@ for precise diagnostics. The full error enum is defined in
 | `StepLimitExceeded` | Execution exceeded configured limit. |
 | `InvalidGridDimensions` | `RESIZE` with rows or cols ≤ 0. |
 | `InvalidShift` | `SHL`/`SHR` shift amount outside [0, 64). |
+| `InvalidDiscreteK` | `XQMX`/`XSMX` called with `k < 2` (the signed `[-k, k-1]` domain requires at least two values). |
