@@ -40,8 +40,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::Instruction;
-//! use aglais_xqvm_bytecode::{codec, InstructionStream};
+//! use aglais_xqvm_bytecode::{codec, Instruction, InstructionStream};
 //!
 //! let program = [
 //!     Instruction::Push1 { val: [1] },
@@ -49,17 +48,20 @@
 //!     Instruction::Add  {},
 //!     Instruction::Halt {},
 //! ];
-//! let buf: Vec<u8> = program.iter().flat_map(|i| codec::encode(i)).collect();
+//! let buf: Vec<u8> = program.iter().flat_map(codec::encode).collect();
 //!
 //! // No jump table -- every label is None.
-//! let decoded: Vec<_> = InstructionStream::new(&buf)
-//!     .collect::<Result<Vec<_>>>()
-//!     .unwrap();
+//! let mut stream = InstructionStream::new(&buf);
+//! let mut decoded = Vec::new();
+//! while let Some(item) = stream.next() {
+//!     let (_offset, label, instr) = item.expect("decode");
+//!     assert!(label.is_none());
+//!     decoded.push(instr);
+//! }
 //!
 //! assert_eq!(decoded.len(), 4);
-//! assert_eq!(decoded[0].2, Instruction::Push1 { val: [1] });
-//! assert_eq!(decoded[3].2, Instruction::Halt {});
-//! assert!(decoded.iter().all(|(_, label, _)| label.is_none()));
+//! assert_eq!(decoded[0], Instruction::Push1 { val: [1] });
+//! assert_eq!(decoded[3], Instruction::Halt {});
 //! ```
 
 #[cfg(not(feature = "std"))]
@@ -199,7 +201,7 @@ impl<'a> InstructionStream<'a> {
     /// use aglais_xqvm_bytecode::InstructionStream;
     /// use aglais_xqvm_bytecode::Instruction;
     ///
-    /// let program = Program::new(vec![0x0Fu8]); // HALT
+    /// let program = Program::new(vec![0xFFu8]); // HALT
     ///
     /// let mut stream = InstructionStream::from_program(&program);
     /// let (_, _, instr) = stream.next_instruction().unwrap().unwrap();

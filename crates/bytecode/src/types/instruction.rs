@@ -42,9 +42,7 @@ macro_rules! impl_instruction {
         /// # Examples
         ///
         /// ```rust
-        /// use aglais_xqvm_bytecode::types::Instruction;
-        /// use aglais_xqvm_bytecode::types::Register;
-        /// use aglais_xqvm_bytecode::types::Opcode;
+        /// use aglais_xqvm_bytecode::{Instruction, Opcode, Register};
         ///
         /// let instr = Instruction::Pop {};
         /// assert_eq!(instr.opcode(), Opcode::Pop);
@@ -75,9 +73,7 @@ macro_rules! impl_instruction {
             /// # Examples
             ///
             /// ```rust
-            /// use aglais_xqvm_bytecode::types::Instruction;
-            /// use aglais_xqvm_bytecode::types::Register;
-            /// use aglais_xqvm_bytecode::types::Opcode;
+            /// use aglais_xqvm_bytecode::{Instruction, Opcode, Register};
             ///
             /// assert_eq!(Instruction::Add {}.opcode(), Opcode::Add);
             /// assert_eq!(Instruction::Stow { reg: Register(7) }.opcode(), Opcode::Stow);
@@ -95,7 +91,7 @@ macro_rules! impl_instruction {
             /// # Examples
             ///
             /// ```rust
-            /// use aglais_xqvm_bytecode::types::Instruction;
+            /// use aglais_xqvm_bytecode::Instruction;
             ///
             /// assert_eq!(Instruction::Halt {}.mnemonic(), "HALT");
             /// ```

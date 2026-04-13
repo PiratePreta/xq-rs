@@ -260,8 +260,8 @@ macro_rules! impl_codec {
         /// use aglais_xqvm_bytecode::Instruction;
         /// use aglais_xqvm_bytecode::codec;
         ///
-        /// assert_eq!(codec::encode(&Instruction::Halt {}), [0x09]);
-        /// assert_eq!(codec::encode(&Instruction::Nop {}),  [0x00]);
+        /// assert_eq!(codec::encode(&Instruction::Halt {}), [0xFF]);
+        /// assert_eq!(codec::encode(&Instruction::Nop {}),  [0xF0]);
         /// assert_eq!(codec::encode(&Instruction::Pop {}),  [0x10]);
         /// assert_eq!(codec::encode(&Instruction::Push1 { val: [42] }), [0x11, 42]);
         /// ```
@@ -359,12 +359,12 @@ mod tests {
 
     #[test]
     fn halt_is_one_byte() {
-        assert_eq!(encode(&Instruction::Halt {}), [0x09]);
+        assert_eq!(encode(&Instruction::Halt {}), [0xFF]);
     }
 
     #[test]
     fn nop_is_one_byte() {
-        assert_eq!(encode(&Instruction::Nop {}), [0x00]);
+        assert_eq!(encode(&Instruction::Nop {}), [0xF0]);
     }
 
     #[test]
@@ -406,22 +406,22 @@ mod tests {
 
     #[test]
     fn jump2_label_fixint_be() {
-        // Jump2 (wide form) at byte 0x02; u16(5) in BE = 0x0005
+        // Jump2 (wide form) at byte 0x03; u16(5) in BE = 0x0005
         let bytes = encode(&Instruction::Jump2 { label: 5u16 });
-        assert_eq!(bytes, [0x02, 0x00, 0x05]);
+        assert_eq!(bytes, [0x03, 0x00, 0x05]);
     }
 
     #[test]
     fn jump1_label_is_two_bytes() {
-        // Jump1 (narrow form) at byte 0x80; u8 label is one byte
+        // Jump1 (narrow form) at byte 0x01; u8 label is one byte
         let bytes = encode(&Instruction::Jump1 { label: 7u8 });
-        assert_eq!(bytes, [0x80, 0x07]);
+        assert_eq!(bytes, [0x01, 0x07]);
     }
 
     #[test]
     fn jumpi1_label_is_two_bytes() {
         let bytes = encode(&Instruction::JumpI1 { label: 0u8 });
-        assert_eq!(bytes, [0x81, 0x00]);
+        assert_eq!(bytes, [0x02, 0x00]);
     }
 
     #[test]
@@ -470,9 +470,9 @@ mod tests {
         ));
         // JUMP2 needs two label bytes.
         assert!(matches!(
-            decode(&[0x02u8, 0x00]),
+            decode(&[0x03u8, 0x00]),
             Err(DecodeError::TruncatedOperand {
-                opcode: 0x02,
+                opcode: 0x03,
                 needed: 2,
                 available: 1,
             })
