@@ -96,7 +96,7 @@ All other byte values outside the assigned ranges are likewise illegal.
 | `0x3C` | `BXOR` | [Bitwise](bitwise.md) | Bitwise XOR |
 | `0x3D` | `BNOT` | [Bitwise](bitwise.md) | Bitwise NOT |
 | `0x3E` | `SHL` | [Bitwise](bitwise.md) | Left shift |
-| `0x3F` | `SHR` | [Bitwise](bitwise.md) | Logical right shift |
+| `0x3F` | `SHR` | [Bitwise](bitwise.md) | Arithmetic right shift |
 | `0x40` | `BQMX` | [Allocators](allocators.md) | Alloc binary QUBO model |
 | `0x41` | `SQMX` | [Allocators](allocators.md) | Alloc spin Ising model |
 | `0x42` | `XQMX` | [Allocators](allocators.md) | Alloc discrete model |
