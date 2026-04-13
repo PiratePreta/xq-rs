@@ -15,78 +15,67 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Complete XQVM program: jump table + instruction bytes.
+//! Complete XQVM program: just the instruction stream.
 //!
-//! A [`Program`] is the top-level unit of XQVM bytecode. It wraps a
-//! [`JumpTable`] and the raw instruction stream, and provides
-//! [`encode`](Program::encode) / [`decode`](Program::decode) for the
-//! binary wire format.
-//!
-//! ## Wire format
-//!
-//! The binary format is: `jump_table_bytes ++ code_bytes`.
-//! [`encode`](Program::encode) serialises the jump table header followed by
-//! the instruction bytes. [`decode`](Program::decode) parses the jump table
-//! first, then treats the remainder as code.
+//! After QUI-405 the wire format is exactly the instruction stream -- the
+//! jump table is no longer serialised and is reconstructed by scanning for
+//! `TARGET` opcodes at load time. [`Program::from_bytes`] takes raw bytes
+//! and pre-computes the [`JumpTable`] once so subsequent VM runs do not pay
+//! the scan cost.
 //!
 //! # Examples
 //!
 //! ```rust
 //! use aglais_xqvm_bytecode::Program;
 //!
-//! let program = Program::new(vec![0x0Fu8]); // HALT, empty jump table
+//! let program = Program::new(vec![0x09u8]); // HALT
 //! let bytes = program.encode();
-//! let decoded = Program::decode(&bytes).unwrap();
-//! assert_eq!(decoded.code(), &[0x0F]);
+//! let decoded = Program::decode(&bytes).expect("decode");
+//! assert_eq!(decoded.code(), &[0x09]);
+//! assert!(decoded.jump_table().is_empty());
 //! ```
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use crate::jump_table::{DecodeError, JumpTable};
+use thiserror::Error;
+
+use crate::jump_table::JumpTable;
 
 // ---------------------------------------------------------------------------
 // Program
 // ---------------------------------------------------------------------------
 
-/// A complete XQVM program: jump table + instruction bytes.
+/// A complete XQVM program.
 ///
-/// Use [`encode`](Self::encode) and [`decode`](Self::decode) for
-/// serialisation. The jump table maps label indices used by `JUMP`/`JUMPI`
-/// to basic-block byte ranges in the instruction stream.
-///
-/// # Examples
-///
-/// ```rust
-/// use aglais_xqvm_bytecode::{Program, JumpTable, JumpEntry};
-///
-/// let table = JumpTable::new(vec![
-///     JumpEntry { label: 0, start: 0, end: 3 },
-/// ]);
-/// let prog = Program::new_with_table(table, vec![0x00, 0x00, 0x0F]);
-/// assert_eq!(prog.jump_table().len(), 1);
-/// ```
+/// Holds the instruction-stream bytes and a pre-computed [`JumpTable`] (the
+/// table is rebuilt every time you go through [`Self::new`] or
+/// [`Self::decode`]). The wire format -- what [`Self::encode`] returns -- is
+/// just the raw instruction bytes, with no jump-table header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    jump_table: JumpTable,
     code: Vec<u8>,
+    jump_table: JumpTable,
 }
 
 impl Program {
-    /// Create a program from raw instruction bytes (empty jump table).
+    /// Wrap raw instruction bytes in a [`Program`], computing the jump table
+    /// by scanning the buffer for `TARGET` opcodes.
     pub fn new(code: Vec<u8>) -> Self {
-        Self {
-            jump_table: JumpTable::default(),
-            code,
-        }
+        let jump_table = JumpTable::scan(&code);
+        Self { code, jump_table }
     }
 
-    /// Create a program with an explicit jump table.
-    pub fn new_with_table(jump_table: JumpTable, code: Vec<u8>) -> Self {
-        Self { jump_table, code }
+    /// Wrap raw instruction bytes with an explicit jump table.
+    ///
+    /// Useful in tests where the caller has already computed the table or
+    /// wants to override the scan result. In normal use [`Self::new`] is
+    /// preferable.
+    pub fn from_parts(code: Vec<u8>, jump_table: JumpTable) -> Self {
+        Self { code, jump_table }
     }
 
-    /// The jump table.
+    /// The pre-computed jump table.
     pub fn jump_table(&self) -> &JumpTable {
         &self.jump_table
     }
@@ -96,25 +85,34 @@ impl Program {
         &self.code
     }
 
-    /// Encode the program to a byte buffer (jump table + code).
+    /// Encode the program to its wire format -- the raw instruction stream.
+    ///
+    /// Equivalent to cloning [`Self::code`].
     pub fn encode(&self) -> Vec<u8> {
-        let mut buf = self.jump_table.encode();
-        buf.extend_from_slice(&self.code);
-        buf
+        self.code.clone()
     }
 
-    /// Decode a program from its encoded byte representation.
+    /// Decode a program from its wire format. Cannot fail because the wire
+    /// format is the raw instruction stream itself; the `Result` return is
+    /// kept for API symmetry with the eventual macro-codec migration.
     ///
     /// # Errors
     ///
-    /// Returns [`DecodeError`] if the jump table header is malformed or
-    /// truncated.
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let (jump_table, consumed) = JumpTable::decode(bytes)?;
-        let code = bytes.get(consumed..).unwrap_or_default().to_vec();
-        Ok(Self { jump_table, code })
+    /// This function currently never returns an error. The signature stays
+    /// `Result` so future format additions (length headers, magic bytes)
+    /// can introduce decoding failures without a breaking API change.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProgramDecodeError> {
+        Ok(Self::new(bytes.to_vec()))
     }
 }
+
+/// Error returned by [`Program::decode`].
+///
+/// No variants today (decoding never fails for the current wire format),
+/// but the type exists so future format extensions can add failures
+/// without a breaking signature change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum ProgramDecodeError {}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -123,46 +121,45 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jump_table::JumpEntry;
+    use crate::Instruction;
+    use crate::codec;
 
-    #[test]
-    fn encode_decode_roundtrip() {
-        let prog = Program::new(vec![0x0F]);
-        assert_eq!(Program::decode(&prog.encode()).unwrap().code(), prog.code());
+    fn assemble(instrs: &[Instruction]) -> Vec<u8> {
+        instrs.iter().flat_map(codec::encode).collect()
     }
 
     #[test]
-    fn empty_program() {
+    fn encode_is_just_the_code() {
+        let prog = Program::new(vec![0x09]);
+        assert_eq!(prog.encode(), vec![0x09]);
+    }
+
+    #[test]
+    fn decode_round_trips() {
+        let prog = Program::new(vec![0x09, 0x00]);
+        let decoded = Program::decode(&prog.encode()).unwrap();
+        assert_eq!(decoded.code(), &[0x09, 0x00]);
+    }
+
+    #[test]
+    fn empty_program_has_empty_jump_table() {
         let prog = Program::new(vec![]);
-        let bytes = prog.encode();
-        // Empty table header (2 bytes) + no code
-        assert_eq!(bytes, [0x00, 0x00]);
+        assert!(prog.jump_table().is_empty());
+        assert!(prog.encode().is_empty());
     }
 
     #[test]
-    fn code_is_preserved() {
-        let prog = Program::new(vec![0x0F, 0x00]);
-        let decoded = Program::decode(&prog.encode()).unwrap();
-        assert_eq!(decoded.code(), &[0x0F, 0x00]);
-    }
-
-    #[test]
-    fn roundtrip_with_jump_table() {
-        let table = JumpTable::new(vec![
-            JumpEntry {
-                label: 0,
-                start: 0,
-                end: 3,
-            },
-            JumpEntry {
-                label: 1,
-                start: 3,
-                end: 5,
-            },
+    fn jump_table_is_built_from_targets_in_code() {
+        let buf = assemble(&[
+            Instruction::Target {},
+            Instruction::Nop {},
+            Instruction::Target {},
+            Instruction::Halt {},
         ]);
-        let prog = Program::new_with_table(table, vec![0x00, 0x00, 0x0F, 0x00, 0x0F]);
-        let decoded = Program::decode(&prog.encode()).unwrap();
-        assert_eq!(decoded.jump_table(), prog.jump_table());
-        assert_eq!(decoded.code(), prog.code());
+        let prog = Program::new(buf);
+        let table = prog.jump_table();
+        assert_eq!(table.len(), 2);
+        assert_eq!(table.get(0), Some(0));
+        assert_eq!(table.get(1), Some(2));
     }
 }

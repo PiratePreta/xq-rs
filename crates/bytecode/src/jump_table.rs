@@ -15,226 +15,126 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Jump table: maps label indices to basic-block byte ranges.
+//! Jump table: maps sequential `TARGET` ids to their byte positions.
 //!
-//! A [`JumpTable`] is a sequence of [`JumpEntry`] triples
-//! `(label, start, end)` where `start` and `end` are absolute byte offsets
-//! into the instruction stream. The label index is a zero-based `u16` that
-//! `JUMP` and `JUMPI` operands reference directly.
+//! After QUI-405 the jump table is no longer part of the wire format. It is
+//! computed at load time by scanning the instruction stream for `TARGET`
+//! opcodes; each `TARGET` is assigned a sequential id (`0, 1, 2, ...`) in
+//! program order, and the table records the byte offset where it starts.
 //!
-//! ## Wire format
-//!
-//! The jump table is serialized immediately before the instruction stream:
-//!
-//! | Field | Type | Bytes |
-//! |---|---|---|
-//! | `entry_count` | u16 BE | 2 |
-//! | Per entry: `label` | u16 BE | 2 |
-//! | Per entry: `start` | u32 BE | 4 |
-//! | Per entry: `end` | u32 BE | 4 |
-//!
-//! Total: `2 + 10 * entry_count` bytes.
+//! `JUMP1`/`JUMP2`/`JUMPI1`/`JUMPI2` operands are these sequential ids: the
+//! VM looks up `jump_table.get(label)` to recover the target byte offset.
+//! This matches the xq-py reference behaviour described in `XQVM_SPEC.md`.
 //!
 //! # Examples
 //!
 //! ```rust
-//! use aglais_xqvm_bytecode::JumpTable;
+//! use aglais_xqvm_bytecode::{Instruction, JumpTable, codec};
 //!
-//! let table = JumpTable::default();
-//! assert!(table.is_empty());
-//! let bytes = table.encode();
-//! let (decoded, consumed) = JumpTable::decode(&bytes).unwrap();
-//! assert_eq!(consumed, 2);
-//! assert!(decoded.is_empty());
+//! let bytes: Vec<u8> = [
+//!     Instruction::Target {},
+//!     Instruction::Halt {},
+//! ]
+//! .iter()
+//! .flat_map(codec::encode)
+//! .collect();
+//!
+//! let table = JumpTable::scan(&bytes);
+//! assert_eq!(table.len(), 1);
+//! assert_eq!(table.get(0), Some(0));
 //! ```
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use thiserror::Error;
-
-// ---------------------------------------------------------------------------
-// Entry
-// ---------------------------------------------------------------------------
-
-/// A single jump-table entry: maps a label index to a byte range.
-///
-/// `start` is the offset of the first byte of the basic block.
-/// `end` is one past the last byte (exclusive), so the block spans
-/// `[start, end)`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct JumpEntry {
-    /// Zero-based label index.
-    pub label: u16,
-    /// Start offset (inclusive) of the basic block in the instruction stream.
-    pub start: u32,
-    /// End offset (exclusive) of the basic block in the instruction stream.
-    pub end: u32,
-}
-
-/// Byte size of a single wire-encoded entry (2 + 4 + 4).
-const ENTRY_SIZE: usize = 10;
-
-// ---------------------------------------------------------------------------
-// Error
-// ---------------------------------------------------------------------------
-
-/// Error returned when decoding a [`JumpTable`] from bytes.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum DecodeError {
-    /// The input is too short to contain the entry-count header.
-    #[error("jump table truncated: need at least 2 bytes, got {len}")]
-    TruncatedHeader {
-        /// Actual byte length available.
-        len: usize,
-    },
-
-    /// The input is too short for the declared number of entries.
-    #[error(
-        "jump table truncated: header declares {count} entries \
-         ({expected} bytes) but only {available} bytes remain"
-    )]
-    TruncatedEntries {
-        /// Declared entry count.
-        count: u16,
-        /// Bytes required for the entries.
-        expected: usize,
-        /// Bytes actually available after the header.
-        available: usize,
-    },
-}
+use crate::stream::InstructionStream;
+use crate::types::Instruction;
 
 // ---------------------------------------------------------------------------
 // JumpTable
 // ---------------------------------------------------------------------------
 
-/// A collection of basic-block descriptors used by `JUMP` / `JUMPI`.
+/// Maps sequential `TARGET` ids to their byte positions in the instruction
+/// stream.
 ///
-/// Entries are indexed by their `label` field: `get(label)` returns the
-/// entry whose `label` matches. Labels form a dense `0..N` range, so
-/// lookup is O(1) via direct indexing.
+/// Built by [`scan`](Self::scan) -- a single linear pass that records the
+/// byte offset of every `TARGET` opcode in the order they appear. Lookups
+/// are O(1) via direct indexing.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::{JumpTable, JumpEntry};
+/// use aglais_xqvm_bytecode::{Instruction, JumpTable, codec};
 ///
-/// let entries = vec![
-///     JumpEntry { label: 0, start: 0, end: 5 },
-///     JumpEntry { label: 1, start: 5, end: 12 },
-/// ];
-/// let table = JumpTable::new(entries);
+/// // Two TARGETs followed by HALT.
+/// let bytes: Vec<u8> = [
+///     Instruction::Target {},
+///     Instruction::Target {},
+///     Instruction::Halt {},
+/// ]
+/// .iter()
+/// .flat_map(codec::encode)
+/// .collect();
+///
+/// let table = JumpTable::scan(&bytes);
 /// assert_eq!(table.len(), 2);
-/// assert_eq!(table.get(0).unwrap().start, 0);
-/// assert_eq!(table.get(1).unwrap().end, 12);
-/// assert!(table.get(2).is_none());
+/// assert_eq!(table.get(0), Some(0));
+/// assert_eq!(table.get(1), Some(1));
+/// assert_eq!(table.get(2), None);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JumpTable {
-    entries: Vec<JumpEntry>,
+    /// `targets[seq_id]` is the byte offset of the `TARGET` opcode whose
+    /// sequential id is `seq_id`.
+    targets: Vec<usize>,
 }
 
 impl JumpTable {
-    /// Create a jump table from a list of entries.
-    pub fn new(entries: Vec<JumpEntry>) -> Self {
-        Self { entries }
+    /// Create a jump table from an explicit list of target byte offsets,
+    /// indexed by sequential id.
+    pub fn new(targets: Vec<usize>) -> Self {
+        Self { targets }
     }
 
-    /// Look up a jump-table entry by label index.
+    /// Scan an instruction-byte buffer and record the position of every
+    /// `TARGET` opcode in stream order.
     ///
-    /// Returns `None` if `label` is out of range.
-    pub fn get(&self, label: u16) -> Option<&JumpEntry> {
-        self.entries.iter().find(|e| e.label == label)
+    /// Truncated or unknown opcodes encountered during the scan are silently
+    /// skipped (they will surface again as proper errors when the VM walks
+    /// the same buffer at runtime). The scan is single-pass and allocates
+    /// only the output `Vec`.
+    pub fn scan(code: &[u8]) -> Self {
+        let mut targets = Vec::new();
+        let mut stream = InstructionStream::new(code);
+        while let Some(item) = stream.next_instruction() {
+            if let Ok((pos, _label, Instruction::Target {})) = item {
+                targets.push(pos);
+            }
+        }
+        Self { targets }
     }
 
-    /// The number of entries.
+    /// Look up the byte offset of the `TARGET` with sequential id `label`.
+    ///
+    /// Returns `None` if `label` is out of range (i.e. the program contains
+    /// fewer than `label + 1` `TARGET` opcodes).
+    pub fn get(&self, label: u16) -> Option<usize> {
+        self.targets.get(usize::from(label)).copied()
+    }
+
+    /// Number of `TARGET` opcodes recorded.
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.targets.len()
     }
 
-    /// Whether the table is empty (no basic blocks).
+    /// Whether the table is empty (the program has no `TARGET` opcodes).
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.targets.is_empty()
     }
 
-    /// Borrow the entries slice.
-    pub fn entries(&self) -> &[JumpEntry] {
-        &self.entries
-    }
-
-    /// Encode the jump table to bytes (big-endian wire format).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use aglais_xqvm_bytecode::{JumpTable, JumpEntry};
-    ///
-    /// let table = JumpTable::new(vec![
-    ///     JumpEntry { label: 0, start: 0, end: 10 },
-    /// ]);
-    /// let bytes = table.encode();
-    /// assert_eq!(bytes.len(), 2 + 10); // header + 1 entry
-    /// ```
-    pub fn encode(&self) -> Vec<u8> {
-        let count = self.entries.len() as u16;
-        let mut buf = Vec::with_capacity(2 + self.entries.len() * ENTRY_SIZE);
-        buf.extend_from_slice(&count.to_be_bytes());
-        for entry in &self.entries {
-            buf.extend_from_slice(&entry.label.to_be_bytes());
-            buf.extend_from_slice(&entry.start.to_be_bytes());
-            buf.extend_from_slice(&entry.end.to_be_bytes());
-        }
-        buf
-    }
-
-    /// Decode a jump table from the start of `bytes`.
-    ///
-    /// Returns the decoded table and the number of bytes consumed.
-    ///
-    /// # Errors
-    ///
-    /// - [`DecodeError::TruncatedHeader`] -- fewer than 2 bytes.
-    /// - [`DecodeError::TruncatedEntries`] -- not enough bytes for the
-    ///   declared entry count.
-    pub fn decode(bytes: &[u8]) -> Result<(Self, usize), DecodeError> {
-        if bytes.len() < 2 {
-            return Err(DecodeError::TruncatedHeader { len: bytes.len() });
-        }
-        let count = u16::from_be_bytes([*bytes.first().unwrap_or(&0), *bytes.get(1).unwrap_or(&0)]);
-        let body_len = usize::from(count) * ENTRY_SIZE;
-        let available = bytes.len() - 2;
-        if available < body_len {
-            return Err(DecodeError::TruncatedEntries {
-                count,
-                expected: body_len,
-                available,
-            });
-        }
-
-        let mut entries = Vec::with_capacity(usize::from(count));
-        let mut pos = 2;
-        for _ in 0..count {
-            let label = u16::from_be_bytes([
-                *bytes.get(pos).unwrap_or(&0),
-                *bytes.get(pos + 1).unwrap_or(&0),
-            ]);
-            let start = u32::from_be_bytes([
-                *bytes.get(pos + 2).unwrap_or(&0),
-                *bytes.get(pos + 3).unwrap_or(&0),
-                *bytes.get(pos + 4).unwrap_or(&0),
-                *bytes.get(pos + 5).unwrap_or(&0),
-            ]);
-            let end = u32::from_be_bytes([
-                *bytes.get(pos + 6).unwrap_or(&0),
-                *bytes.get(pos + 7).unwrap_or(&0),
-                *bytes.get(pos + 8).unwrap_or(&0),
-                *bytes.get(pos + 9).unwrap_or(&0),
-            ]);
-            entries.push(JumpEntry { label, start, end });
-            pos += ENTRY_SIZE;
-        }
-
-        Ok((Self { entries }, pos))
+    /// Borrow the raw `targets` slice (sequential id -> byte offset).
+    pub fn targets(&self) -> &[usize] {
+        &self.targets
     }
 }
 
@@ -246,104 +146,75 @@ impl JumpTable {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+    use crate::codec;
 
-    #[test]
-    fn empty_table_roundtrip() {
-        let table = JumpTable::default();
-        let bytes = table.encode();
-        assert_eq!(bytes, [0x00, 0x00]);
-        let (decoded, consumed) = JumpTable::decode(&bytes).unwrap();
-        assert_eq!(consumed, 2);
-        assert_eq!(decoded, table);
+    fn assemble(instrs: &[Instruction]) -> Vec<u8> {
+        instrs.iter().flat_map(codec::encode).collect()
     }
 
     #[test]
-    fn single_entry_roundtrip() {
-        let table = JumpTable::new(vec![JumpEntry {
-            label: 0,
-            start: 0,
-            end: 42,
-        }]);
-        let bytes = table.encode();
-        assert_eq!(bytes.len(), 12);
-        let (decoded, consumed) = JumpTable::decode(&bytes).unwrap();
-        assert_eq!(consumed, 12);
-        assert_eq!(decoded, table);
+    fn empty_buffer_has_no_targets() {
+        let table = JumpTable::scan(&[]);
+        assert!(table.is_empty());
+        assert_eq!(table.len(), 0);
+        assert_eq!(table.get(0), None);
     }
 
     #[test]
-    fn multi_entry_roundtrip() {
-        let table = JumpTable::new(vec![
-            JumpEntry {
-                label: 0,
-                start: 0,
-                end: 10,
-            },
-            JumpEntry {
-                label: 1,
-                start: 10,
-                end: 25,
-            },
-            JumpEntry {
-                label: 2,
-                start: 25,
-                end: 30,
-            },
+    fn buffer_with_no_targets_has_empty_table() {
+        let buf = assemble(&[Instruction::Push1 { val: [42] }, Instruction::Halt {}]);
+        let table = JumpTable::scan(&buf);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn single_target_at_offset_zero() {
+        let buf = assemble(&[Instruction::Target {}, Instruction::Halt {}]);
+        let table = JumpTable::scan(&buf);
+        assert_eq!(table.len(), 1);
+        assert_eq!(table.get(0), Some(0));
+    }
+
+    #[test]
+    fn target_after_other_instructions() {
+        // PUSH1 (2 bytes) + TARGET (1 byte) + HALT
+        let buf = assemble(&[
+            Instruction::Push1 { val: [7] },
+            Instruction::Target {},
+            Instruction::Halt {},
         ]);
-        let bytes = table.encode();
-        let (decoded, consumed) = JumpTable::decode(&bytes).unwrap();
-        assert_eq!(consumed, 2 + 3 * 10);
-        assert_eq!(decoded, table);
+        let table = JumpTable::scan(&buf);
+        assert_eq!(table.len(), 1);
+        assert_eq!(table.get(0), Some(2));
     }
 
     #[test]
-    fn get_by_label() {
-        let table = JumpTable::new(vec![
-            JumpEntry {
-                label: 0,
-                start: 0,
-                end: 5,
-            },
-            JumpEntry {
-                label: 1,
-                start: 5,
-                end: 12,
-            },
+    fn multiple_targets_get_sequential_ids() {
+        // TARGET (0) + NOP (1) + TARGET (2) + NOP (3) + TARGET (4) + HALT
+        let buf = assemble(&[
+            Instruction::Target {},
+            Instruction::Nop {},
+            Instruction::Target {},
+            Instruction::Nop {},
+            Instruction::Target {},
+            Instruction::Halt {},
         ]);
-        assert_eq!(table.get(0).unwrap().start, 0);
-        assert_eq!(table.get(1).unwrap().end, 12);
-        assert!(table.get(2).is_none());
+        let table = JumpTable::scan(&buf);
+        assert_eq!(table.len(), 3);
+        assert_eq!(table.get(0), Some(0));
+        assert_eq!(table.get(1), Some(2));
+        assert_eq!(table.get(2), Some(4));
+        assert_eq!(table.get(3), None);
     }
 
     #[test]
-    fn truncated_header_error() {
-        assert!(matches!(
-            JumpTable::decode(&[0x00]),
-            Err(DecodeError::TruncatedHeader { len: 1 })
-        ));
-    }
-
-    #[test]
-    fn truncated_entries_error() {
-        // Header says 1 entry (10 bytes) but only 5 available.
-        let bytes = [0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
-        assert!(matches!(
-            JumpTable::decode(&bytes),
-            Err(DecodeError::TruncatedEntries { count: 1, .. })
-        ));
-    }
-
-    #[test]
-    fn decode_with_trailing_bytes() {
-        let table = JumpTable::new(vec![JumpEntry {
-            label: 0,
-            start: 0,
-            end: 5,
-        }]);
-        let mut bytes = table.encode();
-        bytes.extend_from_slice(&[0xFF, 0xFE]); // trailing code bytes
-        let (decoded, consumed) = JumpTable::decode(&bytes).unwrap();
-        assert_eq!(consumed, 12);
-        assert_eq!(decoded, table);
+    fn explicit_constructor_round_trips_through_get() {
+        let table = JumpTable::new(vec![10, 20, 30]);
+        assert_eq!(table.len(), 3);
+        assert_eq!(table.get(0), Some(10));
+        assert_eq!(table.get(1), Some(20));
+        assert_eq!(table.get(2), Some(30));
+        assert_eq!(table.get(3), None);
+        assert_eq!(table.targets(), &[10, 20, 30]);
     }
 }
