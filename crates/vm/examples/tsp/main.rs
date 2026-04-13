@@ -46,7 +46,7 @@
 //!    ordered tour; writes it to output slot 0.
 
 use aglais_xqvm_asm::assemble_source;
-use aglais_xqvm_vm::{Domain, RegVal, Vm, XqmxModel};
+use aglais_xqvm_vm::{Domain, RegVal, Vm, XqmxModel, XqmxSample};
 use miette::{IntoDiagnostic, Result, WrapErr, bail, ensure};
 
 const ENCODER_ASM: &str = include_str!("encoder.xqasm");
@@ -98,17 +98,35 @@ fn main() -> Result<()> {
 
     // -- Step 2: build the identity sample (city i visits position i) -----------
     //
-    // Samples are stored as XqmxModel with linear[city*N + position] = 1.
-    // This lets ROWSUM, COLSUM, COLFIND, and ENERGY operate on the sample
-    // using the standard model grid instructions.
+    // The verifier needs the sample in two shapes:
+    //
+    //   * `sample_grid` is an `XqmxModel` whose linear table stores
+    //     `linear[city*N + position] = 1`. The grid instructions
+    //     (`ROWSUM`, `COLSUM`, `ROWFIND`, `COLFIND`) only operate on
+    //     models, so the one-hot row/column scans need this shape.
+    //   * `sample_values` is an `XqmxSample` carrying the same dense
+    //     vector. `ENERGY` requires its sample operand to be an
+    //     `XqmxSample`, matching the xq-py spec; xq-rs used to allow a
+    //     model in the sample slot, but that shortcut was removed in
+    //     QUI-410.
+    //
+    // Both are derived from the same dense values so they cannot drift.
 
-    let mut sample = XqmxModel::new(Domain::Binary, n * n);
-    sample.rows = n;
-    sample.cols = n;
+    let mut dense = vec![0i64; n * n];
     for i in 0..n {
-        sample.set_linear(i * n + i, 1);
+        if let Some(slot) = dense.get_mut(i * n + i) {
+            *slot = 1;
+        }
     }
-    let sample_val = RegVal::Model(sample);
+
+    let mut sample_grid = XqmxModel::new(Domain::Binary, n * n);
+    sample_grid.rows = n;
+    sample_grid.cols = n;
+    for (idx, &val) in dense.iter().enumerate() {
+        sample_grid.set_linear(idx, val);
+    }
+    let sample_grid_val = RegVal::Model(sample_grid);
+    let sample_values_val = RegVal::Sample(XqmxSample::new(Domain::Binary, dense));
 
     // -- Step 3: verify the sample ----------------------------------------------
 
@@ -117,7 +135,12 @@ fn main() -> Result<()> {
         .wrap_err("verifier assembly failed")?;
 
     let mut vm = Vm::new();
-    let _ = vm.set_calldata(vec![qubo, sample_val.clone(), RegVal::Int(n as i64)]);
+    let _ = vm.set_calldata(vec![
+        qubo,
+        sample_grid_val.clone(),
+        sample_values_val,
+        RegVal::Int(n as i64),
+    ]);
     let _ = vm.set_output_slots(2);
     vm.run(&verifier_bc)
         .into_diagnostic()
@@ -141,7 +164,7 @@ fn main() -> Result<()> {
         .wrap_err("decoder assembly failed")?;
 
     let mut vm = Vm::new();
-    let _ = vm.set_calldata(vec![sample_val, RegVal::Int(n as i64)]);
+    let _ = vm.set_calldata(vec![sample_grid_val, RegVal::Int(n as i64)]);
     let _ = vm.set_output_slots(1);
     vm.run(&decoder_bc)
         .into_diagnostic()

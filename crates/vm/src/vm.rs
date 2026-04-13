@@ -1374,20 +1374,18 @@ impl Vm {
         model: Register,
         sample: Register,
     ) -> Result<StepResult, Error> {
-        // Build the dense sample vector first so we can borrow the model
-        // independently.  A RegVal::Model sample stores variable assignments
-        // as sparse linear terms (linear[i] = x_i); a RegVal::Sample stores
-        // them directly as a dense Vec<i64>.
+        // Per `XQVM_SPEC.md` (`ENERGY`) and the xq-py reference
+        // (`compute_energy` in `xqvm/core/xqmx.py`), the model register must
+        // hold a Model and the sample register must hold a Sample. A Model
+        // passed in the sample slot is rejected -- that "model-as-sample"
+        // shortcut existed only in xq-rs and produced different programs
+        // from xq-py for the same source.
         let sample_values: Vec<i64> = match self.reg(sample) {
             RegVal::Sample(s) => s.values.clone(),
-            RegVal::Model(s) => {
-                let size = s.size;
-                (0..size).map(|i| s.get_linear(i)).collect()
-            }
             other => {
                 return Err(Error::RegisterType {
                     reg: sample.slot(),
-                    expected: "sample or model",
+                    expected: "sample",
                     got: other.type_name(),
                 });
             }
