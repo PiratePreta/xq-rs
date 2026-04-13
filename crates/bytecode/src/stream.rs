@@ -336,11 +336,21 @@ impl Iterator for InstructionStream<'_> {
 // Error mapping
 // ---------------------------------------------------------------------------
 
-fn map_decode_error(_err: oxicode::Error, offset: usize, byte: u8) -> Error {
-    if Opcode::try_from(byte).is_ok() {
-        Error::TruncatedInstruction { offset }
-    } else {
-        Error::UnknownOpcode { offset, byte }
+fn map_decode_error(err: codec::DecodeError, offset: usize, byte: u8) -> Error {
+    match err {
+        codec::DecodeError::UnknownOpcode { byte } => Error::UnknownOpcode { offset, byte },
+        codec::DecodeError::EmptyInput | codec::DecodeError::TruncatedOperand { .. } => {
+            // The buffer ended mid-instruction. Surface the recognised-opcode
+            // case as `TruncatedInstruction` so VM diagnostics still highlight
+            // the failing opcode; for an empty payload we fall back to the
+            // raw byte (which can only happen when callers pass an empty
+            // slice, never during normal stream walking).
+            if Opcode::try_from(byte).is_ok() {
+                Error::TruncatedInstruction { offset }
+            } else {
+                Error::UnknownOpcode { offset, byte }
+            }
+        }
     }
 }
 
