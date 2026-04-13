@@ -5,7 +5,7 @@ Instructions for branching, looping, and program termination.
 | Code | Mnemonic | Arguments | Stack Effect | Register Effect | Description |
 |------|----------|-----------|--------------|-----------------|-------------|
 | `0x00` | `NOP` | -- | \\([\ldots] \to [\ldots]\\) | -- | No operation. |
-| `0x01` | `TARGET` | -- | \\([\ldots] \to [\ldots]\\) | -- | Mark a valid jump destination. Required at every label that `JUMP`/`JUMPI` may target; treated as `NOP` at runtime. |
+| `0x01` | `TARGET` | -- | \\([\ldots] \to [\ldots]\\) | -- | Mark a valid jump destination. Required at every label that `JUMP`/`JUMPI` may target; treated as `NOP` at runtime. The assembler emits this automatically wherever a label is placed, either via the `.N:` shorthand or the explicit `TARGET .N` directive. |
 | `0x02` | `JUMP2` | `label: u16` | \\([\ldots] \to [\ldots]\\) | -- | Seek the instruction stream to `jump_table[label].start`. Unconditional. Wide form: takes a `u16` label index. |
 | `0x03` | `JUMPI2` | `label: u16` | \\([\ldots, c] \to [\ldots]\\) | -- | Pop \\(c\\). If \\(c \neq 0\\), seek to `jump_table[label].start`; otherwise fall through. Wide form: takes a `u16` label index. |
 | `0x80` | `JUMP1` | `label: u8` | \\([\ldots] \to [\ldots]\\) | -- | Same as `JUMP2` but with a single-byte `u8` label index. Used by the assembler when the label id fits in `u8` to save one byte per call site. |
@@ -38,7 +38,23 @@ exact wire encoding.
 
 `TARGET` must appear at every label destination. It is a no-op at runtime but
 serves as a validation marker -- the VM verifies that jump targets land on
-`TARGET` instructions.
+`TARGET` instructions. The assembler inserts a `TARGET` automatically wherever
+a label is *placed*, so authors do not normally type it by hand. Two equivalent
+spellings produce the same bytecode:
+
+```asm
+; Shorthand: label form
+.0: HALT
+
+; Explicit form: TARGET directive bound to a label
+TARGET .0
+HALT
+```
+
+Both compile to `[TARGET, HALT]`. Use whichever is clearer in context. A bare
+`TARGET` (with no operand) emits a raw `Target` opcode without binding any
+label; that is only useful for direct bytecode construction and most user
+programs should prefer one of the label-bearing forms.
 
 ## Looping
 
