@@ -180,6 +180,7 @@ impl Instruction {
             | Self::Stow { .. }
             | Self::Drop { .. }
             | Self::Input { .. }
+            | Self::Lidx { .. }
             | Self::LVal { .. }
             | Self::Bqmx { .. }
             | Self::Sqmx { .. }
@@ -306,6 +307,7 @@ impl Instruction {
             Self::Stow { reg }
             | Self::Drop { reg }
             | Self::Input { reg }
+            | Self::Lidx { reg }
             | Self::LVal { reg }
             | Self::Bqmx { reg }
             | Self::Sqmx { reg }
@@ -375,6 +377,7 @@ impl fmt::Display for Instruction {
             | Self::Drop { reg }
             | Self::Input { reg }
             | Self::Output { reg }
+            | Self::Lidx { reg }
             | Self::LVal { reg }
             | Self::Iter { reg }
             | Self::Bqmx { reg }
@@ -464,8 +467,8 @@ mod tests {
     }
 
     #[test]
-    fn instruction_count_is_84() {
-        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 84);
+    fn instruction_count_is_85() {
+        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 85);
     }
 
     #[test]

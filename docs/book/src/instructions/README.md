@@ -59,6 +59,7 @@ All other byte values outside the assigned ranges are likewise illegal.
 | `0x05` | `LVAL` | [Control Flow](control-flow.md) | Copy loop value to register |
 | `0x06` | `RANGE` | [Control Flow](control-flow.md) | Start range loop |
 | `0x07` | `ITER` | [Control Flow](control-flow.md) | Start vec iteration |
+| `0x08` | `LIDX` | [Control Flow](control-flow.md) | Copy loop index to register |
 | `0x09` | `HALT` | [Control Flow](control-flow.md) | Stop execution |
 | `0x0A` | `LOAD` | [Register I/O](register-io.md) | Push register int to stack |
 | `0x0B` | `STOW` | [Register I/O](register-io.md) | Pop stack into register |

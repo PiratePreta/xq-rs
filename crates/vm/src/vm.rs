@@ -512,6 +512,25 @@ impl Vm {
         }
     }
 
+    fn exec_lidx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        // Per `XQVM_SPEC.md` (`LIDX`), copy the current loop index into `reg`.
+        // For `RANGE` loops the values *are* indices, so `LIDX` and `LVAL`
+        // produce the same result. For `ITER` loops `LIDX` reports the
+        // position inside the source vec; once `ITER` learns slicing
+        // (QUI-407) this will become `start_idx + index`, but the slice
+        // machinery does not exist yet so the raw vec index is correct.
+        let frame = self.loop_stack.last().ok_or(Error::NoActiveLoop { pos })?;
+        let value = match &frame.kind {
+            LoopKind::Range { current, .. } => *current,
+            LoopKind::Iter { index, .. } => i64::try_from(*index).unwrap_or(i64::MAX),
+        };
+        *self
+            .regs
+            .get_mut(usize::from(reg.slot()))
+            .unwrap_or_else(|| unreachable!("register slot always valid")) = RegVal::Int(value);
+        Ok(StepResult::Continue)
+    }
+
     fn exec_l_val(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let frame = self.loop_stack.last().ok_or(Error::NoActiveLoop { pos })?;
         match &frame.kind {

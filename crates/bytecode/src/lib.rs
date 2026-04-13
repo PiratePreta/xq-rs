@@ -46,7 +46,7 @@
 //! }
 //!
 //! let mnemonics = aglais_xqvm_bytecode::opcodes!(list_mnemonics);
-//! assert_eq!(mnemonics.len(), 84);
+//! assert_eq!(mnemonics.len(), 85);
 //! assert!(mnemonics.contains(&"ENERGY"));
 //! assert!(mnemonics.contains(&"PUSH1"));
 //! ```

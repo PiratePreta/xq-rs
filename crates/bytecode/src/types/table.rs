@@ -17,7 +17,7 @@
 
 /// Invoke `$mac!` with the complete XQVM opcode table.
 ///
-/// The callback macro receives the full comma-separated list of 84 opcode
+/// The callback macro receives the full comma-separated list of 85 opcode
 /// entries. Each entry has the form:
 ///
 /// ```text
@@ -32,8 +32,8 @@
 /// | `"doc"` | `str` literal | Single-sentence description |
 /// | `{field: Type, ...}` | named-field list | Zero or more named operand fields |
 ///
-/// Codes `0x08` and `0x0D` are unassigned gaps reserved for future use;
-/// the decoder and VM treat them as illegal opcodes.
+/// Code `0x0D` is an unassigned gap reserved for future use; the decoder
+/// and VM treat it as an illegal opcode.
 ///
 /// # Examples
 ///
@@ -71,7 +71,8 @@ macro_rules! opcodes {
              {}),
             (0x07, Iter,    "ITER",     "Start a vec iteration over a slice of a register's vec.",
              {reg: $crate::Register}),
-            // 0x08 is reserved (unassigned gap).
+            (0x08, Lidx,    "LIDX",     "Copy the current loop index (offset-adjusted) into a register.",
+             {reg: $crate::Register}),
             (0x09, Halt,    "HALT",     "Stop execution.",
              {}),
             // ---------------------------------------------------------------
