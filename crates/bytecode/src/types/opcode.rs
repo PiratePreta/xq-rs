@@ -25,8 +25,9 @@ use thiserror::Error;
 /// use aglais_xqvm_bytecode::Opcode;
 /// use aglais_xqvm_bytecode::error::OpcodeDecodeError;
 ///
-/// let err = Opcode::try_from(0xFFu8).unwrap_err();
-/// assert_eq!(err, OpcodeDecodeError(0xFF));
+/// // 0xFE is an unassigned byte; decoding it yields an error carrying the byte.
+/// let err = Opcode::try_from(0xFEu8).unwrap_err();
+/// assert_eq!(err, OpcodeDecodeError(0xFE));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("unknown opcode byte 0x{0:02X}")]
@@ -144,7 +145,7 @@ mod tests {
     #[test]
     fn unknown_opcode_returns_error() {
         for byte in [
-            0x0Du8, 0x19, 0x1D, 0x2C, 0x35, 0x46, 0x49, 0x54, 0x59, 0x5C, 0xFE, 0xFF,
+            0x0Du8, 0x19, 0x1D, 0x2C, 0x35, 0x46, 0x49, 0x54, 0x59, 0x5C, 0x80, 0x81, 0xEF, 0xFE,
         ] {
             assert_eq!(
                 Opcode::try_from(byte),
@@ -156,8 +157,12 @@ mod tests {
 
     #[test]
     fn spot_check_discriminants() {
-        assert_eq!(Opcode::Nop as u8, 0x00);
-        assert_eq!(Opcode::Halt as u8, 0x09);
+        assert_eq!(Opcode::Target as u8, 0x00);
+        assert_eq!(Opcode::Jump1 as u8, 0x01);
+        assert_eq!(Opcode::JumpI1 as u8, 0x02);
+        assert_eq!(Opcode::Jump2 as u8, 0x03);
+        assert_eq!(Opcode::JumpI2 as u8, 0x04);
+        assert_eq!(Opcode::Iter as u8, 0x09);
         assert_eq!(Opcode::Pop as u8, 0x10);
         assert_eq!(Opcode::Push1 as u8, 0x11);
         assert_eq!(Opcode::Add as u8, 0x20);
@@ -167,5 +172,7 @@ mod tests {
         assert_eq!(Opcode::GetLine as u8, 0x60);
         assert_eq!(Opcode::OneHotR as u8, 0x70);
         assert_eq!(Opcode::Energy as u8, 0x7F);
+        assert_eq!(Opcode::Nop as u8, 0xF0);
+        assert_eq!(Opcode::Halt as u8, 0xFF);
     }
 }

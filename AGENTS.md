@@ -168,7 +168,7 @@ Aglais XQVM is a hardware-agnostic quantum VM: a problem is expressed once in XQ
 
 ### Key Patterns
 
-**X-Macro opcode table** (`crates/bytecode/src/types/table.rs`) -- The `opcodes!` macro is the single source of truth for all 76 instructions. The `Opcode` enum, `Instruction` enum, mnemonic strings, and operand arity are all derived from it. When adding or changing an opcode, edit only this table.
+**X-Macro opcode table** (`crates/bytecode/src/types/table.rs`) -- The `opcodes!` macro is the single source of truth for all 87 instructions. The `Opcode` enum, `Instruction` enum, mnemonic strings, and operand arity are all derived from it. When adding or changing an opcode, edit only this table.
 
 **Two-pass label resolution** (`crates/bytecode/src/builder.rs`) -- `InstructionBuilder` records unresolved jump fixups on the first pass and patches offsets at `build()` time, supporting both forward and backward label references.
 
@@ -178,7 +178,7 @@ Aglais XQVM is a hardware-agnostic quantum VM: a problem is expressed once in XQ
 
 **VM interpreter** (`crates/vm/`) -- `Vm` executes a `Program` (raw instruction bytes) via an incremental `InstructionStream` reader. State: 256-slot register file (`RegVal` enum: `Int(i64)`, `VecInt(Vec<i64>)`, `VecXqmx(Vec<XqmxModel>)`, `Model(XqmxModel)`, `Sample(XqmxSample)`), an unbounded integer stack, and a loop stack of `LoopFrame` records (one per `RANGE`/`ITER`). `StepResult` drives control flow: `Continue`, `Jump(offset)`, `Halt`, `StartLoop`. Default step limit is 10,000,000 (configurable via `set_step_limit()`). Calldata and output slots are injected before `run()` via `set_calldata()` / `set_output_slots()`. VM errors carry `into_diagnostic(&program, source_name)` which disassembles the failing offset for miette source annotation. `clippy::result_large_err` is explicitly allowed in the asm crate because `NamedSource<Arc<str>>` on the error path is intentional.
 
-### Instruction Set Categories (76 total)
+### Instruction Set Categories (87 total)
 
 Control flow, stack/register I/O, arithmetic (including `SQR`, `ABS`, `INC`, `DEC`, `MIN`, `MAX`), comparison, logical/bitwise, QUBO/Ising/discrete matrix allocators (`BQMX`, `SQMX`, `XQMX`), sample allocators, vector ops, index math, matrix coefficient access, grid ops, high-level constraints (`ONEHOTR`, `ONEHOTC`, `EXCLUDE`, `IMPLIES`), and `ENERGY`.
 

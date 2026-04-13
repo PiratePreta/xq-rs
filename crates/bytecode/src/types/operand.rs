@@ -23,7 +23,7 @@
 /// # Examples
 ///
 /// ```rust
-/// use aglais_xqvm_bytecode::types::Register;
+/// use aglais_xqvm_bytecode::Register;
 ///
 /// let r = Register(0);
 /// assert_eq!(r.slot(), 0);

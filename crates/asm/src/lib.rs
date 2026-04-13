@@ -45,8 +45,8 @@
 //! use aglais_xqvm_asm::assemble_source;
 //!
 //! let program = assemble_source("PUSH 42\nHALT").unwrap();
-//! assert_eq!(program.code()[0], 0x18); // PUSH1 opcode
-//! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
+//! assert_eq!(program.code()[0], 0x11); // PUSH1 opcode
+//! assert_eq!(*program.code().last().unwrap(), 0xFF); // HALT opcode
 //! ```
 //!
 //! For finer control, use [`parse`] and [`assemble`] separately.

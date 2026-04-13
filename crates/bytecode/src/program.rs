@@ -28,10 +28,10 @@
 //! ```rust
 //! use aglais_xqvm_bytecode::Program;
 //!
-//! let program = Program::new(vec![0x09u8]); // HALT
+//! let program = Program::new(vec![0xFFu8]); // HALT
 //! let bytes = program.encode();
 //! let decoded = Program::decode(&bytes).expect("decode");
-//! assert_eq!(decoded.code(), &[0x09]);
+//! assert_eq!(decoded.code(), &[0xFF]);
 //! assert!(decoded.jump_table().is_empty());
 //! ```
 
@@ -130,15 +130,15 @@ mod tests {
 
     #[test]
     fn encode_is_just_the_code() {
-        let prog = Program::new(vec![0x09]);
-        assert_eq!(prog.encode(), vec![0x09]);
+        let prog = Program::new(vec![0xFF]);
+        assert_eq!(prog.encode(), vec![0xFF]);
     }
 
     #[test]
     fn decode_round_trips() {
-        let prog = Program::new(vec![0x09, 0x00]);
+        let prog = Program::new(vec![0xFF, 0x00]);
         let decoded = Program::decode(&prog.encode()).unwrap();
-        assert_eq!(decoded.code(), &[0x09, 0x00]);
+        assert_eq!(decoded.code(), &[0xFF, 0x00]);
     }
 
     #[test]

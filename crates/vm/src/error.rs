@@ -26,13 +26,11 @@
 //!
 //! ```rust
 //! use aglais_xqvm_vm::Error;
-//! use aglais_xqvm_bytecode::InstructionBuilder;
+//! use aglais_xqvm_bytecode::{Instruction, InstructionBuilder};
 //!
-//! let program = InstructionBuilder::new()
-//!     .push(0)
-//!     .halt()
-//!     .build()
-//!     .unwrap();
+//! let mut builder = InstructionBuilder::new();
+//! builder.push(0).emit(Instruction::Halt {});
+//! let program = builder.build().unwrap();
 //!
 //! let err = Error::DivisionByZero { pos: 0 };
 //! # #[cfg(feature = "std")]

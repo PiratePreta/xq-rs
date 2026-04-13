@@ -17,7 +17,7 @@
 
 /// Invoke `$mac!` with the complete XQVM opcode table.
 ///
-/// The callback macro receives the full comma-separated list of 85 opcode
+/// The callback macro receives the full comma-separated list of 87 opcode
 /// entries. Each entry has the form:
 ///
 /// ```text
@@ -55,26 +55,26 @@ macro_rules! opcodes {
             // ---------------------------------------------------------------
             // Control Flow
             // ---------------------------------------------------------------
-            (0x00, Nop,     "NOP",      "No operation.",
+            (0x00, Target,  "TARGET",   "Mark a valid jump destination.",
              {}),
-            (0x01, Target,  "TARGET",   "Mark a valid jump destination.",
-             {}),
-            (0x02, Jump2,   "JUMP2",    "Unconditionally jump to a basic block by u16 label index (wide form).",
+            (0x01, Jump1,   "JUMP1",    "Unconditionally jump to a basic block by u8 label index (narrow form).",
+             {label: u8}),
+            (0x02, JumpI1,  "JUMPI1",   "Jump to a basic block by u8 label index if the top of the stack is non-zero (narrow form).",
+             {label: u8}),
+            (0x03, Jump2,   "JUMP2",    "Unconditionally jump to a basic block by u16 label index (wide form).",
              {label: u16}),
-            (0x03, JumpI2,  "JUMPI2",   "Jump to a basic block by u16 label index if the top of the stack is non-zero (wide form).",
+            (0x04, JumpI2,  "JUMPI2",   "Jump to a basic block by u16 label index if the top of the stack is non-zero (wide form).",
              {label: u16}),
-            (0x04, Next,    "NEXT",     "Advance the loop index; jump back or exit the current loop.",
-             {}),
-            (0x05, LVal,    "LVAL",     "Copy the current loop value into a register.",
+            (0x05, Lidx,    "LIDX",     "Copy the current loop index (offset-adjusted) into a register.",
              {reg: $crate::Register}),
-            (0x06, Range,   "RANGE",    "Start a range loop over [start, start + count).",
-             {}),
-            (0x07, Iter,    "ITER",     "Start a vec iteration over a slice of a register's vec.",
+            (0x06, LVal,    "LVAL",     "Copy the current loop value into a register.",
              {reg: $crate::Register}),
-            (0x08, Lidx,    "LIDX",     "Copy the current loop index (offset-adjusted) into a register.",
-             {reg: $crate::Register}),
-            (0x09, Halt,    "HALT",     "Stop execution.",
+            (0x07, Next,    "NEXT",     "Advance the loop index; jump back or exit the current loop.",
              {}),
+            (0x08, Range,   "RANGE",    "Start a range loop over [start, start + count).",
+             {}),
+            (0x09, Iter,    "ITER",     "Start a vec iteration over a slice of a register's vec.",
+             {reg: $crate::Register}),
             // ---------------------------------------------------------------
             // Register I/O
             // ---------------------------------------------------------------
@@ -267,15 +267,16 @@ macro_rules! opcodes {
             (0x7F, Energy,  "ENERGY",   "Compute the Hamiltonian energy of a sample against a model; push the result.",
              {model: $crate::Register, sample: $crate::Register}),
             // ---------------------------------------------------------------
-            // JUMP / JUMPI narrow encodings (u8 label index)
+            // Special
             //
-            // Placed at 0x80/0x81 as a temporary slot until the umbrella
-            // control-flow opcode realignment moves them next to JUMP2/JUMPI2.
+            // Per the canonical XQVM spec, NOP and HALT live at the top of
+            // the opcode space so every other byte in 0x80..=0xEF can be
+            // rejected as illegal without an extra range check.
             // ---------------------------------------------------------------
-            (0x80, Jump1,   "JUMP1",    "Unconditionally jump to a basic block by u8 label index (narrow form).",
-             {label: u8}),
-            (0x81, JumpI1,  "JUMPI1",   "Jump to a basic block by u8 label index if the top of the stack is non-zero (narrow form).",
-             {label: u8}),
+            (0xF0, Nop,     "NOP",      "No operation.",
+             {}),
+            (0xFF, Halt,    "HALT",     "Stop execution.",
+             {}),
         }
     };
 }

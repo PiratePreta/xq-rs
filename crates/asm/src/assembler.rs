@@ -53,7 +53,7 @@
 //! ];
 //! let program = assemble(&lines, src, "<test>").unwrap();
 //! assert_eq!(program.code()[0], 0x11); // PUSH1 opcode
-//! assert_eq!(*program.code().last().unwrap(), 0x0F); // HALT opcode
+//! assert_eq!(*program.code().last().unwrap(), 0xFF); // HALT opcode
 //! ```
 
 // AssembleError carries a NamedSource<Arc<str>> in every variant so that
@@ -597,12 +597,12 @@ mod tests {
 
     #[test]
     fn halt_is_one_byte() {
-        assert_eq!(asm("HALT"), [0x09]);
+        assert_eq!(asm("HALT"), [0xFF]);
     }
 
     #[test]
     fn nop_is_one_byte() {
-        assert_eq!(asm("NOP"), [0x00]);
+        assert_eq!(asm("NOP"), [0xF0]);
     }
 
     #[test]
