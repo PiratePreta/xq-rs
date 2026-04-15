@@ -125,13 +125,13 @@ fn energy_instruction() {
 
 #[test]
 fn forward_jump_resolves() {
-    // After QUI-404 the label `.0:` compiles to an inline TARGET:
+    // After QUI-404 + QUI-437 narrowing:
     //   JUMP1 .0  (2 bytes at 0)
     //   NOP       (1 byte  at 2)
     //   TARGET    (1 byte  at 3, emitted by place())
     //   HALT      (1 byte  at 4)
     let instrs = asm("JUMP .0\nNOP\n.0:\nHALT");
-    assert_eq!(instrs[0], Instruction::Jump2 { label: 0 });
+    assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Target {});
     assert_eq!(instrs[3], Instruction::Halt {});
@@ -143,9 +143,9 @@ fn backward_jumpi_resolves() {
     // PUSH -1  (2 bytes, site=0: Push1 0xFF)
     // ADD      (1 byte,  site=2)
     // COPY     (1 byte,  site=3)
-    // JUMPI .0 (2 bytes, site=4: JumpI1 + u8)
+    // JUMPI .0 (2 bytes, site=4: JumpI1 + u8, narrowed from JumpI2)
     let instrs = asm(".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0");
-    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI2 { label: 0 });
+    assert_eq!(instrs.last().unwrap(), &Instruction::JumpI1 { label: 0 });
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn label_on_same_line_as_instruction() {
     let instrs = asm(".0: NOP\nJUMP .0");
     assert_eq!(instrs[0], Instruction::Target {});
     assert_eq!(instrs[1], Instruction::Nop {});
-    assert_eq!(instrs[2], Instruction::Jump2 { label: 0 });
+    assert_eq!(instrs[2], Instruction::Jump1 { label: 0 });
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn multiple_labels_and_jumps() {
     let instrs = asm(src);
     assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
     // Label .0 has id 0, fits in u8 -> JumpI1 narrow form.
-    assert!(matches!(instrs[1], Instruction::JumpI2 { .. }));
+    assert!(matches!(instrs[1], Instruction::JumpI1 { .. }));
     assert_eq!(instrs[2], Instruction::Push1 { val: [42] });
     // place() inserts an inline TARGET before HALT.
     assert_eq!(instrs[3], Instruction::Target {});
@@ -269,7 +269,7 @@ fn mixed_case_produces_same_bytecode_as_uppercase() {
 #[test]
 fn case_insensitive_jump_mnemonics() {
     let instrs = asm("jump .0\nnop\n.0:\nhalt");
-    assert_eq!(instrs[0], Instruction::Jump2 { label: 0 });
+    assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
     assert_eq!(instrs[1], Instruction::Nop {});
     assert_eq!(instrs[2], Instruction::Target {});
     assert_eq!(instrs[3], Instruction::Halt {});

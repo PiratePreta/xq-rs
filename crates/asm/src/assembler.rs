@@ -640,40 +640,39 @@ mod tests {
 
     #[test]
     fn forward_jump_label() {
-        // After QUI-404, the `.0:` label compiles to an inline TARGET
-        // followed by the next user instruction:
-        //   JUMP2 .0  (3 bytes at site 0: always wide after QUI-405)
-        //   NOP       (1 byte  at site 3)
+        // After QUI-404 + QUI-437 narrowing:
+        //   JUMP1 .0  (2 bytes at site 0: narrowed from placeholder)
+        //   NOP       (1 byte  at site 2)
         //   .0:
-        //   TARGET    (1 byte  at site 4, emitted by place())
-        //   HALT      (1 byte  at site 5)
+        //   TARGET    (1 byte  at site 3, emitted by place())
+        //   HALT      (1 byte  at site 4)
         let src = "JUMP .0\nNOP\n.0:\nHALT";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[0], Instruction::Jump2 { label: 0 });
+        assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Target {});
         assert_eq!(instrs[3], Instruction::Halt {});
-        // Sequential id 0 -> the first (and only) TARGET at byte 4.
-        assert_eq!(program.jump_table().get(0), Some(4));
+        // Sequential id 0 -> the first (and only) TARGET at byte 3.
+        assert_eq!(program.jump_table().get(0), Some(3));
     }
 
     #[test]
     fn backward_jumpi_label() {
-        // After QUI-404 + QUI-405:
+        // After QUI-404 + QUI-437 narrowing:
         //   .0:
         //   TARGET    (1 byte  at 0, emitted by place())
         //   PUSH -1   (2 bytes at 1)
         //   ADD       (1 byte  at 3)
         //   COPY      (1 byte  at 4)
-        //   JUMPI2 .0 (3 bytes at 5)
+        //   JUMPI1 .0 (2 bytes at 5, narrowed from JumpI2)
         let src = ".0:\nPUSH -1\nADD\nCOPY\nJUMPI .0";
         let lines = parse(src, "<test>").unwrap();
         let program = assemble(&lines, src, "<test>").unwrap();
         let instrs = decode_all(program.code());
         assert_eq!(instrs[0], Instruction::Target {});
-        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI2 { label: 0 });
+        assert_eq!(instrs.last().unwrap(), &Instruction::JumpI1 { label: 0 });
         assert_eq!(program.jump_table().get(0), Some(0));
     }
 
@@ -693,10 +692,10 @@ mod tests {
         // source must work and resolve cleanly.
         let program = assemble_source("TARGET .0\nNOP\nJUMP .0").expect("forward TARGET");
         let instrs = decode_all(program.code());
-        // Layout: TARGET (1) + NOP (1) + Jump2 (3)
+        // Layout: TARGET (1) + NOP (1) + Jump1 (2)
         assert_eq!(instrs[0], Instruction::Target {});
         assert_eq!(instrs[1], Instruction::Nop {});
-        assert_eq!(instrs[2], Instruction::Jump2 { label: 0 });
+        assert_eq!(instrs[2], Instruction::Jump1 { label: 0 });
         assert_eq!(program.jump_table().get(0), Some(0));
     }
 

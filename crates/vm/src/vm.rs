@@ -227,7 +227,7 @@ impl Vm {
             stack: Vec::new(),
             regs: {
                 let mut v = Vec::with_capacity(256);
-                v.resize_with(256, RegVal::default);
+                v.resize_with(256, || RegVal::Unset);
                 v
             },
             loop_stack: Vec::new(),
@@ -334,7 +334,7 @@ impl Vm {
     /// Reset the VM to its initial state (stack, registers, loops cleared).
     pub fn reset(&mut self) {
         self.stack.clear();
-        self.regs.iter_mut().for_each(|r| *r = RegVal::default());
+        self.regs.iter_mut().for_each(|r| *r = RegVal::Unset);
         self.loop_stack.clear();
         self.steps = 0;
     }
@@ -784,6 +784,12 @@ impl Vm {
     }
 
     fn exec_load(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        if matches!(self.reg(reg), RegVal::Unset) {
+            return Err(Error::UnsetRegister {
+                pos,
+                reg: reg.slot(),
+            });
+        }
         let v = self.reg(reg).as_int().map_err(|got| Error::RegisterType {
             reg: reg.slot(),
             expected: "int",
@@ -818,7 +824,7 @@ impl Vm {
     }
 
     fn exec_drop(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
-        *self.reg_mut(reg) = RegVal::default();
+        *self.reg_mut(reg) = RegVal::Unset;
         Ok(StepResult::Continue)
     }
 
@@ -873,7 +879,17 @@ impl Vm {
         if b == 0 {
             return Err(Error::DivisionByZero { pos });
         }
-        self.push_stack(a.wrapping_div(b), pos)?;
+        // Floor division (rounds toward −∞), matching Python `a // b`.
+        // Truncate first, then subtract 1 when the remainder is nonzero and
+        // the operands have opposite signs.
+        let q = a.wrapping_div(b);
+        let r = a.wrapping_rem(b);
+        let floored = if r != 0 && (r ^ b) < 0 {
+            q.wrapping_sub(1)
+        } else {
+            q
+        };
+        self.push_stack(floored, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -883,7 +899,15 @@ impl Vm {
         if b == 0 {
             return Err(Error::DivisionByZero { pos });
         }
-        self.push_stack(a.wrapping_rem(b), pos)?;
+        // Divisor-sign modulo, matching Python `a % b`.
+        // Adjust the C-style truncating remainder to have the same sign as `b`.
+        let r = a.wrapping_rem(b);
+        let m = if r != 0 && (r ^ b) < 0 {
+            r.wrapping_add(b)
+        } else {
+            r
+        };
+        self.push_stack(m, pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1603,6 +1627,20 @@ mod tests {
     }
 
     #[test]
+    fn failing_tracer_propagates_error() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(1).halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let mut tracer = FailingTracer { fail_at: 1 };
+        let err = vm.run_trace(&mut tracer, &program).unwrap_err();
+        assert!(
+            matches!(err, Error::TraceFailed { .. }),
+            "expected TraceFailed, got {err:?}",
+        );
+    }
+
+    #[test]
     fn run_delegates_to_run_trace() {
         let mut b = InstructionBuilder::new();
         let _ = b.push(3).push(4).add().halt();
@@ -1673,20 +1711,110 @@ mod tests {
     }
 
     #[test]
-    fn failing_tracer_propagates_error() {
+    fn div_floor_negative_dividend() {
+        // -7 // 2 = -4 (floor), not -3 (truncating)
         let mut b = InstructionBuilder::new();
-        let _ = b.push(1).push(2).add().halt();
+        let _ = b.push(-7).push(2).div().halt();
         let program = b.build().unwrap();
-
-        let mut tracer = FailingTracer { fail_at: 2 };
         let mut vm = Vm::new();
-        let err = vm.run_trace(&mut tracer, &program).unwrap_err();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[-4]);
+    }
 
-        match err {
-            Error::TraceFailed { message, .. } => {
-                assert!(message.contains("intentional failure at step 2"));
-            }
-            other => panic!("expected TraceFailed, got {other:?}"),
-        }
+    #[test]
+    fn div_floor_negative_divisor() {
+        // 7 // -2 = -4 (floor)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(-2).div().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[-4]);
+    }
+
+    #[test]
+    fn div_floor_both_positive() {
+        // 7 // 2 = 3 (unchanged by floor correction)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(2).div().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[3]);
+    }
+
+    #[test]
+    fn mod_divisor_sign_negative_dividend() {
+        // -7 % 2 = 1 (divisor-sign), not -1 (dividend-sign)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(-7).push(2).modulo().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[1]);
+    }
+
+    #[test]
+    fn mod_divisor_sign_negative_divisor() {
+        // 7 % -2 = -1 (divisor-sign)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(-2).modulo().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[-1]);
+    }
+
+    #[test]
+    fn mod_divisor_sign_both_positive() {
+        // 7 % 3 = 1 (unchanged)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(3).modulo().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[1]);
+    }
+
+    #[test]
+    fn load_on_never_set_register_faults() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.load(Register(5)).halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let err = vm.run(&program).unwrap_err();
+        assert!(
+            matches!(err, Error::UnsetRegister { reg: 5, .. }),
+            "expected UnsetRegister, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn drop_then_load_faults() {
+        let mut b = InstructionBuilder::new();
+        let _ = b
+            .push(42)
+            .stow(Register(0))
+            .drop_reg(Register(0))
+            .load(Register(0))
+            .halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let err = vm.run(&program).unwrap_err();
+        assert!(
+            matches!(err, Error::UnsetRegister { reg: 0, .. }),
+            "expected UnsetRegister, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn stow_then_load_works_after_unset_init() {
+        // Register is initially Unset; STOW sets it; LOAD retrieves it.
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(99).stow(Register(3)).load(Register(3)).halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[99]);
     }
 }

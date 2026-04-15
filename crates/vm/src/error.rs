@@ -70,6 +70,11 @@ pub enum Error {
         got: &'static str,
     },
 
+    /// A `LOAD` was attempted on a register that is unset (`DROP`ped or
+    /// never written). Matches xq-py's `RegisterNotFound` exception.
+    #[error("register r{reg} is unset at byte {pos:#06x}")]
+    UnsetRegister { pos: usize, reg: u8 },
+
     /// Division or modulo by zero.
     #[error("division by zero at byte {pos:#06x}")]
     DivisionByZero { pos: usize },
@@ -196,6 +201,7 @@ impl Error {
             | Self::TraceFailed { pos, .. }
             | Self::BadJumpTarget { pos, .. }
             | Self::InvalidLabel { pos, .. }
+            | Self::UnsetRegister { pos, .. }
             | Self::IndexOutOfBounds { pos, .. } => Some(*pos),
             Self::RegisterType { .. }
             | Self::CallDataIndex { .. }

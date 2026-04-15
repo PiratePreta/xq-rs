@@ -318,15 +318,12 @@ impl InstructionBuilder {
     // Control flow (jump instructions use labels, not raw indices)
     // -----------------------------------------------------------------------
 
-    /// Emit a `JUMP2` (wide-form) instruction targeting `label`.
+    /// Emit a `JUMP` instruction targeting `label`.
     ///
-    /// The wide form uses a 3-byte encoding (opcode + `u16` label) and is
-    /// the only form the high-level builder API emits. The narrow `Jump1`
-    /// encoding remains valid in the wire format and can be constructed
-    /// directly via [`emit`](Self::emit) when the caller already knows the
-    /// final sequential id, but `jump`/`jump_if` cannot use it because the
-    /// post-build label-renumbering pass (introduced in QUI-405) may shift
-    /// the id outside the `u8` range.
+    /// Internally the builder records a wide `Jump2` placeholder; during
+    /// [`build`](Self::build) the placeholder is narrowed to `Jump1` (2 bytes)
+    /// when the sequential id fits in `u8`, or left as `Jump2` (3 bytes)
+    /// otherwise.
     ///
     /// The label byte is patched during [`build`](Self::build) with the
     /// label's *sequential* id (its `TARGET`'s position in stream order),
@@ -335,10 +332,11 @@ impl InstructionBuilder {
         self.emit_with_fixup(Instruction::Jump2 { label: u16::MAX }, label)
     }
 
-    /// Emit a `JUMPI2` (wide-form) conditional jump targeting `label`.
+    /// Emit a `JUMPI` conditional jump targeting `label`.
     ///
-    /// Pops the top of the stack and jumps if the value is non-zero. See
-    /// [`jump`](Self::jump) for why the narrow form is not auto-selected.
+    /// Pops the top of the stack and jumps if the value is non-zero.
+    /// Uses a wide `JumpI2` placeholder; [`build`](Self::build) narrows it
+    /// to `JumpI1` when the sequential id fits in `u8`.
     pub fn jump_if(&mut self, label: LabelId) -> &mut Self {
         self.emit_with_fixup(Instruction::JumpI2 { label: u16::MAX }, label)
     }
@@ -382,7 +380,7 @@ impl InstructionBuilder {
     // Registers (hand-written to avoid shadowing core::mem::drop)
     // -----------------------------------------------------------------------
 
-    /// Reset a register to `Int(0)`.
+    /// Emit a `DROP` instruction, marking the register as unset.
     pub fn drop_reg(&mut self, reg: Register) -> &mut Self {
         self.emit(Instruction::Drop { reg })
     }
@@ -411,11 +409,10 @@ impl InstructionBuilder {
     /// label whose `.label()` was called before another label that ends up
     /// earlier in the stream) are renumbered automatically here.
     ///
-    /// `b.jump` / `b.jump_if` always emit the wide `Jump2`/`JumpI2` form so
-    /// the renumbered id is guaranteed to fit; the narrow `Jump1`/`JumpI1`
-    /// encodings are still part of the wire format and can be constructed
-    /// directly via `b.emit(Instruction::Jump1 { label })` if you know the
-    /// final sequential id ahead of time.
+    /// `b.jump` / `b.jump_if` use `Jump2`/`JumpI2` as placeholders during
+    /// assembly; `build` narrows each to `Jump1`/`JumpI1` (2 bytes) when the
+    /// final sequential id fits in `u8`, keeping bytecode compact for
+    /// programs with ≤ 256 labels (the common case).
     ///
     /// # Errors
     ///
@@ -516,6 +513,44 @@ impl InstructionBuilder {
                 .get_mut(fixup.site..end)
                 .unwrap_or_else(|| panic!("fixup site {:#06X} out of buffer bounds", fixup.site))
                 .copy_from_slice(&encoded);
+        }
+
+        // 5. Narrow Jump2/JumpI2 → Jump1/JumpI1 where the sequential id fits
+        //    in u8.  Process fixups in ascending site order so that the
+        //    cumulative byte shrinkage (one byte per narrowed instruction)
+        //    correctly maps original site positions to their shifted actuals.
+        let mut narrowable: Vec<(usize, Opcode, u16)> = self
+            .fixups
+            .iter()
+            .filter_map(|f| {
+                let seq_id = alloc_to_seq
+                    .get(f.label.0)
+                    .copied()
+                    .flatten()
+                    .unwrap_or_else(|| unreachable!("all fixups validated in step 1"));
+                (seq_id <= u16::from(u8::MAX)).then_some((f.site, f.opcode, seq_id))
+            })
+            .collect();
+        narrowable.sort_by_key(|&(site, _, _)| site);
+        let mut shrinkage: usize = 0;
+        for (site, opcode, seq_id) in narrowable {
+            let actual = site - shrinkage;
+            let narrow = match opcode {
+                Opcode::Jump2 => Instruction::Jump1 {
+                    label: seq_id as u8,
+                },
+                Opcode::JumpI2 => Instruction::JumpI1 {
+                    label: seq_id as u8,
+                },
+                _ => unreachable!("only jump fixups are tracked"),
+            };
+            let nb = codec::encode(&narrow);
+            // `nb` is 2 bytes; the wide form was 3.  Replace the first two
+            // bytes in place and remove the now-redundant third byte.
+            self.buf[actual] = nb[0];
+            self.buf[actual + 1] = nb[1];
+            let _ = self.buf.remove(actual + 2);
+            shrinkage += 1;
         }
 
         Ok(Program::new(self.buf))
@@ -650,10 +685,10 @@ mod tests {
 
     #[test]
     fn backward_jump_resolves_correctly() {
-        // After QUI-404 + QUI-405:
+        // After QUI-404 + QUI-405 + QUI-437 narrowing:
         //   TARGET   (1 byte at 0)  <- emitted by place()
         //   Push1    (2 bytes at 1)
-        //   JumpI2   (3 bytes at 3) <- always wide; renumbered seq id = 0
+        //   JumpI1   (2 bytes at 3) <- narrowed; seq id 0 fits in u8
         let mut b = InstructionBuilder::new();
         let top = b.label();
         b.place(top).push(0).jump_if(top);
@@ -662,8 +697,8 @@ mod tests {
         let instrs = decode_all(program.code());
         assert_eq!(instrs[0], Instruction::Target {});
         assert_eq!(instrs[1], Instruction::Push1 { val: [0x00] });
-        // Always-wide form; sequential id 0 (the only TARGET).
-        assert_eq!(instrs[2], Instruction::JumpI2 { label: 0 });
+        // Narrowed to JumpI1; sequential id 0 (the only TARGET).
+        assert_eq!(instrs[2], Instruction::JumpI1 { label: 0 });
 
         // The jump table is built by scanning the byte stream for TARGETs;
         // the only TARGET is at byte 0 so seq id 0 -> 0.
@@ -673,24 +708,24 @@ mod tests {
 
     #[test]
     fn forward_jump_resolves_correctly() {
-        // After QUI-404 + QUI-405:
-        //   Jump2    (3 bytes at 0)  <- always wide
-        //   Nop      (1 byte  at 3)
-        //   TARGET   (1 byte  at 4)  <- emitted by place()
-        //   Halt     (1 byte  at 5)
+        // After QUI-404 + QUI-405 + QUI-437 narrowing:
+        //   Jump1    (2 bytes at 0)  <- narrowed from placeholder Jump2
+        //   Nop      (1 byte  at 2)
+        //   TARGET   (1 byte  at 3)  <- emitted by place()
+        //   Halt     (1 byte  at 4)
         let mut b = InstructionBuilder::new();
         let done = b.label();
         b.jump(done).nop().place(done).halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[0], Instruction::Jump2 { label: 0 });
+        assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
         assert_eq!(instrs[1], Instruction::Nop {});
         assert_eq!(instrs[2], Instruction::Target {});
         assert_eq!(instrs[3], Instruction::Halt {});
 
-        // Sequential id 0 -> byte 4 (the TARGET).
-        assert_eq!(program.jump_table().get(0), Some(4));
+        // Sequential id 0 -> byte 3 (the TARGET, shifted left by the narrowing).
+        assert_eq!(program.jump_table().get(0), Some(3));
     }
 
     #[test]
@@ -706,13 +741,13 @@ mod tests {
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        // Layout: Push1 .. JumpI2 .0 .. Push1 .. JumpI2 .0 .. Target .. Halt
+        // Layout: Push1 .. JumpI1 .0 .. Push1 .. JumpI1 .0 .. Target .. Halt
         assert_eq!(*instrs.last().unwrap(), Instruction::Halt {});
         assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
         assert_eq!(instrs[2], Instruction::Push1 { val: [0x00] });
         // Both jumps target sequential id 0 (the only TARGET in the program).
-        assert!(matches!(instrs[1], Instruction::JumpI2 { label: 0 }));
-        assert!(matches!(instrs[3], Instruction::JumpI2 { label: 0 }));
+        assert!(matches!(instrs[1], Instruction::JumpI1 { label: 0 }));
+        assert!(matches!(instrs[3], Instruction::JumpI1 { label: 0 }));
         // place() inserts an inline TARGET before HALT.
         assert_eq!(instrs[4], Instruction::Target {});
         assert_eq!(instrs[5], Instruction::Halt {});
@@ -737,37 +772,35 @@ mod tests {
         let instrs = decode_all(program.code());
         // jump_if `first` was alloc id 0, but `first` is the *second* TARGET
         // in stream order, so its sequential id is 1.
-        assert!(matches!(instrs[0], Instruction::JumpI2 { label: 1 }));
+        assert!(matches!(instrs[0], Instruction::JumpI1 { label: 1 }));
         // jump `second` was alloc id 1, but `second` is the *first* TARGET
         // in stream order, so its sequential id is 0.
-        assert!(matches!(instrs[1], Instruction::Jump2 { label: 0 }));
+        assert!(matches!(instrs[1], Instruction::Jump1 { label: 0 }));
     }
 
     #[test]
-    fn jump_always_emits_wide_form() {
-        // After QUI-405 the high-level builder API always emits the wide
-        // form (Jump2/JumpI2) regardless of label id, because the
-        // post-build label-renumbering pass may shift the sequential id
-        // outside the u8 range.
+    fn jump_narrows_to_jump1_for_small_seq_id() {
+        // build() narrows Jump2 → Jump1 when the sequential id fits in u8.
+        // For a single label, seq id is 0 which always fits.
         let mut b = InstructionBuilder::new();
         let l = b.label();
         b.jump(l).place(l).halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        // Always-wide form, even for sequential id 0 which would fit in u8.
-        assert_eq!(instrs[0], Instruction::Jump2 { label: 0 });
+        // Narrowed to Jump1 (2 bytes) since seq id 0 fits in u8.
+        assert_eq!(instrs[0], Instruction::Jump1 { label: 0 });
     }
 
     #[test]
-    fn jump_if_always_emits_wide_form() {
+    fn jump_if_narrows_to_jumpi1_for_small_seq_id() {
         let mut b = InstructionBuilder::new();
         let l = b.label();
         b.push(1).jump_if(l).place(l).halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
-        assert_eq!(instrs[1], Instruction::JumpI2 { label: 0 });
+        assert_eq!(instrs[1], Instruction::JumpI1 { label: 0 });
     }
 
     #[test]
@@ -846,12 +879,12 @@ mod tests {
 
         let program = b.build().unwrap();
         // The runtime jump table records each TARGET's byte offset in
-        // stream order; the layout is TARGET (1) + NOP (1) + JUMP2 (3) +
-        // TARGET (1) + HALT (1).
+        // stream order; the narrowed layout is TARGET (1) + NOP (1) +
+        // JUMP1 (2) + TARGET (1) + HALT (1).
         // Sequential id 0 -> first TARGET at byte 0.
-        // Sequential id 1 -> second TARGET at byte 5.
+        // Sequential id 1 -> second TARGET at byte 4 (shifted by narrowing).
         assert_eq!(program.jump_table().len(), 2);
         assert_eq!(program.jump_table().get(0), Some(0));
-        assert_eq!(program.jump_table().get(1), Some(5));
+        assert_eq!(program.jump_table().get(1), Some(4));
     }
 }

@@ -82,7 +82,7 @@ fn div_two_numbers() {
 }
 
 #[test]
-fn div_truncates_towards_zero() {
+fn div_positive_operands_uses_floor() {
     let vm = run(|b| {
         b.push(7).push(2).div().halt();
     });
@@ -359,11 +359,14 @@ fn stow_and_load() {
 }
 
 #[test]
-fn default_register_is_zero() {
-    let vm = run(|b| {
+fn load_on_never_written_register_faults() {
+    let err = run_err(|b| {
         b.load(Register(5)).halt();
     });
-    assert_eq!(vm.stack(), &[0]);
+    assert!(
+        matches!(err, Error::UnsetRegister { reg: 5, .. }),
+        "expected UnsetRegister for reg 5, got {err:?}",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,11 +1251,11 @@ fn row_find_and_col_find() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn drop_resets_register_to_zero() {
+fn drop_marks_register_unset() {
     let vm = run(|b| {
         b.push(42).stow(Register(3)).drop_reg(Register(3)).halt();
     });
-    assert_eq!(vm.register(3), &RegVal::Int(0));
+    assert_eq!(vm.register(3), &RegVal::Unset);
 }
 
 #[test]
