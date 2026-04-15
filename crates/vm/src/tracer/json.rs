@@ -64,6 +64,7 @@ fn json_escape(s: &str) -> String {
 /// of the containing map).
 fn regval_json(val: &RegVal) -> String {
     match val {
+        RegVal::Unset => "{\"type\":\"unset\"}".to_string(),
         RegVal::Int(v) => {
             format!("{{\"type\":\"int\",\"value\":{v}}}")
         }

@@ -24,11 +24,15 @@ use crate::model::{XqmxModel, XqmxSample};
 
 /// A value that can be stored in an XQVM register.
 ///
-/// All registers default to `Int(0)`. The type is determined by the allocation
-/// instruction used (`BQMX`, `VECI`, etc.).
+/// Registers begin in the `Unset` state. `STOW`, `INPUT`, `LVAL`, `LIDX`, and
+/// the allocator instructions (`BQMX`, `VECI`, etc.) transition a register to
+/// one of the typed variants. `DROP` returns it to `Unset`. A `LOAD` on an
+/// `Unset` register is a runtime fault (`Error::UnsetRegister`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum RegVal {
-    /// Integer (default). Exchanges values with the stack via `LOAD`/`STOW`.
+    /// Register has no value; `LOAD` on this slot faults.
+    Unset,
+    /// Integer. Exchanges values with the stack via `LOAD`/`STOW`.
     Int(i64),
     /// Integer vector, created by `VECI` or `VEC`.
     VecInt(Vec<i64>),
@@ -51,6 +55,7 @@ impl RegVal {
     pub(crate) fn as_int(&self) -> Result<i64, &'static str> {
         match self {
             Self::Int(n) => Ok(*n),
+            Self::Unset => Err("unset"),
             Self::VecInt(_) => Err("vec<int>"),
             Self::VecXqmx(_) => Err("vec<xqmx>"),
             Self::Model(_) => Err("model"),
@@ -62,6 +67,7 @@ impl RegVal {
     pub(crate) fn as_model_mut(&mut self) -> Result<&mut XqmxModel, &'static str> {
         match self {
             Self::Model(m) => Ok(m),
+            Self::Unset => Err("unset"),
             Self::Int(_) => Err("int"),
             Self::VecInt(_) => Err("vec<int>"),
             Self::VecXqmx(_) => Err("vec<xqmx>"),
@@ -73,6 +79,7 @@ impl RegVal {
     pub(crate) fn as_model(&self) -> Result<&XqmxModel, &'static str> {
         match self {
             Self::Model(m) => Ok(m),
+            Self::Unset => Err("unset"),
             Self::Int(_) => Err("int"),
             Self::VecInt(_) => Err("vec<int>"),
             Self::VecXqmx(_) => Err("vec<xqmx>"),
@@ -84,6 +91,7 @@ impl RegVal {
     pub(crate) fn as_vec_int_mut(&mut self) -> Result<&mut Vec<i64>, &'static str> {
         match self {
             Self::VecInt(v) => Ok(v),
+            Self::Unset => Err("unset"),
             Self::Int(_) => Err("int"),
             Self::VecXqmx(_) => Err("vec<xqmx>"),
             Self::Model(_) => Err("model"),
@@ -95,6 +103,7 @@ impl RegVal {
     pub(crate) fn as_vec_int(&self) -> Result<&Vec<i64>, &'static str> {
         match self {
             Self::VecInt(v) => Ok(v),
+            Self::Unset => Err("unset"),
             Self::Int(_) => Err("int"),
             Self::VecXqmx(_) => Err("vec<xqmx>"),
             Self::Model(_) => Err("model"),
@@ -105,6 +114,7 @@ impl RegVal {
     /// Type name for error messages.
     pub(crate) fn type_name(&self) -> &'static str {
         match self {
+            Self::Unset => "unset",
             Self::Int(_) => "int",
             Self::VecInt(_) => "vec<int>",
             Self::VecXqmx(_) => "vec<xqmx>",

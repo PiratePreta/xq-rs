@@ -56,6 +56,7 @@ impl<W: Write> TextTracer<W> {
 /// Format a register value in compact form.
 fn fmt_regval(val: &RegVal) -> String {
     match val {
+        RegVal::Unset => "unset".to_string(),
         RegVal::Int(v) => format!("{v}"),
         RegVal::VecInt(v) => format!("vec<int>(len={})", v.len()),
         RegVal::VecXqmx(v) => format!("vec<model>(len={})", v.len()),
