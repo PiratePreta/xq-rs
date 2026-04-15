@@ -45,9 +45,9 @@
 //! 3. **Decoder** -- reads the sample and `N` from input slots; extracts the
 //!    ordered tour; writes it to output slot 0.
 
+use miette::{IntoDiagnostic, Result, WrapErr, bail, ensure};
 use xqasm::assemble_source;
 use xqvm::{Domain, RegVal, Vm, XqmxModel, XqmxSample};
-use miette::{IntoDiagnostic, Result, WrapErr, bail, ensure};
 
 const ENCODER_ASM: &str = include_str!("encoder.xqasm");
 const VERIFIER_ASM: &str = include_str!("verifier.xqasm");

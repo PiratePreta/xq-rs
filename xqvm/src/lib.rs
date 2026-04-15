@@ -96,11 +96,11 @@ pub use bytecode::{
 // Public API re-exports — interpreter
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "std")]
+pub use disasm::Disassembly;
 pub use error::Error;
 #[cfg(feature = "std")]
 pub use error::RuntimeDiagnostic;
-#[cfg(feature = "std")]
-pub use disasm::Disassembly;
 pub use model::{Domain, XqmxModel, XqmxSample};
 #[cfg(feature = "std")]
 pub use tracer::{JsonTracer, TextTracer};
