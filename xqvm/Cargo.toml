@@ -1,0 +1,28 @@
+[package]
+name                 = "xqvm"
+description          = "X-Quadratic Virtual Machine — bytecode interpreter for the Aglais XQVM"
+version              = "0.1.0"
+license.workspace    = true
+repository.workspace = true
+edition              = "2024"
+
+[lints]
+workspace = true
+
+[features]
+default = [ "std" ]
+std = [
+    "miette",
+    "thiserror/std",
+]
+
+[dependencies]
+pastey.workspace    = true
+thiserror.workspace = true
+
+# std-only optional dependencies
+miette = { workspace = true, optional = true }
+
+[dev-dependencies]
+xqasm.workspace  = true
+miette.workspace = true

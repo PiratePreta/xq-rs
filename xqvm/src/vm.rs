@@ -1,0 +1,1820 @@
+// Copyright (C) 2026 Postquant Labs Incorporated
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! XQVM bytecode interpreter.
+//!
+//! [`Vm`] executes XQVM bytecode programs. It maintains an integer stack,
+//! a 256-slot register file, a loop stack, and optional calldata / output slots.
+//! Constants are encoded inline in `PUSH1`..`PUSH8` instructions; no
+//! separate constant pool is required.
+//!
+//! # Examples
+//!
+//! ```rust
+//! use xqvm::Vm;
+//! use xqvm::InstructionBuilder;
+//!
+//! // Build: PUSH 3 + PUSH 4 = 7; HALT.
+//! let mut b = InstructionBuilder::new();
+//! b.push(3).push(4).add().halt();
+//! let program = b.build().unwrap();
+//!
+//! let mut vm = Vm::new();
+//! vm.run(&program).unwrap();
+//! assert_eq!(vm.stack(), &[7]);
+//! ```
+
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec, vec::Vec};
+
+use crate::bytecode::{Instruction, InstructionStream, Program, Register};
+use crate::opcodes;
+
+use crate::error::Error;
+use crate::model::{Domain, XqmxModel, XqmxSample};
+use crate::tracer::{NoopTracer, StepState, Tracer};
+use crate::value::RegVal;
+
+// ---------------------------------------------------------------------------
+// Loop support
+// ---------------------------------------------------------------------------
+
+/// The kind of the active loop.
+#[derive(Debug)]
+pub(crate) enum LoopKind {
+    /// A range loop started by `RANGE`. Iterates current..end.
+    Range { current: i64, end: i64 },
+    /// A vec-iteration loop started by `ITER`. The frame owns a copy of the
+    /// slice `vec[start_offset..start_offset + elements.len()]` taken at the
+    /// time `ITER` ran, so subsequent mutations to the source register do
+    /// not affect the iteration. `start_offset` is reported by `LIDX` so
+    /// loop bodies can recover the original vec position.
+    Iter {
+        elements: IterElements,
+        start_offset: usize,
+        index: usize,
+    },
+}
+
+/// Storage for the slice copied by `ITER`.
+///
+/// Vecs in xq-rs hold either `Int` or `Model` elements, so the loop frame
+/// carries one of two parallel buffers rather than a `Vec<RegVal>` (which
+/// would force `RegVal::default()` placeholders into every slot).
+#[derive(Debug)]
+pub(crate) enum IterElements {
+    Int(Vec<i64>),
+    Xqmx(Vec<XqmxModel>),
+}
+
+impl IterElements {
+    fn len(&self) -> usize {
+        match self {
+            Self::Int(v) => v.len(),
+            Self::Xqmx(v) => v.len(),
+        }
+    }
+}
+
+/// A single frame on the loop stack.
+#[derive(Debug)]
+pub(crate) struct LoopFrame {
+    /// The kind of loop.
+    pub kind: LoopKind,
+    /// Byte offset of the first instruction inside the loop body
+    /// (the instruction immediately after `RANGE` or `ITER`).
+    pub body_start: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Step result
+// ---------------------------------------------------------------------------
+
+/// Control-flow signal returned by each instruction handler.
+#[derive(Debug)]
+pub(crate) enum StepResult {
+    /// Advance to the next sequential instruction.
+    Continue,
+    /// Jump to the basic block identified by this label index.
+    Jump(u16),
+    /// Seek the instruction stream to the given byte offset (loop back-edge).
+    Seek(usize),
+    /// Stop execution.
+    Halt,
+    /// Push a new loop frame; the run loop sets `body_start` to `stream.pos()`.
+    StartLoop { kind: LoopKind },
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Validate `start`/`end` against `len` and return `(start_usize, range)`.
+///
+/// `ITER` accepts the indices via the value stack as `i64`. The accepted
+/// range is `0 <= start <= end` and `0 <= end <= len`; anything outside
+/// produces an `IndexOutOfBounds` error pointing at the offending value.
+/// `start == end` is permitted and produces an empty range.
+fn resolve_iter_slice(
+    pos: usize,
+    start: i64,
+    end: i64,
+    len: usize,
+) -> Result<(usize, core::ops::Range<usize>), Error> {
+    let start_us = usize::try_from(start).map_err(|_| Error::IndexOutOfBounds {
+        pos,
+        index: start,
+        len,
+    })?;
+    let end_us = usize::try_from(end).map_err(|_| Error::IndexOutOfBounds {
+        pos,
+        index: end,
+        len,
+    })?;
+    if start_us > len {
+        return Err(Error::IndexOutOfBounds {
+            pos,
+            index: start,
+            len,
+        });
+    }
+    if end_us > len {
+        return Err(Error::IndexOutOfBounds {
+            pos,
+            index: end,
+            len,
+        });
+    }
+    if start_us > end_us {
+        return Err(Error::IndexOutOfBounds {
+            pos,
+            index: end,
+            len,
+        });
+    }
+    Ok((start_us, start_us..end_us))
+}
+
+/// Sign-extend a big-endian byte slice (1..=8 bytes) to `i64`.
+fn sign_extend_be(bytes: &[u8]) -> i64 {
+    debug_assert!(!bytes.is_empty() && bytes.len() <= 8);
+    let mut v = 0i64;
+    for &b in bytes {
+        v = (v << 8) | i64::from(b);
+    }
+    let shift = 64u32 - (bytes.len() * 8) as u32;
+    (v << shift) >> shift
+}
+
+// ---------------------------------------------------------------------------
+// VM struct
+// ---------------------------------------------------------------------------
+
+/// Default step limit to guard against infinite loops.
+const DEFAULT_STEP_LIMIT: u64 = 10_000_000;
+
+/// The XQVM bytecode interpreter.
+///
+/// # Examples
+///
+/// ```rust
+/// use xqvm::Vm;
+/// use xqvm::InstructionBuilder;
+///
+/// let mut b = InstructionBuilder::new();
+/// b.push(6).push(7).mul().halt();
+/// let program = b.build().unwrap();
+///
+/// let mut vm = Vm::new();
+/// vm.run(&program).unwrap();
+/// assert_eq!(vm.stack(), &[42]);
+/// ```
+#[derive(Debug)]
+pub struct Vm {
+    stack: Vec<i64>,
+    regs: Vec<RegVal>,
+    loop_stack: Vec<LoopFrame>,
+    calldata: Vec<RegVal>,
+    outputs: Vec<RegVal>,
+    step_limit: u64,
+    steps: u64,
+}
+
+impl Default for Vm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Vm {
+    /// Create a new VM with default settings.
+    pub fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+            regs: {
+                let mut v = Vec::with_capacity(256);
+                v.resize_with(256, || RegVal::Unset);
+                v
+            },
+            loop_stack: Vec::new(),
+            calldata: Vec::new(),
+            outputs: Vec::new(),
+            step_limit: DEFAULT_STEP_LIMIT,
+            steps: 0,
+        }
+    }
+
+    /// Set calldata slots available to the program via `INPUT`.
+    ///
+    /// Any [`RegVal`] can be placed in a calldata slot and loaded into a
+    /// register using `INPUT`.  This allows passing models, samples, and
+    /// vectors between programs without extra assembly instructions.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use xqvm::Vm;
+    /// use xqvm::RegVal;
+    /// use xqvm::{InstructionBuilder, Register};
+    ///
+    /// let mut vm = Vm::new();
+    /// vm.set_calldata(vec![RegVal::Int(7)]);
+    ///
+    /// let mut b = InstructionBuilder::new();
+    /// b.push(0).input(Register(0)).halt();
+    /// let program = b.build().unwrap();
+    /// vm.run(&program).unwrap();
+    /// assert_eq!(vm.register(0), &RegVal::Int(7));
+    /// ```
+    pub fn set_calldata(&mut self, data: Vec<RegVal>) -> &mut Self {
+        self.calldata = data;
+        self
+    }
+
+    /// Set the number of output slots writable by the program via `OUTPUT`.
+    ///
+    /// Slots are initialised to [`RegVal::Int(0)`](RegVal::Int).
+    pub fn set_output_slots(&mut self, n: usize) -> &mut Self {
+        self.outputs = vec![RegVal::default(); n];
+        self
+    }
+
+    /// Set the maximum number of instructions that may execute.
+    ///
+    /// Passing `0` sets the limit to `u64::MAX` (effectively unlimited).
+    pub fn set_step_limit(&mut self, limit: u64) -> &mut Self {
+        self.step_limit = if limit == 0 { u64::MAX } else { limit };
+        self
+    }
+
+    /// Return the current stack (bottom first).
+    pub fn stack(&self) -> &[i64] {
+        &self.stack
+    }
+
+    /// Return the output slots written by `OUTPUT`.
+    pub fn outputs(&self) -> &[RegVal] {
+        &self.outputs
+    }
+
+    /// Return the value of register `r`.
+    pub fn register(&self, r: u8) -> &RegVal {
+        self.regs
+            .get(usize::from(r))
+            .unwrap_or_else(|| unreachable!("register slot {} always valid in a 256-slot file", r))
+    }
+
+    /// Write `val` into register `r`.
+    ///
+    /// Use this to pre-load registers before calling [`run`](Self::run),
+    /// for example when passing a model or a vec between programs.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use xqvm::Vm;
+    /// use xqvm::RegVal;
+    /// use xqvm::InstructionBuilder;
+    ///
+    /// let mut vm = Vm::new();
+    /// vm.set_register(0, RegVal::Int(42));
+    ///
+    /// let mut b = InstructionBuilder::new();
+    /// b.load(xqvm::Register(0)).halt();
+    /// let program = b.build().unwrap();
+    /// vm.run(&program).unwrap();
+    /// assert_eq!(vm.stack(), &[42]);
+    /// ```
+    pub fn set_register(&mut self, r: u8, val: RegVal) -> &mut Self {
+        *self.regs.get_mut(usize::from(r)).unwrap_or_else(|| {
+            unreachable!("register slot {} always valid in a 256-slot file", r)
+        }) = val;
+        self
+    }
+
+    /// Return the number of steps executed by the last [`run`](Self::run) call.
+    pub fn steps(&self) -> u64 {
+        self.steps
+    }
+
+    /// Reset the VM to its initial state (stack, registers, loops cleared).
+    pub fn reset(&mut self) {
+        self.stack.clear();
+        self.regs.iter_mut().for_each(|r| *r = RegVal::Unset);
+        self.loop_stack.clear();
+        self.steps = 0;
+    }
+
+    /// Execute a [`Program`].
+    ///
+    /// Executes the instruction stream of `program`. Inline constants are
+    /// encoded directly in `PUSH1`..`PUSH8` instructions -- no separate
+    /// constant pool is needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] on any runtime fault (stack underflow, bad jump, etc.).
+    pub fn run(&mut self, program: &Program) -> Result<(), Error> {
+        self.run_trace(&mut NoopTracer, program)
+    }
+
+    /// Execute a [`Program`] with a [`Tracer`].
+    ///
+    /// Behaves identically to [`run`](Self::run) but invokes `tracer.on_step`
+    /// after every instruction, providing a snapshot of the VM state.
+    ///
+    /// When `T` is [`NoopTracer`], the compiler eliminates all tracing
+    /// overhead via dead-code elimination.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] on any runtime fault, or [`Error::TraceFailed`] if
+    /// the tracer callback returns an error.
+    pub fn run_trace<T: Tracer>(&mut self, tracer: &mut T, program: &Program) -> Result<(), Error>
+    where
+        T::Error: core::fmt::Display,
+    {
+        let mut stream = InstructionStream::from_program(program);
+        let table = program.jump_table();
+        self.steps = 0;
+
+        loop {
+            if self.steps >= self.step_limit {
+                return Err(Error::StepLimitExceeded {
+                    limit: self.step_limit,
+                });
+            }
+            self.steps += 1;
+
+            let Some(item) = stream.next_instruction() else {
+                break;
+            };
+            let (pos, _label, instr) = item.map_err(Error::from)?;
+
+            let result = if T::ENABLED {
+                // Snapshot read registers before dispatch.
+                let read_slots = instr.read_registers();
+                let read_regs: Vec<(u8, RegVal)> = read_slots
+                    .as_slice()
+                    .iter()
+                    .filter_map(|&i| Some((i, self.regs.get(usize::from(i))?.clone())))
+                    .collect();
+
+                // Snapshot written register values before dispatch.
+                let write_slots = instr.written_registers();
+                let pre_write: Vec<RegVal> = write_slots
+                    .as_slice()
+                    .iter()
+                    .filter_map(|&i| self.regs.get(usize::from(i)).cloned())
+                    .collect();
+
+                // Execute the instruction.
+                let result = self.dispatch(pos, instr)?;
+
+                // Collect registers that actually changed.
+                let written_regs: Vec<(u8, RegVal)> = write_slots
+                    .as_slice()
+                    .iter()
+                    .zip(pre_write.iter())
+                    .filter_map(|(&i, pre)| {
+                        let cur = self.regs.get(usize::from(i))?;
+                        (cur != pre).then(|| (i, cur.clone()))
+                    })
+                    .collect();
+
+                let state = StepState {
+                    pos,
+                    step: self.steps,
+                    instruction: &instr,
+                    stack: &self.stack,
+                    read_regs: &read_regs,
+                    written_regs: &written_regs,
+                    loop_depth: self.loop_stack.len(),
+                };
+
+                tracer.on_step(&state).map_err(|e| Error::TraceFailed {
+                    pos,
+                    message: format!("{e}"),
+                })?;
+
+                result
+            } else {
+                self.dispatch(pos, instr)?
+            };
+
+            match result {
+                StepResult::Continue => {}
+                StepResult::Halt => break,
+                StepResult::Jump(label) => {
+                    let target = table.get(label).ok_or(Error::InvalidLabel { pos, label })?;
+                    stream.seek(target).map_err(Error::from)?;
+                }
+                StepResult::Seek(target) => {
+                    stream.seek(target).map_err(Error::from)?;
+                }
+                StepResult::StartLoop { kind } => {
+                    let body_start = stream.pos();
+                    self.loop_stack.push(LoopFrame { kind, body_start });
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ---- define the dispatcher-generating macro ----
+
+macro_rules! impl_dispatch {
+    (
+        $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
+            {$($field:ident: $ftype:ty),*}) ),*
+        $(,)?
+    ) => {
+        impl Vm {
+            fn dispatch(
+                &mut self,
+                pos: usize,
+                instr: Instruction,
+            ) -> Result<StepResult, Error> {
+                match instr {
+                    $(
+                        Instruction::$variant { $($field),* } => {
+                            ::pastey::paste! {
+                                self.[<exec_ $variant:snake>](pos $(, $field)*)
+                            }
+                        }
+                    )*
+                }
+            }
+        }
+    };
+}
+
+opcodes!(impl_dispatch);
+
+// ---- hand-written instruction handlers ----
+
+impl Vm {
+    // -- helpers --
+
+    fn pop(&mut self, pos: usize) -> Result<i64, Error> {
+        self.stack.pop().ok_or(Error::StackUnderflow { pos })
+    }
+
+    /// Stack depth limit required by the spec.
+    const STACK_LIMIT: usize = 8192;
+
+    fn push_stack(&mut self, v: i64, pos: usize) -> Result<(), Error> {
+        if self.stack.len() >= Self::STACK_LIMIT {
+            return Err(Error::StackOverflow { pos });
+        }
+        self.stack.push(v);
+        Ok(())
+    }
+
+    fn reg(&self, r: Register) -> &RegVal {
+        self.regs.get(usize::from(r.slot())).unwrap_or_else(|| {
+            unreachable!("register slot {} always valid in a 256-slot file", r.slot())
+        })
+    }
+
+    fn reg_mut(&mut self, r: Register) -> &mut RegVal {
+        self.regs.get_mut(usize::from(r.slot())).unwrap_or_else(|| {
+            unreachable!("register slot {} always valid in a 256-slot file", r.slot())
+        })
+    }
+
+    // -- Control flow --
+
+    fn exec_nop(&mut self, _pos: usize) -> Result<StepResult, Error> {
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_target(&mut self, _pos: usize) -> Result<StepResult, Error> {
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_jump1(&mut self, _pos: usize, label: u8) -> Result<StepResult, Error> {
+        Ok(StepResult::Jump(u16::from(label)))
+    }
+
+    fn exec_jump2(&mut self, _pos: usize, label: u16) -> Result<StepResult, Error> {
+        Ok(StepResult::Jump(label))
+    }
+
+    fn exec_jump_i1(&mut self, pos: usize, label: u8) -> Result<StepResult, Error> {
+        let cond = self.pop(pos)?;
+        if cond != 0 {
+            Ok(StepResult::Jump(u16::from(label)))
+        } else {
+            Ok(StepResult::Continue)
+        }
+    }
+
+    fn exec_jump_i2(&mut self, pos: usize, label: u16) -> Result<StepResult, Error> {
+        let cond = self.pop(pos)?;
+        if cond != 0 {
+            Ok(StepResult::Jump(label))
+        } else {
+            Ok(StepResult::Continue)
+        }
+    }
+
+    fn exec_next(&mut self, pos: usize) -> Result<StepResult, Error> {
+        // Extract the values we need before mutating the loop stack.
+        let (should_loop, body_start) = {
+            let frame = self
+                .loop_stack
+                .last_mut()
+                .ok_or(Error::NoActiveLoop { pos })?;
+            match &mut frame.kind {
+                LoopKind::Range { current, end } => {
+                    *current += 1;
+                    let looping = *current < *end;
+                    (looping, frame.body_start)
+                }
+                LoopKind::Iter {
+                    elements, index, ..
+                } => {
+                    *index += 1;
+                    let looping = *index < elements.len();
+                    (looping, frame.body_start)
+                }
+            }
+        };
+
+        if should_loop {
+            Ok(StepResult::Seek(body_start))
+        } else {
+            let _ = self.loop_stack.pop();
+            Ok(StepResult::Continue)
+        }
+    }
+
+    fn exec_lidx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        // Per `XQVM_SPEC.md` (`LIDX`), copy the current loop index into `reg`.
+        // For `RANGE` loops the values *are* indices, so `LIDX` and `LVAL`
+        // produce the same result. For `ITER` loops `LIDX` reports the
+        // *original* vec position (`start_offset + index`), so loop bodies
+        // can reach back into the source vec by absolute index even after
+        // `ITER` slicing.
+        let frame = self.loop_stack.last().ok_or(Error::NoActiveLoop { pos })?;
+        let value = match &frame.kind {
+            LoopKind::Range { current, .. } => *current,
+            LoopKind::Iter {
+                start_offset,
+                index,
+                ..
+            } => i64::try_from(start_offset.saturating_add(*index)).unwrap_or(i64::MAX),
+        };
+        *self
+            .regs
+            .get_mut(usize::from(reg.slot()))
+            .unwrap_or_else(|| unreachable!("register slot always valid")) = RegVal::Int(value);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_l_val(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let frame = self.loop_stack.last().ok_or(Error::NoActiveLoop { pos })?;
+        match &frame.kind {
+            LoopKind::Range { current, .. } => {
+                *self
+                    .regs
+                    .get_mut(usize::from(reg.slot()))
+                    .unwrap_or_else(|| unreachable!("register slot always valid")) =
+                    RegVal::Int(*current);
+            }
+            LoopKind::Iter {
+                elements, index, ..
+            } => {
+                let idx = *index;
+                let val = match elements {
+                    IterElements::Int(v) => {
+                        RegVal::Int(*v.get(idx).ok_or(Error::IndexOutOfBounds {
+                            pos,
+                            index: i64::try_from(idx).unwrap_or(i64::MAX),
+                            len: v.len(),
+                        })?)
+                    }
+                    IterElements::Xqmx(v) => RegVal::Model(
+                        v.get(idx)
+                            .ok_or(Error::IndexOutOfBounds {
+                                pos,
+                                index: i64::try_from(idx).unwrap_or(i64::MAX),
+                                len: v.len(),
+                            })?
+                            .clone(),
+                    ),
+                };
+                *self
+                    .regs
+                    .get_mut(usize::from(reg.slot()))
+                    .unwrap_or_else(|| unreachable!("register slot always valid")) = val;
+            }
+        }
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_range(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let count = self.pop(pos)?;
+        let start = self.pop(pos)?;
+        Ok(StepResult::StartLoop {
+            kind: LoopKind::Range {
+                current: start,
+                end: start.wrapping_add(count),
+            },
+        })
+    }
+
+    fn exec_iter(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        // Per `XQVM_SPEC.md` (`ITER`): pop `end_idx`, then `start_idx`, read
+        // the source vec from `reg`, and copy `vec[start_idx..end_idx]` into
+        // the loop frame. The slice is duplicated so that mutations to the
+        // source vec inside the loop body do not affect what `LVAL` sees.
+        // `LIDX` later reports `start_offset + index` as the absolute vec
+        // position. Errors:
+        //
+        //   * `RegisterType`        -- `reg` does not hold a vec
+        //   * `IndexOutOfBounds`    -- `start_idx` or `end_idx` is negative
+        //                              or greater than `vec.len()`
+        //
+        // If `start_idx == end_idx` the resulting slice is empty; xq-rs
+        // keeps do-while semantics, so the loop body still runs once before
+        // `NEXT` pops the frame, mirroring the existing `RANGE` behaviour.
+        let end = self.pop(pos)?;
+        let start = self.pop(pos)?;
+        match self.reg(reg) {
+            RegVal::VecInt(v) => {
+                let len = v.len();
+                let (start_offset, range) = resolve_iter_slice(pos, start, end, len)?;
+                let copy = v
+                    .get(range)
+                    .map(<[i64]>::to_vec)
+                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"));
+                Ok(StepResult::StartLoop {
+                    kind: LoopKind::Iter {
+                        elements: IterElements::Int(copy),
+                        start_offset,
+                        index: 0,
+                    },
+                })
+            }
+            RegVal::VecXqmx(v) => {
+                let len = v.len();
+                let (start_offset, range) = resolve_iter_slice(pos, start, end, len)?;
+                let copy = v
+                    .get(range)
+                    .map(<[XqmxModel]>::to_vec)
+                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"));
+                Ok(StepResult::StartLoop {
+                    kind: LoopKind::Iter {
+                        elements: IterElements::Xqmx(copy),
+                        start_offset,
+                        index: 0,
+                    },
+                })
+            }
+            other => Err(Error::RegisterType {
+                reg: reg.slot(),
+                expected: "vec",
+                got: other.type_name(),
+            }),
+        }
+    }
+
+    fn exec_halt(&mut self, _pos: usize) -> Result<StepResult, Error> {
+        Ok(StepResult::Halt)
+    }
+
+    // -- Stack & register I/O --
+
+    fn exec_push1(&mut self, pos: usize, val: [u8; 1]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push2(&mut self, pos: usize, val: [u8; 2]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push3(&mut self, pos: usize, val: [u8; 3]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push4(&mut self, pos: usize, val: [u8; 4]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push5(&mut self, pos: usize, val: [u8; 5]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push6(&mut self, pos: usize, val: [u8; 6]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push7(&mut self, pos: usize, val: [u8; 7]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_push8(&mut self, pos: usize, val: [u8; 8]) -> Result<StepResult, Error> {
+        self.push_stack(sign_extend_be(&val), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_pop(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let _ = self.pop(pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_copy(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let top = *self.stack.last().ok_or(Error::StackUnderflow { pos })?;
+        self.push_stack(top, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_swap(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let len = self.stack.len();
+        if len < 2 {
+            return Err(Error::StackUnderflow { pos });
+        }
+        self.stack.swap(len - 1, len - 2);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_load(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        if matches!(self.reg(reg), RegVal::Unset) {
+            return Err(Error::UnsetRegister {
+                pos,
+                reg: reg.slot(),
+            });
+        }
+        let v = self.reg(reg).as_int().map_err(|got| Error::RegisterType {
+            reg: reg.slot(),
+            expected: "int",
+            got,
+        })?;
+        self.push_stack(v, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_stow(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let v = self.pop(pos)?;
+        *self.reg_mut(reg) = RegVal::Int(v);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_input(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let idx = self.pop(pos)?;
+        let usize_idx = usize::try_from(idx)
+            .ok()
+            .filter(|&i| i < self.calldata.len())
+            .ok_or(Error::CallDataIndex {
+                index: idx,
+                len: self.calldata.len(),
+            })?;
+        let val = self
+            .calldata
+            .get(usize_idx)
+            .unwrap_or_else(|| unreachable!("usize_idx < calldata.len() checked above"))
+            .clone();
+        *self.reg_mut(reg) = val;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_drop(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
+        *self.reg_mut(reg) = RegVal::Unset;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_sclr(&mut self, _pos: usize) -> Result<StepResult, Error> {
+        self.stack.clear();
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_output(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let idx = self.pop(pos)?;
+        let usize_idx = usize::try_from(idx)
+            .ok()
+            .filter(|&i| i < self.outputs.len())
+            .ok_or(Error::OutputIndex {
+                index: idx,
+                len: self.outputs.len(),
+            })?;
+        let val = self.reg(reg).clone();
+        *self
+            .outputs
+            .get_mut(usize_idx)
+            .unwrap_or_else(|| unreachable!("usize_idx < outputs.len() checked above")) = val;
+        Ok(StepResult::Continue)
+    }
+
+    // -- Arithmetic --
+
+    fn exec_add(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_add(b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_sub(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_sub(b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_mul(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_mul(b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_div(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        if b == 0 {
+            return Err(Error::DivisionByZero { pos });
+        }
+        // Floor division (rounds toward −∞), matching Python `a // b`.
+        // Truncate first, then subtract 1 when the remainder is nonzero and
+        // the operands have opposite signs.
+        let q = a.wrapping_div(b);
+        let r = a.wrapping_rem(b);
+        let floored = if r != 0 && (r ^ b) < 0 {
+            q.wrapping_sub(1)
+        } else {
+            q
+        };
+        self.push_stack(floored, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_modulo(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        if b == 0 {
+            return Err(Error::DivisionByZero { pos });
+        }
+        // Divisor-sign modulo, matching Python `a % b`.
+        // Adjust the C-style truncating remainder to have the same sign as `b`.
+        let r = a.wrapping_rem(b);
+        let m = if r != 0 && (r ^ b) < 0 {
+            r.wrapping_add(b)
+        } else {
+            r
+        };
+        self.push_stack(m, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_neg(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_neg(), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_sqr(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_mul(a), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_abs(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_abs(), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_min(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a.min(b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_max(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a.max(b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_inc(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_add(1), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_dec(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(a.wrapping_sub(1), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    // -- Comparison --
+
+    fn exec_eq(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a == b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_lt(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a < b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_gt(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a > b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_lte(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a <= b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_gte(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a >= b), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    // -- Logical boolean --
+
+    fn exec_not(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a == 0), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_and(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a != 0 && b != 0), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_or(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from(a != 0 || b != 0), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_xor(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(i64::from((a != 0) ^ (b != 0)), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    // -- Bitwise --
+
+    fn exec_b_and(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a & b, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_b_or(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a | b, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_b_xor(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        self.push_stack(a ^ b, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_b_not(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        self.push_stack(!a, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_shl(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        if !(0..64).contains(&b) {
+            return Err(Error::InvalidShift { pos, amount: b });
+        }
+        self.push_stack(a << b, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_shr(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let b = self.pop(pos)?;
+        let a = self.pop(pos)?;
+        if !(0..64).contains(&b) {
+            return Err(Error::InvalidShift { pos, amount: b });
+        }
+        // Arithmetic (sign-preserving) right shift, matching xq-py: the sign
+        // bit is replicated, so negative values stay negative and `i64::MIN >> 1`
+        // halves the magnitude rather than overflowing.
+        self.push_stack(a >> b, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    // -- Allocators --
+
+    fn exec_bqmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        *self.reg_mut(reg) = RegVal::Model(XqmxModel::new(Domain::Binary, size));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_sqmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        *self.reg_mut(reg) = RegVal::Model(XqmxModel::new(Domain::Spin, size));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_xqmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let k = self.pop(pos)?;
+        let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        if k < 2 {
+            return Err(Error::InvalidDiscreteK { pos, k });
+        }
+        *self.reg_mut(reg) = RegVal::Model(XqmxModel::new(Domain::Discrete(k), size));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_bsmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        *self.reg_mut(reg) = RegVal::Sample(XqmxSample::new(Domain::Binary, vec![0; size]));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_ssmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        *self.reg_mut(reg) = RegVal::Sample(XqmxSample::new(Domain::Spin, vec![-1; size]));
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_xsmx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let k = self.pop(pos)?;
+        let size = usize::try_from(self.pop(pos)?).unwrap_or(0);
+        if k < 2 {
+            return Err(Error::InvalidDiscreteK { pos, k });
+        }
+        *self.reg_mut(reg) = RegVal::Sample(XqmxSample::new(Domain::Discrete(k), vec![0; size]));
+        Ok(StepResult::Continue)
+    }
+
+    // -- Vec allocators --
+
+    fn exec_vec(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
+        // Untyped vec -- becomes VecInt (integer vec is the default untyped container).
+        *self.reg_mut(reg) = RegVal::VecInt(Vec::new());
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_vec_i(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
+        *self.reg_mut(reg) = RegVal::VecInt(Vec::new());
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_vec_x(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
+        *self.reg_mut(reg) = RegVal::VecXqmx(Vec::new());
+        Ok(StepResult::Continue)
+    }
+
+    // -- Vector access --
+
+    fn exec_vec_push(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let v = self.pop(pos)?;
+        let vec = self
+            .reg_mut(reg)
+            .as_vec_int_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "vec<int>",
+                got,
+            })?;
+        vec.push(v);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_vec_get(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let idx = self.pop(pos)?;
+        let vec = self
+            .reg(reg)
+            .as_vec_int()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "vec<int>",
+                got,
+            })?;
+        let usize_idx = usize::try_from(idx).ok().filter(|&i| i < vec.len()).ok_or(
+            Error::IndexOutOfBounds {
+                pos,
+                index: idx,
+                len: vec.len(),
+            },
+        )?;
+        self.push_stack(
+            *vec.get(usize_idx)
+                .unwrap_or_else(|| unreachable!("usize_idx < vec.len() checked above")),
+            pos,
+        )?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_vec_set(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let val = self.pop(pos)?;
+        let idx = self.pop(pos)?;
+        let vec = self
+            .reg_mut(reg)
+            .as_vec_int_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "vec<int>",
+                got,
+            })?;
+        let usize_idx = usize::try_from(idx).ok().filter(|&i| i < vec.len()).ok_or(
+            Error::IndexOutOfBounds {
+                pos,
+                index: idx,
+                len: vec.len(),
+            },
+        )?;
+        *vec.get_mut(usize_idx)
+            .unwrap_or_else(|| unreachable!("usize_idx < vec.len() checked above")) = val;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_vec_len(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let len = match self.reg(reg) {
+            RegVal::VecInt(v) => v.len(),
+            RegVal::VecXqmx(v) => v.len(),
+            other => {
+                return Err(Error::RegisterType {
+                    reg: reg.slot(),
+                    expected: "vec",
+                    got: other.type_name(),
+                });
+            }
+        };
+        self.push_stack(len as i64, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    // -- Index math --
+
+    fn exec_idx_grid(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let cols = self.pop(pos)?;
+        let col = self.pop(pos)?;
+        let row = self.pop(pos)?;
+        self.push_stack(row.wrapping_mul(cols).wrapping_add(col), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_idx_triu(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let j = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        // Upper-triangular index for (i, j) with i <= j:
+        // index = j*(j-1)/2 + i
+        let idx = j.wrapping_mul(j.wrapping_sub(1)) / 2 + i;
+        self.push_stack(idx, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    // -- XQMX coefficient access --
+
+    fn exec_get_line(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let i = self.pop(pos)?;
+        let m = self
+            .reg(reg)
+            .as_model()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let usize_i = i as usize;
+        self.push_stack(m.get_linear(usize_i), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_set_line(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let val = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        m.set_linear(i as usize, val);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_add_line(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let delta = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        m.add_linear(i as usize, delta);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_get_quad(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let j = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        let m = self
+            .reg(reg)
+            .as_model()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        self.push_stack(m.get_quad(i as usize, j as usize), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_set_quad(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let val = self.pop(pos)?;
+        let j = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        m.set_quad(i as usize, j as usize, val);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_add_quad(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let delta = self.pop(pos)?;
+        let j = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        m.add_quad(i as usize, j as usize, delta);
+        Ok(StepResult::Continue)
+    }
+
+    // -- XQMX grid --
+
+    fn exec_resize(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let cols = self.pop(pos)?;
+        let rows = self.pop(pos)?;
+        if rows <= 0 || cols <= 0 {
+            return Err(Error::InvalidGridDimensions { pos, rows, cols });
+        }
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        m.rows = rows as usize;
+        m.cols = cols as usize;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_row_find(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let value = self.pop(pos)?;
+        let row = self.pop(pos)?;
+        let m = self
+            .reg(reg)
+            .as_model()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let row_start = row as usize * m.cols;
+        let result = (0..m.cols)
+            .find(|&col| m.get_linear(row_start + col) == value)
+            .map(|c| c as i64)
+            .unwrap_or(-1);
+        self.push_stack(result, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_col_find(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let value = self.pop(pos)?;
+        let col = self.pop(pos)?;
+        let m = self
+            .reg(reg)
+            .as_model()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let result = (0..m.rows)
+            .find(|&row| m.get_linear(row * m.cols + col as usize) == value)
+            .map(|r| r as i64)
+            .unwrap_or(-1);
+        self.push_stack(result, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_row_sum(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let row = self.pop(pos)?;
+        let m = self
+            .reg(reg)
+            .as_model()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let row_start = row as usize * m.cols;
+        let sum: i64 = (0..m.cols).map(|c| m.get_linear(row_start + c)).sum();
+        self.push_stack(sum, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_col_sum(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let col = self.pop(pos)?;
+        let m = self
+            .reg(reg)
+            .as_model()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let sum: i64 = (0..m.rows)
+            .map(|r| m.get_linear(r * m.cols + col as usize))
+            .sum();
+        self.push_stack(sum, pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    // -- Constraints --
+
+    fn exec_one_hot_r(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let row = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let row_start = row as usize * m.cols;
+        // H = penalty * (sum(x_i) - 1)^2
+        // Linear: -penalty per variable in row
+        // Quadratic: 2*penalty per pair in row
+        for c in 0..m.cols {
+            m.add_linear(row_start + c, -penalty);
+        }
+        for ci in 0..m.cols {
+            for cj in (ci + 1)..m.cols {
+                m.add_quad(row_start + ci, row_start + cj, 2 * penalty);
+            }
+        }
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_one_hot_c(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let col = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        let col_idx = col as usize;
+        // H = penalty * (sum(x_{r,col}) - 1)^2 over all rows.
+        // Linear: -penalty per variable in column.
+        // Quadratic: 2*penalty per pair in column.
+        for ri in 0..m.rows {
+            m.add_linear(ri * m.cols + col_idx, -penalty);
+        }
+        for ri in 0..m.rows {
+            for rj in (ri + 1)..m.rows {
+                m.add_quad(ri * m.cols + col_idx, rj * m.cols + col_idx, 2 * penalty);
+            }
+        }
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_exclude(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let j = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        // Penalise x_i * x_j = 1 (mutual exclusion).
+        m.add_quad(i as usize, j as usize, penalty);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_implies(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let j = self.pop(pos)?;
+        let i = self.pop(pos)?;
+        let m = self
+            .reg_mut(reg)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: reg.slot(),
+                expected: "model",
+                got,
+            })?;
+        // Penalise x_i=1, x_j=0: penalty * x_i * (1 - x_j) = penalty*x_i - penalty*x_i*x_j.
+        m.add_linear(i as usize, penalty);
+        m.add_quad(i as usize, j as usize, -penalty);
+        Ok(StepResult::Continue)
+    }
+
+    // -- Energy --
+
+    fn exec_energy(
+        &mut self,
+        pos: usize,
+        model: Register,
+        sample: Register,
+    ) -> Result<StepResult, Error> {
+        // Per `XQVM_SPEC.md` (`ENERGY`) and the xq-py reference
+        // (`compute_energy` in `xqvm/core/xqmx.py`), the model register must
+        // hold a Model and the sample register must hold a Sample. A Model
+        // passed in the sample slot is rejected -- that "model-as-sample"
+        // shortcut existed only in xq-rs and produced different programs
+        // from xq-py for the same source.
+        let sample_values: Vec<i64> = match self.reg(sample) {
+            RegVal::Sample(s) => s.values.clone(),
+            other => {
+                return Err(Error::RegisterType {
+                    reg: sample.slot(),
+                    expected: "sample",
+                    got: other.type_name(),
+                });
+            }
+        };
+        let m = match self.reg(model) {
+            RegVal::Model(m) => m,
+            other => {
+                return Err(Error::RegisterType {
+                    reg: model.slot(),
+                    expected: "model",
+                    got: other.type_name(),
+                });
+            }
+        };
+        let energy = m.energy(&sample_values).map_err(|()| Error::SizeMismatch {
+            model_size: m.size,
+            sample_len: sample_values.len(),
+        })?;
+        self.push_stack(energy, pos)?;
+        Ok(StepResult::Continue)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use crate::bytecode::{Instruction, InstructionBuilder, Register};
+
+    use crate::Vm;
+    use crate::error::Error;
+    use crate::tracer::{NoopTracer, StepState, Tracer};
+    use crate::value::RegVal;
+
+    /// Test tracer that records all step states.
+    struct RecordingTracer {
+        steps: Vec<RecordedStep>,
+    }
+
+    #[allow(dead_code)]
+    struct RecordedStep {
+        pos: usize,
+        step: u64,
+        instruction: Instruction,
+        stack: Vec<i64>,
+        read_regs: Vec<(u8, RegVal)>,
+        written_regs: Vec<(u8, RegVal)>,
+        loop_depth: usize,
+    }
+
+    impl RecordingTracer {
+        fn new() -> Self {
+            Self { steps: Vec::new() }
+        }
+    }
+
+    impl Tracer for RecordingTracer {
+        type Error = core::convert::Infallible;
+
+        fn on_step(&mut self, state: &StepState<'_>) -> Result<(), Self::Error> {
+            self.steps.push(RecordedStep {
+                pos: state.pos,
+                step: state.step,
+                instruction: *state.instruction,
+                stack: state.stack.to_vec(),
+                read_regs: state.read_regs.to_vec(),
+                written_regs: state.written_regs.to_vec(),
+                loop_depth: state.loop_depth,
+            });
+            Ok(())
+        }
+    }
+
+    /// Tracer that errors on a specific step.
+    struct FailingTracer {
+        fail_at: u64,
+    }
+
+    impl Tracer for FailingTracer {
+        type Error = String;
+
+        fn on_step(&mut self, state: &StepState<'_>) -> Result<(), Self::Error> {
+            if state.step == self.fail_at {
+                Err(format!("intentional failure at step {}", self.fail_at))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn failing_tracer_propagates_error() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(1).halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let mut tracer = FailingTracer { fail_at: 1 };
+        let err = vm.run_trace(&mut tracer, &program).unwrap_err();
+        assert!(
+            matches!(err, Error::TraceFailed { .. }),
+            "expected TraceFailed, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn run_delegates_to_run_trace() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(3).push(4).add().halt();
+        let program = b.build().unwrap();
+
+        let mut vm1 = Vm::new();
+        vm1.run(&program).unwrap();
+
+        let mut vm2 = Vm::new();
+        vm2.run_trace(&mut NoopTracer, &program).unwrap();
+
+        assert_eq!(vm1.stack(), vm2.stack());
+    }
+
+    #[test]
+    fn recording_tracer_captures_steps() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(3).push(4).add().stow(Register(0)).halt();
+        let program = b.build().unwrap();
+
+        let mut tracer = RecordingTracer::new();
+        let mut vm = Vm::new();
+        vm.run_trace(&mut tracer, &program).unwrap();
+
+        assert_eq!(tracer.steps.len(), 5);
+
+        // Step 1: PUSH 3 -> stack=[3], no regs
+        let s0 = tracer.steps.first().expect("step 0");
+        assert_eq!(s0.step, 1);
+        assert_eq!(s0.stack, &[3]);
+        assert!(s0.read_regs.is_empty());
+        assert!(s0.written_regs.is_empty());
+
+        // Step 2: PUSH 4 -> stack=[3, 4], no regs
+        let s1 = tracer.steps.get(1).expect("step 1");
+        assert_eq!(s1.stack, &[3, 4]);
+
+        // Step 3: ADD -> stack=[7], no regs
+        let s2 = tracer.steps.get(2).expect("step 2");
+        assert_eq!(s2.stack, &[7]);
+
+        // Step 4: STOW r0 -> stack=[], writes r0=7
+        let s3 = tracer.steps.get(3).expect("step 3");
+        assert_eq!(s3.stack, &[] as &[i64]);
+        assert!(s3.read_regs.is_empty());
+        assert_eq!(s3.written_regs.len(), 1);
+        assert_eq!(s3.written_regs.first(), Some(&(0, RegVal::Int(7))));
+
+        // Step 5: HALT -> stack=[]
+        let s4 = tracer.steps.get(4).expect("step 4");
+        assert_eq!(s4.stack, &[] as &[i64]);
+    }
+
+    #[test]
+    fn recording_tracer_captures_read_regs() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(42).stow(Register(0)).load(Register(0)).halt();
+        let program = b.build().unwrap();
+
+        let mut tracer = RecordingTracer::new();
+        let mut vm = Vm::new();
+        vm.run_trace(&mut tracer, &program).unwrap();
+
+        // Step 3: LOAD r0 reads r0=42
+        let s2 = tracer.steps.get(2).expect("step 2");
+        assert_eq!(s2.read_regs.len(), 1);
+        assert_eq!(s2.read_regs.first(), Some(&(0, RegVal::Int(42))));
+    }
+
+    #[test]
+    fn div_floor_negative_dividend() {
+        // -7 // 2 = -4 (floor), not -3 (truncating)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(-7).push(2).div().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[-4]);
+    }
+
+    #[test]
+    fn div_floor_negative_divisor() {
+        // 7 // -2 = -4 (floor)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(-2).div().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[-4]);
+    }
+
+    #[test]
+    fn div_floor_both_positive() {
+        // 7 // 2 = 3 (unchanged by floor correction)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(2).div().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[3]);
+    }
+
+    #[test]
+    fn mod_divisor_sign_negative_dividend() {
+        // -7 % 2 = 1 (divisor-sign), not -1 (dividend-sign)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(-7).push(2).modulo().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[1]);
+    }
+
+    #[test]
+    fn mod_divisor_sign_negative_divisor() {
+        // 7 % -2 = -1 (divisor-sign)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(-2).modulo().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[-1]);
+    }
+
+    #[test]
+    fn mod_divisor_sign_both_positive() {
+        // 7 % 3 = 1 (unchanged)
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(7).push(3).modulo().halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[1]);
+    }
+
+    #[test]
+    fn load_on_never_set_register_faults() {
+        let mut b = InstructionBuilder::new();
+        let _ = b.load(Register(5)).halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let err = vm.run(&program).unwrap_err();
+        assert!(
+            matches!(err, Error::UnsetRegister { reg: 5, .. }),
+            "expected UnsetRegister, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn drop_then_load_faults() {
+        let mut b = InstructionBuilder::new();
+        let _ = b
+            .push(42)
+            .stow(Register(0))
+            .drop_reg(Register(0))
+            .load(Register(0))
+            .halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let err = vm.run(&program).unwrap_err();
+        assert!(
+            matches!(err, Error::UnsetRegister { reg: 0, .. }),
+            "expected UnsetRegister, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn stow_then_load_works_after_unset_init() {
+        // Register is initially Unset; STOW sets it; LOAD retrieves it.
+        let mut b = InstructionBuilder::new();
+        let _ = b.push(99).stow(Register(3)).load(Register(3)).halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[99]);
+    }
+}

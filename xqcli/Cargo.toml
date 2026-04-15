@@ -1,0 +1,24 @@
+[package]
+name                 = "xqcli"
+description          = "Unified CLI for the Aglais XQVM toolchain"
+version              = "0.1.0"
+license.workspace    = true
+repository.workspace = true
+edition              = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+xqasm.workspace  = true
+xqvm.workspace   = true
+clap.workspace   = true
+miette.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+
+[[bin]]
+name = "xquad"
+path = "src/main.rs"
