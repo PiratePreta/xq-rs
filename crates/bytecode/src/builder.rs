@@ -532,8 +532,7 @@ impl InstructionBuilder {
             })
             .collect();
         narrowable.sort_by_key(|&(site, _, _)| site);
-        let mut shrinkage: usize = 0;
-        for (site, opcode, seq_id) in narrowable {
+        for (shrinkage, (site, opcode, seq_id)) in narrowable.into_iter().enumerate() {
             let actual = site - shrinkage;
             let narrow = match opcode {
                 Opcode::Jump2 => Instruction::Jump1 {
@@ -547,10 +546,12 @@ impl InstructionBuilder {
             let nb = codec::encode(&narrow);
             // `nb` is 2 bytes; the wide form was 3.  Replace the first two
             // bytes in place and remove the now-redundant third byte.
-            self.buf[actual] = nb[0];
-            self.buf[actual + 1] = nb[1];
-            let _ = self.buf.remove(actual + 2);
-            shrinkage += 1;
+            let nb_len = nb.len();
+            self.buf
+                .get_mut(actual..actual + nb_len)
+                .unwrap_or_else(|| panic!("narrow site {actual:#06X} out of buffer bounds"))
+                .copy_from_slice(&nb);
+            let _ = self.buf.remove(actual + nb_len);
         }
 
         Ok(Program::new(self.buf))
