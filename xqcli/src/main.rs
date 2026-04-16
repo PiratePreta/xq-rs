@@ -23,7 +23,7 @@ mod run;
 
 use clap::{Parser, Subcommand};
 
-/// Aglais XQVM toolchain.
+/// XQuad Toolchain.
 #[derive(Debug, Parser)]
 #[command(name = "xquad", version, about)]
 struct Cli {

@@ -15,7 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Assembler for the Aglais X-Quadratic Virtual Machine (XQVM).
+//! Assembler for the XQuad Toolchain X-Quadratic Virtual Machine (XQVM).
 //!
 //! This crate converts XQVM assembly source text into the binary bytecode
 //! format consumed by the VM.

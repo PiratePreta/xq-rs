@@ -66,7 +66,7 @@ impl Drop for TempDir {
     }
 }
 
-/// Build a [`Command`] targeting the `xq` binary.
+/// Build a [`Command`] targeting the `xquad` binary.
 fn xq() -> Command {
     Command::cargo_bin("xquad").expect("xq binary to exist")
 }

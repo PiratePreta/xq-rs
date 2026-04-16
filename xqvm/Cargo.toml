@@ -1,6 +1,6 @@
 [package]
 name                 = "xqvm"
-description          = "X-Quadratic Virtual Machine — bytecode interpreter for the Aglais XQVM"
+description          = "X-Quadratic Virtual Machine — bytecode interpreter for the XQuad Toolchain"
 version              = "0.1.0"
 license.workspace    = true
 repository.workspace = true

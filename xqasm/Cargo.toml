@@ -1,6 +1,6 @@
 [package]
 name                 = "xqasm"
-description          = "Assembler for the Aglais X-Quadratic Virtual Machine"
+description          = "Assembler for the XQuad Toolchain"
 version              = "0.1.0"
 license.workspace    = true
 repository.workspace = true
