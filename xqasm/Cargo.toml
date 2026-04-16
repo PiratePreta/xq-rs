@@ -1,0 +1,17 @@
+[package]
+name                 = "xqasm"
+description          = "Assembler for the XQuad Toolchain"
+version              = "0.1.0"
+license.workspace    = true
+repository.workspace = true
+edition              = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+xqvm.workspace      = true
+miette.workspace    = true
+pest                = "2"
+pest_derive         = "2"
+thiserror.workspace = true

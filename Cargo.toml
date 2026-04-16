@@ -1,11 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/bytecode",
-    "crates/asm",
-    "crates/disasm",
-    "crates/vm",
-    "crates/cli",
+    "xqvm",
+    "xqasm",
+    "xqcli",
 ]
 
 [workspace.package]
@@ -14,16 +12,13 @@ license    = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 ### Workspace crates ###
-aglais-xqvm-asm      = { path = "./crates/asm" }
-aglais-xqvm-bytecode = { path = "./crates/bytecode" }
-aglais-xqvm-disasm   = { path = "./crates/disasm" }
-aglais-xqvm-vm       = { path = "./crates/vm" }
+xqvm  = { path = "./xqvm" }
+xqasm = { path = "./xqasm" }
 
 ### Common dependencies ###
 clap      = { version = "4", features = [ "derive" ] }
 miette    = { version = "7", features = [ "fancy", "derive" ] }
 pastey    = "0.2.1"
-serde     = { version = "1", default-features = false }
 thiserror = { version = "2", default-features = false }
 
 ### Testing ###
