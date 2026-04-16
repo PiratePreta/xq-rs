@@ -38,19 +38,18 @@ pub(crate) struct Args {
 }
 
 /// Execute the `dism` subcommand.
-pub(crate) fn exec(args: Args) -> miette::Result<()> {
-    let bytes = match args.file {
-        Some(ref path) => std::fs::read(path)
+pub(crate) fn exec(args: &Args) -> miette::Result<()> {
+    let bytes = if let Some(path) = &args.file {
+        std::fs::read(path)
             .into_diagnostic()
-            .wrap_err_with(|| format!("failed to read '{}'", path.display()))?,
-        None => {
-            let mut buf = Vec::new();
-            let _n = io::stdin()
-                .read_to_end(&mut buf)
-                .into_diagnostic()
-                .wrap_err("failed to read stdin")?;
-            buf
-        }
+            .wrap_err_with(|| format!("failed to read '{}'", path.display()))?
+    } else {
+        let mut buf = Vec::new();
+        let _n = io::stdin()
+            .read_to_end(&mut buf)
+            .into_diagnostic()
+            .wrap_err("failed to read stdin")?;
+        buf
     };
 
     let mut out = Vec::new();

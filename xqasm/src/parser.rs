@@ -44,7 +44,10 @@ use crate::error::{ParseError, Source, make_span, make_src};
 // silences the missing_docs lint for the generated code without disabling it
 // for the rest of the parser module.
 mod generated {
-    #![allow(missing_docs, unreachable_pub)]
+    #![expect(
+        unreachable_pub,
+        reason = "pest-derive generates pub items inside this private module"
+    )]
     use pest_derive::Parser;
 
     #[derive(Parser)]
@@ -84,8 +87,7 @@ pub fn parse(source: &str, name: &str) -> Result<Vec<AsmLine>, ParseError> {
     let src = Source { text: source, name };
     let pairs = AsmParser::parse(Rule::program, source).map_err(|e| {
         let offset = match e.location {
-            pest::error::InputLocation::Pos(o) => o,
-            pest::error::InputLocation::Span((o, _)) => o,
+            pest::error::InputLocation::Pos(o) | pest::error::InputLocation::Span((o, _)) => o,
         };
         ParseError {
             message: e.variant.to_string(),
@@ -98,7 +100,7 @@ pub fn parse(source: &str, name: &str) -> Result<Vec<AsmLine>, ParseError> {
 
     pairs
         .filter(|p| p.as_rule() == Rule::program)
-        .flat_map(|p| p.into_inner())
+        .flat_map(pest::iterators::Pair::into_inner)
         .filter(|p| p.as_rule() == Rule::line)
         .try_for_each(|line_pair| visit_line(line_pair, src, &mut out))?;
 
@@ -237,15 +239,21 @@ fn parse_integer(text: &str, offset: usize, src: Source<'_>) -> Result<i64, Pars
     })?;
 
     if neg {
-        // -magnitude must fit in i64: magnitude <= 2^63
-        if magnitude > (i64::MAX as u64) + 1 {
+        // -magnitude must fit in i64: magnitude <= 2^63 = i64::MIN.unsigned_abs()
+        if magnitude > i64::MIN.unsigned_abs() {
             return Err(ParseError {
                 message: format!("integer literal '{text}' underflows i64"),
                 src: make_src(src),
                 span: make_span(offset, text.len()),
             });
         }
-        Ok(-(magnitude as i64))
+        // For magnitude == 2^63 the plain cast wraps to i64::MIN; wrapping_neg
+        // converts it back to i64::MIN, which is the correct result.
+        #[expect(
+            clippy::cast_possible_wrap,
+            reason = "magnitude is bounded to ≤2^63 by the prior check; 2^63 wraps to i64::MIN which wrapping_neg correctly leaves as i64::MIN"
+        )]
+        Ok((magnitude as i64).wrapping_neg())
     } else {
         i64::try_from(magnitude).map_err(|_| ParseError {
             message: format!("integer literal '{text}' overflows i64"),
@@ -260,7 +268,6 @@ fn parse_integer(text: &str, offset: usize, src: Source<'_>) -> Result<i64, Pars
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::ast::Operand;

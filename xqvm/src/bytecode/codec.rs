@@ -69,7 +69,7 @@ use super::types::{Instruction, Register};
 // ---------------------------------------------------------------------------
 
 /// Errors returned by [`decode`].
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum DecodeError {
     /// The input is empty.
     #[error("instruction stream truncated: empty input")]
@@ -303,7 +303,6 @@ macro_rules! impl_codec {
         pub fn decode(bytes: &[u8]) -> Result<(Instruction, usize), DecodeError> {
             let opcode = *bytes.first().ok_or(DecodeError::EmptyInput)?;
             let payload = bytes.get(1..).unwrap_or(&[]);
-            #[allow(unused_mut, unused_variables)]
             let mut pos = 0usize;
             match opcode {
                 $(
@@ -331,7 +330,6 @@ opcodes!(impl_codec);
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::bytecode::types::Register;

@@ -17,6 +17,7 @@
 
 //! JSONL tracer.
 
+use std::fmt::Write as _;
 use std::io::Write;
 
 use crate::tracer::{StepState, Tracer};
@@ -52,7 +53,7 @@ fn json_escape(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if c.is_control() => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
+                let _ = write!(out, "\\u{:04x}", c as u32);
             }
             c => out.push(c),
         }
@@ -93,7 +94,7 @@ fn regs_json(regs: &[(u8, RegVal)]) -> String {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(&format!("\"{}\":{}", idx, regval_json(val)));
+        let _ = write!(out, "\"{}\":{}", idx, regval_json(val));
     }
     out.push('}');
     out
@@ -106,7 +107,7 @@ fn stack_json(stack: &[i64]) -> String {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(&format!("{v}"));
+        let _ = write!(out, "{v}");
     }
     out.push(']');
     out

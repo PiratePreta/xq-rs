@@ -79,6 +79,10 @@ use crate::opcodes;
 // ---------------------------------------------------------------------------
 
 /// Sign-extend a big-endian byte slice (1..=8 bytes) to `i64`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "bytes.len() <= 8 per debug_assert; 8 * 8 = 64 always fits in u32"
+)]
 fn sign_extend_be(bytes: &[u8]) -> i64 {
     debug_assert!(!bytes.is_empty() && bytes.len() <= 8);
     let mut v = 0i64;
@@ -193,7 +197,6 @@ macro_rules! impl_fmt_instruction {
                         write!(f, "{:<8}", $mnem)?;
                         // `_first` and its mutation are unused when there are no
                         // operands; the attribute suppresses the resulting warning.
-                        #[allow(unused_mut)]
                         let mut _first = true;
                         $(
                             if !_first { write!(f, ", ")?; }
@@ -292,6 +295,10 @@ impl<'a> Disassembly<'a> {
     /// assert!(text.contains("PUSH1"));
     /// assert!(text.contains("HALT"));
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` if writing to `out` fails.
     pub fn write_to(&self, out: &mut impl io::Write) -> io::Result<()> {
         // Width of the label column: longest ".N:" string, or 0 when there
         // are no labels so the column is omitted entirely.

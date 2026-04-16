@@ -44,7 +44,7 @@ pub enum Domain {
 
 /// A quadratic optimization model (QUBO/Ising/discrete).
 ///
-/// Encodes H(x) = sum_i linear\[i\] * x\[i\] + sum_{i<j} quadratic\[(i,j)\] * x\[i\] * x\[j\].
+/// Encodes H(x) = `sum_i` linear\[i\] * x\[i\] + sum_{i<j} quadratic\[(i,j)\] * x\[i\] * x\[j\].
 ///
 /// # Examples
 ///
@@ -170,30 +170,37 @@ impl XqmxModel {
 
     /// Compute the Hamiltonian energy H(s) for a given sample vector.
     ///
-    /// H(s) = sum_i linear\[i\] * s\[i\] + sum_{i<j} quadratic\[(i,j)\] * s\[i\] * s\[j\]
+    /// H(s) = `sum_i` linear\[i\] * s\[i\] + sum_{i<j} quadratic\[(i,j)\] * s\[i\] * s\[j\]
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if `sample.len() != self.size`.
-    #[allow(clippy::result_unit_err)]
-    pub fn energy(&self, sample: &[i64]) -> Result<i64, ()> {
+    /// Returns [`crate::Error::SizeMismatch`] if `sample.len() != self.size`, or if the
+    /// model contains a coefficient at an index that exceeds its declared size (indicating
+    /// the model was mutated with an out-of-range index).
+    pub fn energy(&self, sample: &[i64]) -> Result<i64, crate::Error> {
         if sample.len() != self.size {
-            return Err(());
+            return Err(crate::Error::SizeMismatch {
+                model_size: self.size,
+                sample_len: sample.len(),
+            });
         }
         let mut h: i64 = 0;
         for (&i, &coeff) in &self.linear {
-            let xi = *sample.get(i).unwrap_or_else(|| {
-                unreachable!("linear index {} < size {} == sample.len()", i, self.size)
-            });
+            let xi = sample.get(i).copied().ok_or(crate::Error::SizeMismatch {
+                model_size: self.size,
+                sample_len: i.saturating_add(1),
+            })?;
             h = h.wrapping_add(coeff.wrapping_mul(xi));
         }
         for (&(i, j), &coeff) in &self.quadratic {
-            let xi = *sample.get(i).unwrap_or_else(|| {
-                unreachable!("quadratic index {} < size {} == sample.len()", i, self.size)
-            });
-            let xj = *sample.get(j).unwrap_or_else(|| {
-                unreachable!("quadratic index {} < size {} == sample.len()", j, self.size)
-            });
+            let xi = sample.get(i).copied().ok_or(crate::Error::SizeMismatch {
+                model_size: self.size,
+                sample_len: i.saturating_add(1),
+            })?;
+            let xj = sample.get(j).copied().ok_or(crate::Error::SizeMismatch {
+                model_size: self.size,
+                sample_len: j.saturating_add(1),
+            })?;
             h = h.wrapping_add(coeff.wrapping_mul(xi).wrapping_mul(xj));
         }
         Ok(h)

@@ -9,10 +9,10 @@ bytecode programmatically, without going through the text assembler.
 use aglais_xqvm_bytecode::InstructionBuilder;
 
 let mut b = InstructionBuilder::new();
-b.push(10)
- .push(32)
- .add()
- .halt();
+b.emit_push(10)
+ .emit_push(32)
+ .emit_add()
+ .emit_halt();
 
 let program = b.build().unwrap();
 ```
@@ -20,7 +20,7 @@ let program = b.build().unwrap();
 ## Labels
 
 Labels are opaque handles. Create them with `label()`, anchor them with
-`place()`, and reference them in `jump()`/`jump_if()`. Both forward and
+`place()`, and reference them in `emit_jump()`/`emit_jump_if()`. Both forward and
 backward references work.
 
 ### Backward Reference
@@ -31,14 +31,14 @@ use aglais_xqvm_bytecode::InstructionBuilder;
 let mut b = InstructionBuilder::new();
 let loop_top = b.label();
 
-b.push(3);
+b.emit_push(3);
 b.place(loop_top);      // anchor label at this position
-b.push(-1);
-b.add();
-b.copy();
-b.jump_if(loop_top);    // backward jump to loop_top
-b.pop();
-b.halt();
+b.emit_push(-1);
+b.emit_add();
+b.emit_copy();
+b.emit_jump_if(loop_top);    // backward jump to loop_top
+b.emit_pop();
+b.emit_halt();
 
 let program = b.build().unwrap();
 ```
@@ -51,24 +51,24 @@ use aglais_xqvm_bytecode::InstructionBuilder;
 let mut b = InstructionBuilder::new();
 let done = b.label();
 
-b.push(0);
-b.jump_if(done);        // forward jump -- target not yet placed
-b.push(42);
+b.emit_push(0);
+b.emit_jump_if(done);        // forward jump -- target not yet placed
+b.emit_push(42);
 b.place(done);           // anchor here
-b.halt();
+b.emit_halt();
 
 let program = b.build().unwrap();
 ```
 
 ## PUSH Auto-Sizing
 
-`push(val)` automatically selects the smallest `PUSH1`--`PUSH8` instruction:
+`emit_push(val)` automatically selects the smallest `PUSH1`--`PUSH8` instruction:
 
 ```rust
-b.push(0);         // emits PUSH1 (2 bytes)
-b.push(42);        // emits PUSH1 (2 bytes)
-b.push(1000);      // emits PUSH2 (3 bytes)
-b.push(i64::MAX);  // emits PUSH8 (9 bytes)
+b.emit_push(0);         // emits PUSH1 (2 bytes)
+b.emit_push(42);        // emits PUSH1 (2 bytes)
+b.emit_push(1000);      // emits PUSH2 (3 bytes)
+b.emit_push(i64::MAX);  // emits PUSH8 (9 bytes)
 ```
 
 ## Register Operations
@@ -79,25 +79,25 @@ Most register instructions have a corresponding method:
 use aglais_xqvm_bytecode::{InstructionBuilder, Register};
 
 let mut b = InstructionBuilder::new();
-b.push(42)
- .stow(Register(0))     // r0 ← Int(42)
- .load(Register(0))     // push r0's value
- .bqmx(Register(1))     // allocate QUBO model in r1
- .halt();
+b.emit_push(42)
+ .emit_stow(Register(0))     // r0 ← Int(42)
+ .emit_load(Register(0))     // push r0's value
+ .emit_bqmx(Register(1))     // allocate QUBO model in r1
+ .emit_halt();
 ```
 
-`DROP` is available as `drop_reg()` to avoid shadowing Rust's `core::mem::drop`:
+`DROP` is available as `emit_drop()`:
 
 ```rust
-b.drop_reg(Register(5));  // r5 ← Int(0)
+b.emit_drop(Register(5));  // r5 ← Int(0)
 ```
 
 ## ENERGY
 
-The `energy()` method takes two register operands:
+The `emit_energy()` method takes two register operands:
 
 ```rust
-b.energy(Register(0), Register(1));  // ENERGY r0 r1
+b.emit_energy(Register(0), Register(1));  // ENERGY r0 r1
 ```
 
 ## Raw Instruction Emit
@@ -122,7 +122,7 @@ b.emit(Instruction::Copy {})
 ```rust
 let mut b = InstructionBuilder::new();
 let ghost = b.label();
-b.jump(ghost).halt();
+b.emit_jump(ghost).emit_halt();
 assert!(b.build().is_err());  // UnplacedLabel
 ```
 
@@ -136,7 +136,7 @@ basic block. The jump table is included in the final `Program`.
 let mut b = InstructionBuilder::new();
 let l0 = b.label();
 let l1 = b.label();
-b.place(l0).nop().jump(l1).place(l1).halt();
+b.place(l0).emit_nop().emit_jump(l1).place(l1).emit_halt();
 
 let program = b.build().unwrap();
 assert_eq!(program.jump_table().len(), 2);

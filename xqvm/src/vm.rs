@@ -30,7 +30,7 @@
 //!
 //! // Build: PUSH 3 + PUSH 4 = 7; HALT.
 //! let mut b = InstructionBuilder::new();
-//! b.push(3).push(4).add().halt();
+//! b.emit_push(3).emit_push(4).emit_add().emit_halt();
 //! let program = b.build().unwrap();
 //!
 //! let mut vm = Vm::new();
@@ -176,7 +176,10 @@ fn sign_extend_be(bytes: &[u8]) -> i64 {
     for &b in bytes {
         v = (v << 8) | i64::from(b);
     }
-    let shift = 64u32 - (bytes.len() * 8) as u32;
+    // bytes.len() is 1..=8 per invariant; try_from never fails for these values,
+    // unwrap_or(8) is a no-panic fallback for any impossible length > u32::MAX.
+    let n = u32::try_from(bytes.len().min(8)).unwrap_or(8);
+    let shift = 64u32 - n * 8;
     (v << shift) >> shift
 }
 
@@ -196,7 +199,7 @@ const DEFAULT_STEP_LIMIT: u64 = 10_000_000;
 /// use xqvm::InstructionBuilder;
 ///
 /// let mut b = InstructionBuilder::new();
-/// b.push(6).push(7).mul().halt();
+/// b.emit_push(6).emit_push(7).emit_mul().emit_halt();
 /// let program = b.build().unwrap();
 ///
 /// let mut vm = Vm::new();
@@ -255,7 +258,7 @@ impl Vm {
     /// vm.set_calldata(vec![RegVal::Int(7)]);
     ///
     /// let mut b = InstructionBuilder::new();
-    /// b.push(0).input(Register(0)).halt();
+    /// b.emit_push(0).emit_input(Register(0)).emit_halt();
     /// let program = b.build().unwrap();
     /// vm.run(&program).unwrap();
     /// assert_eq!(vm.register(0), &RegVal::Int(7));
@@ -314,7 +317,7 @@ impl Vm {
     /// vm.set_register(0, RegVal::Int(42));
     ///
     /// let mut b = InstructionBuilder::new();
-    /// b.load(xqvm::Register(0)).halt();
+    /// b.emit_load(xqvm::Register(0)).emit_halt();
     /// let program = b.build().unwrap();
     /// vm.run(&program).unwrap();
     /// assert_eq!(vm.stack(), &[42]);
@@ -521,18 +524,38 @@ impl Vm {
 
     // -- Control flow --
 
+    #[expect(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires &mut self and Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_nop(&mut self, _pos: usize) -> Result<StepResult, Error> {
         Ok(StepResult::Continue)
     }
 
+    #[expect(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires &mut self and Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_target(&mut self, _pos: usize) -> Result<StepResult, Error> {
         Ok(StepResult::Continue)
     }
 
+    #[expect(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires &mut self and Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_jump1(&mut self, _pos: usize, label: u8) -> Result<StepResult, Error> {
         Ok(StepResult::Jump(u16::from(label)))
     }
 
+    #[expect(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires &mut self and Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_jump2(&mut self, _pos: usize, label: u16) -> Result<StepResult, Error> {
         Ok(StepResult::Jump(label))
     }
@@ -684,8 +707,8 @@ impl Vm {
                 let (start_offset, range) = resolve_iter_slice(pos, start, end, len)?;
                 let copy = v
                     .get(range)
-                    .map(<[i64]>::to_vec)
-                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"));
+                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"))
+                    .to_vec();
                 Ok(StepResult::StartLoop {
                     kind: LoopKind::Iter {
                         elements: IterElements::Int(copy),
@@ -699,8 +722,8 @@ impl Vm {
                 let (start_offset, range) = resolve_iter_slice(pos, start, end, len)?;
                 let copy = v
                     .get(range)
-                    .map(<[XqmxModel]>::to_vec)
-                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"));
+                    .unwrap_or_else(|| unreachable!("resolve_iter_slice already validated"))
+                    .to_vec();
                 Ok(StepResult::StartLoop {
                     kind: LoopKind::Iter {
                         elements: IterElements::Xqmx(copy),
@@ -717,6 +740,11 @@ impl Vm {
         }
     }
 
+    #[expect(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires &mut self and Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_halt(&mut self, _pos: usize) -> Result<StepResult, Error> {
         Ok(StepResult::Halt)
     }
@@ -823,11 +851,19 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_drop(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
         *self.reg_mut(reg) = RegVal::Unset;
         Ok(StepResult::Continue)
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_sclr(&mut self, _pos: usize) -> Result<StepResult, Error> {
         self.stack.clear();
         Ok(StepResult::Continue)
@@ -1121,17 +1157,29 @@ impl Vm {
 
     // -- Vec allocators --
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_vec(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
         // Untyped vec -- becomes VecInt (integer vec is the default untyped container).
         *self.reg_mut(reg) = RegVal::VecInt(Vec::new());
         Ok(StepResult::Continue)
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_vec_i(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
         *self.reg_mut(reg) = RegVal::VecInt(Vec::new());
         Ok(StepResult::Continue)
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "dispatch macro requires Result<StepResult, Error> for all exec methods"
+    )]
     fn exec_vec_x(&mut self, _pos: usize, reg: Register) -> Result<StepResult, Error> {
         *self.reg_mut(reg) = RegVal::VecXqmx(Vec::new());
         Ok(StepResult::Continue)
@@ -1213,7 +1261,9 @@ impl Vm {
                 });
             }
         };
-        self.push_stack(len as i64, pos)?;
+        // Vec lengths are bounded by isize::MAX ≤ i64::MAX on all supported platforms;
+        // try_from never fails in practice.
+        self.push_stack(i64::try_from(len).unwrap_or(i64::MAX), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1249,7 +1299,11 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        let usize_i = i as usize;
+        let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
         self.push_stack(m.get_linear(usize_i), pos)?;
         Ok(StepResult::Continue)
     }
@@ -1265,7 +1319,12 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        m.set_linear(i as usize, val);
+        let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
+        m.set_linear(usize_i, val);
         Ok(StepResult::Continue)
     }
 
@@ -1280,7 +1339,12 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        m.add_linear(i as usize, delta);
+        let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
+        m.add_linear(usize_i, delta);
         Ok(StepResult::Continue)
     }
 
@@ -1295,7 +1359,17 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        self.push_stack(m.get_quad(i as usize, j as usize), pos)?;
+        let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
+        let usize_j = usize::try_from(j).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: j,
+            len: m.size,
+        })?;
+        self.push_stack(m.get_quad(usize_i, usize_j), pos)?;
         Ok(StepResult::Continue)
     }
 
@@ -1311,7 +1385,17 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        m.set_quad(i as usize, j as usize, val);
+        let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
+        let usize_j = usize::try_from(j).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: j,
+            len: m.size,
+        })?;
+        m.set_quad(usize_i, usize_j, val);
         Ok(StepResult::Continue)
     }
 
@@ -1327,7 +1411,17 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        m.add_quad(i as usize, j as usize, delta);
+        let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
+        let usize_j = usize::try_from(j).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: j,
+            len: m.size,
+        })?;
+        m.add_quad(usize_i, usize_j, delta);
         Ok(StepResult::Continue)
     }
 
@@ -1347,8 +1441,11 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        m.rows = rows as usize;
-        m.cols = cols as usize;
+        // rows and cols are validated > 0; try_from handles out-of-range on 32-bit targets.
+        m.rows =
+            usize::try_from(rows).map_err(|_| Error::InvalidGridDimensions { pos, rows, cols })?;
+        m.cols =
+            usize::try_from(cols).map_err(|_| Error::InvalidGridDimensions { pos, rows, cols })?;
         Ok(StepResult::Continue)
     }
 
@@ -1363,11 +1460,16 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        let row_start = row as usize * m.cols;
+        let usize_row = usize::try_from(row).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: row,
+            len: m.rows,
+        })?;
+        let row_start = usize_row * m.cols;
+        // m.cols ≤ i64::MAX (validated via exec_resize); try_from never fails.
         let result = (0..m.cols)
             .find(|&col| m.get_linear(row_start + col) == value)
-            .map(|c| c as i64)
-            .unwrap_or(-1);
+            .map_or(-1, |c| i64::try_from(c).unwrap_or(-1));
         self.push_stack(result, pos)?;
         Ok(StepResult::Continue)
     }
@@ -1383,10 +1485,15 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
+        let usize_col = usize::try_from(col).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: col,
+            len: m.cols,
+        })?;
+        // m.rows ≤ i64::MAX (validated via exec_resize); try_from never fails.
         let result = (0..m.rows)
-            .find(|&row| m.get_linear(row * m.cols + col as usize) == value)
-            .map(|r| r as i64)
-            .unwrap_or(-1);
+            .find(|&row| m.get_linear(row * m.cols + usize_col) == value)
+            .map_or(-1, |r| i64::try_from(r).unwrap_or(-1));
         self.push_stack(result, pos)?;
         Ok(StepResult::Continue)
     }
@@ -1401,7 +1508,12 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        let row_start = row as usize * m.cols;
+        let usize_row = usize::try_from(row).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: row,
+            len: m.rows,
+        })?;
+        let row_start = usize_row * m.cols;
         let sum: i64 = (0..m.cols).map(|c| m.get_linear(row_start + c)).sum();
         self.push_stack(sum, pos)?;
         Ok(StepResult::Continue)
@@ -1417,8 +1529,13 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
+        let usize_col = usize::try_from(col).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: col,
+            len: m.cols,
+        })?;
         let sum: i64 = (0..m.rows)
-            .map(|r| m.get_linear(r * m.cols + col as usize))
+            .map(|r| m.get_linear(r * m.cols + usize_col))
             .sum();
         self.push_stack(sum, pos)?;
         Ok(StepResult::Continue)
@@ -1437,7 +1554,12 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        let row_start = row as usize * m.cols;
+        let usize_row = usize::try_from(row).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: row,
+            len: m.rows,
+        })?;
+        let row_start = usize_row * m.cols;
         // H = penalty * (sum(x_i) - 1)^2
         // Linear: -penalty per variable in row
         // Quadratic: 2*penalty per pair in row
@@ -1463,7 +1585,11 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
-        let col_idx = col as usize;
+        let col_idx = usize::try_from(col).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: col,
+            len: m.cols,
+        })?;
         // H = penalty * (sum(x_{r,col}) - 1)^2 over all rows.
         // Linear: -penalty per variable in column.
         // Quadratic: 2*penalty per pair in column.
@@ -1491,7 +1617,17 @@ impl Vm {
                 got,
             })?;
         // Penalise x_i * x_j = 1 (mutual exclusion).
-        m.add_quad(i as usize, j as usize, penalty);
+        let i_idx = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
+        let j_idx = usize::try_from(j).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: j,
+            len: m.size,
+        })?;
+        m.add_quad(i_idx, j_idx, penalty);
         Ok(StepResult::Continue)
     }
 
@@ -1508,8 +1644,18 @@ impl Vm {
                 got,
             })?;
         // Penalise x_i=1, x_j=0: penalty * x_i * (1 - x_j) = penalty*x_i - penalty*x_i*x_j.
-        m.add_linear(i as usize, penalty);
-        m.add_quad(i as usize, j as usize, -penalty);
+        let i_idx = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: i,
+            len: m.size,
+        })?;
+        let j_idx = usize::try_from(j).map_err(|_| Error::IndexOutOfBounds {
+            pos,
+            index: j,
+            len: m.size,
+        })?;
+        m.add_linear(i_idx, penalty);
+        m.add_quad(i_idx, j_idx, -penalty);
         Ok(StepResult::Continue)
     }
 
@@ -1547,10 +1693,7 @@ impl Vm {
                 });
             }
         };
-        let energy = m.energy(&sample_values).map_err(|()| Error::SizeMismatch {
-            model_size: m.size,
-            sample_len: sample_values.len(),
-        })?;
+        let energy = m.energy(&sample_values)?;
         self.push_stack(energy, pos)?;
         Ok(StepResult::Continue)
     }
@@ -1575,7 +1718,10 @@ mod tests {
         steps: Vec<RecordedStep>,
     }
 
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "struct fields are available for debugging inspections"
+    )]
     struct RecordedStep {
         pos: usize,
         step: u64,
@@ -1629,7 +1775,7 @@ mod tests {
     #[test]
     fn failing_tracer_propagates_error() {
         let mut b = InstructionBuilder::new();
-        let _ = b.push(1).halt();
+        let _ = b.emit_push(1).emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         let mut tracer = FailingTracer { fail_at: 1 };
@@ -1643,7 +1789,7 @@ mod tests {
     #[test]
     fn run_delegates_to_run_trace() {
         let mut b = InstructionBuilder::new();
-        let _ = b.push(3).push(4).add().halt();
+        let _ = b.emit_push(3).emit_push(4).emit_add().emit_halt();
         let program = b.build().unwrap();
 
         let mut vm1 = Vm::new();
@@ -1658,7 +1804,12 @@ mod tests {
     #[test]
     fn recording_tracer_captures_steps() {
         let mut b = InstructionBuilder::new();
-        let _ = b.push(3).push(4).add().stow(Register(0)).halt();
+        let _ = b
+            .emit_push(3)
+            .emit_push(4)
+            .emit_add()
+            .emit_stow(Register(0))
+            .emit_halt();
         let program = b.build().unwrap();
 
         let mut tracer = RecordingTracer::new();
@@ -1697,7 +1848,11 @@ mod tests {
     #[test]
     fn recording_tracer_captures_read_regs() {
         let mut b = InstructionBuilder::new();
-        let _ = b.push(42).stow(Register(0)).load(Register(0)).halt();
+        let _ = b
+            .emit_push(42)
+            .emit_stow(Register(0))
+            .emit_load(Register(0))
+            .emit_halt();
         let program = b.build().unwrap();
 
         let mut tracer = RecordingTracer::new();
@@ -1714,7 +1869,7 @@ mod tests {
     fn div_floor_negative_dividend() {
         // -7 // 2 = -4 (floor), not -3 (truncating)
         let mut b = InstructionBuilder::new();
-        let _ = b.push(-7).push(2).div().halt();
+        let _ = b.emit_push(-7).emit_push(2).emit_div().emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         vm.run(&program).unwrap();
@@ -1725,7 +1880,7 @@ mod tests {
     fn div_floor_negative_divisor() {
         // 7 // -2 = -4 (floor)
         let mut b = InstructionBuilder::new();
-        let _ = b.push(7).push(-2).div().halt();
+        let _ = b.emit_push(7).emit_push(-2).emit_div().emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         vm.run(&program).unwrap();
@@ -1736,7 +1891,7 @@ mod tests {
     fn div_floor_both_positive() {
         // 7 // 2 = 3 (unchanged by floor correction)
         let mut b = InstructionBuilder::new();
-        let _ = b.push(7).push(2).div().halt();
+        let _ = b.emit_push(7).emit_push(2).emit_div().emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         vm.run(&program).unwrap();
@@ -1747,7 +1902,7 @@ mod tests {
     fn mod_divisor_sign_negative_dividend() {
         // -7 % 2 = 1 (divisor-sign), not -1 (dividend-sign)
         let mut b = InstructionBuilder::new();
-        let _ = b.push(-7).push(2).modulo().halt();
+        let _ = b.emit_push(-7).emit_push(2).emit_modulo().emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         vm.run(&program).unwrap();
@@ -1758,7 +1913,7 @@ mod tests {
     fn mod_divisor_sign_negative_divisor() {
         // 7 % -2 = -1 (divisor-sign)
         let mut b = InstructionBuilder::new();
-        let _ = b.push(7).push(-2).modulo().halt();
+        let _ = b.emit_push(7).emit_push(-2).emit_modulo().emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         vm.run(&program).unwrap();
@@ -1769,7 +1924,7 @@ mod tests {
     fn mod_divisor_sign_both_positive() {
         // 7 % 3 = 1 (unchanged)
         let mut b = InstructionBuilder::new();
-        let _ = b.push(7).push(3).modulo().halt();
+        let _ = b.emit_push(7).emit_push(3).emit_modulo().emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         vm.run(&program).unwrap();
@@ -1779,7 +1934,7 @@ mod tests {
     #[test]
     fn load_on_never_set_register_faults() {
         let mut b = InstructionBuilder::new();
-        let _ = b.load(Register(5)).halt();
+        let _ = b.emit_load(Register(5)).emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         let err = vm.run(&program).unwrap_err();
@@ -1793,11 +1948,11 @@ mod tests {
     fn drop_then_load_faults() {
         let mut b = InstructionBuilder::new();
         let _ = b
-            .push(42)
-            .stow(Register(0))
-            .drop_reg(Register(0))
-            .load(Register(0))
-            .halt();
+            .emit_push(42)
+            .emit_stow(Register(0))
+            .emit_drop(Register(0))
+            .emit_load(Register(0))
+            .emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         let err = vm.run(&program).unwrap_err();
@@ -1811,7 +1966,11 @@ mod tests {
     fn stow_then_load_works_after_unset_init() {
         // Register is initially Unset; STOW sets it; LOAD retrieves it.
         let mut b = InstructionBuilder::new();
-        let _ = b.push(99).stow(Register(3)).load(Register(3)).halt();
+        let _ = b
+            .emit_push(99)
+            .emit_stow(Register(3))
+            .emit_load(Register(3))
+            .emit_halt();
         let program = b.build().unwrap();
         let mut vm = Vm::new();
         vm.run(&program).unwrap();

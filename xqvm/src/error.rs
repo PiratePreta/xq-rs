@@ -29,7 +29,7 @@
 //! use xqvm::{Instruction, InstructionBuilder};
 //!
 //! let mut builder = InstructionBuilder::new();
-//! builder.push(0).emit(Instruction::Halt {});
+//! builder.emit_push(0).emit(Instruction::Halt {});
 //! let program = builder.build().unwrap();
 //!
 //! let err = Error::DivisionByZero { pos: 0 };
@@ -52,7 +52,10 @@ use crate::disasm::Disassembly;
 
 /// Errors that can occur during XQVM bytecode execution.
 #[derive(Debug, Error)]
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "error variants are documented via their #[error(...)] display strings"
+)]
 pub enum Error {
     /// The value stack was empty when a pop was attempted.
     #[error("stack underflow at byte {pos:#06x}")]
@@ -165,7 +168,7 @@ impl Error {
     ///
     /// fn run() -> miette::Result<()> {
     ///     let mut b = InstructionBuilder::new();
-    ///     b.push(10).push(0).div().halt();
+    ///     b.emit_push(10).emit_push(0).emit_div().emit_halt();
     ///     let program = b.build().unwrap();
     ///
     ///     let mut vm = Vm::new();
@@ -245,7 +248,7 @@ impl From<crate::bytecode::error::StreamError> for Error {
 ///
 /// fn run() -> miette::Result<()> {
 ///     let mut b = InstructionBuilder::new();
-///     b.push(3).push(4).add().halt();
+///     b.emit_push(3).emit_push(4).emit_add().emit_halt();
 ///     let program = b.build().unwrap();
 ///
 ///     let mut vm = Vm::new();
@@ -280,12 +283,11 @@ fn find_line_span(text: &str, byte_pos: usize) -> Option<SourceSpan> {
     let needle = format!("0x{byte_pos:04X}:");
     let match_start = text.find(&needle)?;
 
-    let line_start = text[..match_start].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let line_start = text[..match_start].rfind('\n').map_or(0, |n| n + 1);
 
     let line_end = text[match_start..]
         .find('\n')
-        .map(|n| match_start + n)
-        .unwrap_or(text.len());
+        .map_or(text.len(), |n| match_start + n);
 
     Some(SourceSpan::from(line_start..line_end))
 }

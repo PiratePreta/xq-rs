@@ -60,7 +60,7 @@ macro_rules! impl_instruction {
                 #[doc = $doc]
                 $variant {
                     $(
-                        #[allow(missing_docs)]
+                        #[expect(missing_docs, reason = "macro-generated enum variant fields don't warrant individual doc comments")]
                         $fname: $ftype,
                     )*
                 },
@@ -339,6 +339,10 @@ impl Instruction {
 // ---------------------------------------------------------------------------
 
 /// Sign-extend a big-endian byte slice (1..=8 bytes) to `i64`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "bytes.len() <= 8 per debug_assert; 8 * 8 = 64 always fits in u32"
+)]
 fn sign_extend_be(bytes: &[u8]) -> i64 {
     debug_assert!(!bytes.is_empty() && bytes.len() <= 8);
     let mut v = 0i64;

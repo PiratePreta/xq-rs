@@ -233,6 +233,50 @@ pub enum AssembleError {
         #[source_code]
         src: NamedSource<Arc<str>>,
     },
+
+    /// A jump-fixup site was outside the code buffer (assembler invariant violated).
+    #[error("jump fixup site {site:#06x} is out of buffer bounds (buffer length {buf_len})")]
+    #[diagnostic(code(xqasm::fixup_out_of_bounds))]
+    FixupOutOfBounds {
+        /// Byte offset of the fixup site.
+        site: usize,
+        /// Length of the code buffer at the time of the fixup.
+        buf_len: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+    },
+
+    /// A label was placed more than once (assembler invariant violated).
+    ///
+    /// The assembler checks for duplicate label definitions before calling
+    /// [`xqvm::InstructionBuilder::place`]; this error indicates a bug in the
+    /// assembler itself.
+    #[error("label {id} was placed more than once")]
+    #[diagnostic(code(xqasm::label_placed_twice))]
+    LabelPlacedTwice {
+        /// Internal builder index of the duplicated label.
+        id: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+    },
+
+    /// A label was not created by this builder (assembler invariant violated).
+    ///
+    /// This error indicates a bug in the assembler itself: a [`LabelId`]
+    /// allocated by one builder instance was passed to a different one.
+    ///
+    /// [`LabelId`]: xqvm::LabelId
+    #[error("label {id} was not created by this builder")]
+    #[diagnostic(code(xqasm::label_not_owned))]
+    LabelNotOwned {
+        /// Internal builder index of the unrecognised label.
+        id: usize,
+        /// Source text for diagnostic rendering.
+        #[source_code]
+        src: NamedSource<Arc<str>>,
+    },
 }
 
 // ---------------------------------------------------------------------------
