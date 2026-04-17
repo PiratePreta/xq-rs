@@ -579,12 +579,12 @@ mod tests {
 
     #[test]
     fn display_jump() {
-        assert_eq!(format!("{}", Instruction::Jump1 { label: 3 }), "JUMP1 .3",);
+        assert_eq!(format!("{}", Instruction::Jump1 { label: 3 }), "JUMP1 .3");
         assert_eq!(
             format!("{}", Instruction::Jump2 { label: 300 }),
             "JUMP2 .300",
         );
-        assert_eq!(format!("{}", Instruction::JumpI1 { label: 3 }), "JUMPI1 .3",);
+        assert_eq!(format!("{}", Instruction::JumpI1 { label: 3 }), "JUMPI1 .3");
         assert_eq!(
             format!("{}", Instruction::JumpI2 { label: 300 }),
             "JUMPI2 .300",
