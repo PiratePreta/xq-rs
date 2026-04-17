@@ -15,6 +15,12 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI binary: stdout and stderr output are intentional"
+)]
+
 //! `xquad` -- unified CLI driver for the XQVM toolchain.
 
 mod asm;
@@ -23,7 +29,7 @@ mod run;
 
 use clap::{Parser, Subcommand};
 
-/// XQuad Toolchain.
+/// `XQuad` toolchain driver.
 #[derive(Debug, Parser)]
 #[command(name = "xquad", version, about)]
 struct Cli {
@@ -46,7 +52,7 @@ fn main() -> miette::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Asm(args) => asm::exec(args),
-        Command::Dism(args) => dism::exec(args),
+        Command::Dism(args) => dism::exec(&args),
         Command::Run(args) => run::exec(args),
     }
 }

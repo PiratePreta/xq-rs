@@ -47,7 +47,7 @@
 //! use xqvm::{Vm, InstructionBuilder};
 //!
 //! let mut b = InstructionBuilder::new();
-//! b.push(10).push(32).add().halt();
+//! b.emit_push(10).emit_push(32).emit_add().emit_halt();
 //! let program = b.build().unwrap();
 //!
 //! let mut vm = Vm::new();
@@ -59,7 +59,10 @@
 // The `alloc` crate provides heap types (`Vec`, `BTreeMap`, ...).
 #![cfg_attr(not(feature = "std"), no_std)]
 // Private modules have doc tests that are only visible to maintainers.
-#![allow(rustdoc::private_doc_tests)]
+#![expect(
+    rustdoc::private_doc_tests,
+    reason = "private modules contain doc tests visible only to maintainers"
+)]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;

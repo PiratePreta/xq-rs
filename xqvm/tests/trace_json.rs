@@ -15,7 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Integration tests for JsonTracer output.
+//! Integration tests for `JsonTracer` output.
 
 use xqvm::bytecode::{InstructionBuilder, Register};
 use xqvm::{JsonTracer, Vm};
@@ -28,7 +28,12 @@ fn is_valid_json(s: &str) -> bool {
 #[test]
 fn json_tracer_produces_valid_jsonl() {
     let mut b = InstructionBuilder::new();
-    let _ = b.push(3).push(4).add().stow(Register(0)).halt();
+    let _ = b
+        .emit_push(3)
+        .emit_push(4)
+        .emit_add()
+        .emit_stow(Register(0))
+        .emit_halt();
     let program = b.build().unwrap();
 
     let mut buf = Vec::new();
@@ -58,7 +63,7 @@ fn json_tracer_produces_valid_jsonl() {
 #[test]
 fn json_tracer_each_line_has_required_fields() {
     let mut b = InstructionBuilder::new();
-    let _ = b.push(42).halt();
+    let _ = b.emit_push(42).emit_halt();
     let program = b.build().unwrap();
 
     let mut buf = Vec::new();

@@ -20,7 +20,11 @@
 //! These tests assemble complete programs and verify the decoded instruction
 //! stream, exercising the full parse -> assemble -> decode pipeline.
 
-#![allow(clippy::indexing_slicing)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers - panics on failure are intentional"
+)]
 
 use xqasm::assemble_source;
 use xqvm::{Instruction, InstructionStream, Register};

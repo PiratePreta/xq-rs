@@ -15,7 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Assembler for the XQuad Toolchain X-Quadratic Virtual Machine (XQVM).
+//! Assembler for the `XQuad` Toolchain X-Quadratic Virtual Machine (XQVM).
 //!
 //! This crate converts XQVM assembly source text into the binary bytecode
 //! format consumed by the VM.
@@ -53,9 +53,15 @@
 
 // Error types carry NamedSource<Arc<str>> for miette source snippets.
 // The extra size is acceptable on error paths in an assembler.
-#![allow(clippy::result_large_err)]
+#![expect(
+    clippy::result_large_err,
+    reason = "assembler errors carry source context for miette; size is acceptable on error paths"
+)]
 // Private modules have doc tests that are only visible to maintainers.
-#![allow(rustdoc::private_doc_tests)]
+#![expect(
+    rustdoc::private_doc_tests,
+    reason = "private modules contain maintainer-only doc tests"
+)]
 
 mod assembler;
 mod ast;

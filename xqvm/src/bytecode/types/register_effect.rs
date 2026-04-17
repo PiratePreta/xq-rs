@@ -54,7 +54,10 @@ impl RegisterEffect {
     /// View as a slice.
     pub fn as_slice(&self) -> &[u8] {
         // SAFETY: `len` is only set to 0, 1, or 2 by private constructors.
-        #[allow(clippy::indexing_slicing)]
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "len is only ever set to 0, 1, or 2 by private constructors; [..len] is always in bounds"
+        )]
         &self.buf[..self.len as usize]
     }
 

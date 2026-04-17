@@ -77,6 +77,6 @@ pub(crate) fn exec(args: Args) -> miette::Result<()> {
 /// Count instructions by walking the encoded buffer.
 fn instruction_count(buf: &[u8]) -> usize {
     xqvm::InstructionStream::new(buf)
-        .filter(|r| r.is_ok())
+        .filter_map(Result::ok)
         .count()
 }

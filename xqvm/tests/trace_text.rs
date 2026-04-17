@@ -15,7 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Integration tests for TextTracer output.
+//! Integration tests for `TextTracer` output.
 
 use xqvm::bytecode::{InstructionBuilder, Register};
 use xqvm::{TextTracer, Vm};
@@ -23,7 +23,12 @@ use xqvm::{TextTracer, Vm};
 #[test]
 fn text_tracer_produces_header_and_rows() {
     let mut b = InstructionBuilder::new();
-    let _ = b.push(3).push(4).add().stow(Register(0)).halt();
+    let _ = b
+        .emit_push(3)
+        .emit_push(4)
+        .emit_add()
+        .emit_stow(Register(0))
+        .emit_halt();
     let program = b.build().unwrap();
 
     let mut buf = Vec::new();
@@ -54,9 +59,9 @@ fn text_tracer_produces_header_and_rows() {
 fn text_tracer_large_stack_is_truncated() {
     let mut b = InstructionBuilder::new();
     for i in 0..12 {
-        let _ = b.push(i);
+        let _ = b.emit_push(i);
     }
-    let _ = b.halt();
+    let _ = b.emit_halt();
     let program = b.build().unwrap();
 
     let mut buf = Vec::new();

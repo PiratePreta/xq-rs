@@ -59,7 +59,10 @@
 // AssembleError carries a NamedSource<Arc<str>> in every variant so that
 // miette can render source snippets.  The extra size is acceptable because
 // error paths in an assembler are not performance-critical.
-#![allow(clippy::result_large_err)]
+#![expect(
+    clippy::result_large_err,
+    reason = "assembler errors carry source context for miette; size is acceptable on error paths"
+)]
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -141,7 +144,9 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
                         id
                     }
                 };
-                let _ = b.place(id);
+                let _ = b
+                    .place(id)
+                    .map_err(|e| convert_build_error(&e, &first_ref, src))?;
             }
             AsmLine::Instruction(instr) => match instr.mnemonic.as_str() {
                 "JUMP" | "JUMPI" => {
@@ -161,30 +166,12 @@ pub fn assemble(lines: &[AsmLine], source: &str, name: &str) -> Result<Program, 
     }
 
     b.build()
-        .map_err(|e| convert_build_error(e, &first_ref, src))
+        .map_err(|e| convert_build_error(&e, &first_ref, src))
 }
 
 // ---------------------------------------------------------------------------
 // Error helpers
 // ---------------------------------------------------------------------------
-
-/// Return `Err(WrongOperandCount)` when `instr.operands.len() != expected`.
-fn check_operand_count(
-    instr: &ParsedInstr,
-    expected: usize,
-    src: Source<'_>,
-) -> Result<(), AssembleError> {
-    if instr.operands.len() != expected {
-        return Err(AssembleError::WrongOperandCount {
-            mnemonic: instr.mnemonic.clone(),
-            expected,
-            got: instr.operands.len(),
-            src: make_src(src),
-            span: make_span(instr.offset, instr.mnemonic.len()),
-        });
-    }
-    Ok(())
-}
 
 /// Build a `WrongOperandKind` error pointing at the mnemonic token.
 fn err_wrong_kind(
@@ -213,13 +200,17 @@ fn assemble_jump(
     first_ref: &mut HashMap<u16, usize>,
     src: Source<'_>,
 ) -> Result<(), AssembleError> {
-    check_operand_count(instr, 1, src)?;
+    let [operand] = instr.operands.as_slice() else {
+        return Err(AssembleError::WrongOperandCount {
+            mnemonic: instr.mnemonic.clone(),
+            expected: 1,
+            got: instr.operands.len(),
+            src: make_src(src),
+            span: make_span(instr.offset, instr.mnemonic.len()),
+        });
+    };
 
-    match instr
-        .operands
-        .first()
-        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
-    {
+    match operand {
         Operand::LabelRef(label_idx) => {
             let id = match label_map.entry(*label_idx) {
                 Entry::Occupied(e) => e.get().0,
@@ -231,8 +222,8 @@ fn assemble_jump(
             };
             let _ = first_ref.entry(*label_idx).or_insert(instr.offset);
             let _ = match instr.mnemonic.as_str() {
-                "JUMPI" => b.jump_if(id),
-                _ => b.jump(id),
+                "JUMPI" => b.emit_jump_if(id),
+                _ => b.emit_jump(id),
             };
         }
         Operand::Integer(_) | Operand::Register(_) => {
@@ -267,13 +258,17 @@ fn assemble_target(
     label_map: &mut LabelMap,
     src: Source<'_>,
 ) -> Result<(), AssembleError> {
-    check_operand_count(instr, 1, src)?;
+    let [operand] = instr.operands.as_slice() else {
+        return Err(AssembleError::WrongOperandCount {
+            mnemonic: instr.mnemonic.clone(),
+            expected: 1,
+            got: instr.operands.len(),
+            src: make_src(src),
+            span: make_span(instr.offset, instr.mnemonic.len()),
+        });
+    };
 
-    let label_idx = match instr
-        .operands
-        .first()
-        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
-    {
+    let label_idx = match operand {
         Operand::LabelRef(idx) => *idx,
         Operand::Integer(_) | Operand::Register(_) => {
             return Err(err_wrong_kind(
@@ -305,7 +300,17 @@ fn assemble_target(
         }
     };
 
-    let _ = b.place(id);
+    let _ = b.place(id).map_err(|e| match e {
+        BuilderError::DuplicateLabel { id } => AssembleError::LabelPlacedTwice {
+            id,
+            src: make_src(src),
+        },
+        BuilderError::ForeignLabel { id } => AssembleError::LabelNotOwned {
+            id,
+            src: make_src(src),
+        },
+        _ => unreachable!("place() only returns DuplicateLabel or ForeignLabel"),
+    })?;
     Ok(())
 }
 
@@ -320,15 +325,19 @@ fn assemble_push(
     b: &mut InstructionBuilder,
     src: Source<'_>,
 ) -> Result<(), AssembleError> {
-    check_operand_count(instr, 1, src)?;
+    let [operand] = instr.operands.as_slice() else {
+        return Err(AssembleError::WrongOperandCount {
+            mnemonic: instr.mnemonic.clone(),
+            expected: 1,
+            got: instr.operands.len(),
+            src: make_src(src),
+            span: make_span(instr.offset, instr.mnemonic.len()),
+        });
+    };
 
-    match instr
-        .operands
-        .first()
-        .unwrap_or_else(|| unreachable!("check_operand_count ensures len == 1"))
-    {
+    match operand {
         Operand::Integer(imm) => {
-            let _ = b.push(*imm);
+            let _ = b.emit_push(*imm);
         }
         _ => {
             return Err(err_wrong_kind(instr, "imm", "integer literal", src));
@@ -343,13 +352,13 @@ fn assemble_push(
 // ---------------------------------------------------------------------------
 
 fn convert_build_error(
-    e: BuilderError,
+    e: &BuilderError,
     first_ref: &HashMap<u16, usize>,
     src: Source<'_>,
 ) -> AssembleError {
     match e {
         BuilderError::UnplacedLabel { id } => {
-            let label_idx = id as u16;
+            let label_idx = u16::try_from(*id).unwrap_or(0);
             let offset = first_ref.get(&label_idx).copied().unwrap_or(0);
             let label_str = format!(".{label_idx}");
             AssembleError::UndefinedLabel {
@@ -359,7 +368,7 @@ fn convert_build_error(
             }
         }
         BuilderError::UnusedLabel { id } => {
-            let label_idx = id as u16;
+            let label_idx = u16::try_from(*id).unwrap_or(0);
             let label_str = format!(".{label_idx}");
             AssembleError::UnusedLabel {
                 label: label_idx,
@@ -368,7 +377,20 @@ fn convert_build_error(
             }
         }
         BuilderError::TooManyTargets { count } => AssembleError::TooManyTargets {
-            count,
+            count: *count,
+            src: make_src(src),
+        },
+        BuilderError::FixupOutOfBounds { site, buf_len } => AssembleError::FixupOutOfBounds {
+            site: *site,
+            buf_len: *buf_len,
+            src: make_src(src),
+        },
+        BuilderError::DuplicateLabel { id } => AssembleError::LabelPlacedTwice {
+            id: *id,
+            src: make_src(src),
+        },
+        BuilderError::ForeignLabel { id } => AssembleError::LabelNotOwned {
+            id: *id,
             src: make_src(src),
         },
     }
@@ -549,9 +571,14 @@ macro_rules! impl_build_instr {
 
                         let mut _iter = instr.operands.iter();
                         $(
-                            // SAFETY: operand count was verified to equal EXPECTED above.
                             let $fname = <$ftype as FromOperand>::from_operand(
-                                _iter.next().unwrap_or_else(|| unreachable!()),
+                                _iter.next().ok_or_else(|| AssembleError::WrongOperandCount {
+                                    mnemonic: instr.mnemonic.clone(),
+                                    expected: EXPECTED,
+                                    got: instr.operands.len(),
+                                    src: make_src(src),
+                                    span: make_span(instr.offset, instr.mnemonic.len()),
+                                })?,
                                 stringify!($fname),
                                 &instr.mnemonic,
                                 instr.offset,
@@ -579,7 +606,6 @@ opcodes!(impl_build_instr);
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::assemble_source;

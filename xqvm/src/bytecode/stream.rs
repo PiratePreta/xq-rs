@@ -361,7 +361,6 @@ fn map_decode_error(err: codec::DecodeError, offset: usize, byte: u8) -> Error {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(unused_results, clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::bytecode::types::{Instruction, Register};

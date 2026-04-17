@@ -71,6 +71,10 @@ pub trait Tracer {
     const ENABLED: bool = true;
 
     /// Called after each instruction executes, with the resulting state.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the tracer fails to record the step.
     fn on_step(&mut self, state: &StepState<'_>) -> Result<(), Self::Error>;
 }
 
@@ -87,7 +91,7 @@ impl Tracer for NoopTracer {
 
     const ENABLED: bool = false;
 
-    #[inline(always)]
+    #[inline]
     fn on_step(&mut self, _state: &StepState<'_>) -> Result<(), Self::Error> {
         Ok(())
     }

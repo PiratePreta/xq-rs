@@ -15,6 +15,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test helpers - panics on failure are intentional"
+)]
+
 //! Integration tests for the `xq` unified CLI.
 //!
 //! Each test invokes the `xq` binary through [`assert_cmd`] and inspects

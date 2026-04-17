@@ -26,7 +26,7 @@
 //! [`JumpTable`](crate::JumpTable), and returns the final program.
 //!
 //! Both forward and backward references work: you may call
-//! [`jump`](InstructionBuilder::jump) before or after
+//! [`emit_jump`](InstructionBuilder::emit_jump) before or after
 //! [`place`](InstructionBuilder::place) on the same label.
 //!
 //! # Examples
@@ -38,14 +38,14 @@
 //! let mut b = InstructionBuilder::new();
 //! let loop_top = b.label();
 //!
-//! b.push(3);
-//! b.place(loop_top);
-//! b.push(-1);
-//! b.add();
-//! b.copy();
-//! b.jump_if(loop_top);  // backward reference
-//! b.pop();
-//! b.halt();
+//! b.emit_push(3);
+//! b.place(loop_top).unwrap();
+//! b.emit_push(-1);
+//! b.emit_add();
+//! b.emit_copy();
+//! b.emit_jump_if(loop_top);  // backward reference
+//! b.emit_pop();
+//! b.emit_halt();
 //!
 //! let program = b.build().unwrap();
 //! assert!(!program.code().is_empty());
@@ -59,11 +59,11 @@
 //! let mut b = InstructionBuilder::new();
 //! let done = b.label();
 //!
-//! b.push(0);
-//! b.jump_if(done);  // forward reference -- target not yet placed
-//! b.push(42);
-//! b.place(done);    // anchor here
-//! b.halt();
+//! b.emit_push(0);
+//! b.emit_jump_if(done);  // forward reference -- target not yet placed
+//! b.emit_push(42);
+//! b.place(done).unwrap();    // anchor here
+//! b.emit_halt();
 //!
 //! let program = b.build().unwrap();
 //! assert!(!program.code().is_empty());
@@ -76,7 +76,7 @@ use thiserror::Error;
 
 use super::codec;
 use super::program::Program;
-use super::types::{Instruction, Opcode, Register};
+use super::types::{Instruction, Register};
 
 // ---------------------------------------------------------------------------
 // Error and Result
@@ -106,6 +106,30 @@ pub enum Error {
         /// Index of the unused label.
         id: usize,
     },
+
+    /// An internal fixup site is outside the assembled buffer, indicating a
+    /// bug in the builder itself.
+    #[error("fixup site {site:#06x} out of buffer bounds (buf len {buf_len})")]
+    FixupOutOfBounds {
+        /// Byte offset of the fixup site.
+        site: usize,
+        /// Length of the assembled buffer.
+        buf_len: usize,
+    },
+
+    /// A label was placed more than once.
+    #[error("label {id} placed more than once")]
+    DuplicateLabel {
+        /// Index of the label that was placed again.
+        id: usize,
+    },
+
+    /// A label was not created by this builder.
+    #[error("label {id} was not created by this builder")]
+    ForeignLabel {
+        /// Index of the unknown label.
+        id: usize,
+    },
 }
 
 type Result<T> = core::result::Result<T, Error>;
@@ -119,7 +143,7 @@ type Result<T> = core::result::Result<T, Error>;
 ///
 /// Labels are allocated in the order they are created. Pass a `LabelId` to
 /// [`InstructionBuilder::place`] to anchor the label at a byte offset, and
-/// to [`InstructionBuilder::jump`] / [`InstructionBuilder::jump_if`] to
+/// to [`InstructionBuilder::emit_jump`] / [`InstructionBuilder::emit_jump_if`] to
 /// emit a jump that targets the label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LabelId(usize);
@@ -128,13 +152,20 @@ pub struct LabelId(usize);
 // InstructionBuilder
 // ---------------------------------------------------------------------------
 
+/// Whether a [`Fixup`] targets a `JUMP` or `JUMPI` instruction.
+#[derive(Debug, Clone, Copy)]
+enum JumpKind {
+    Jump,
+    JumpIf,
+}
+
 /// Pending jump fixup: byte offset of the `JUMP`/`JUMPI` instruction and the
 /// label it should resolve to.
 #[derive(Debug)]
 struct Fixup {
     /// Byte offset of the `JUMP`/`JUMPI` instruction (opcode byte).
     site: usize,
-    opcode: Opcode,
+    kind: JumpKind,
     label: LabelId,
 }
 
@@ -145,7 +176,7 @@ struct Fixup {
 /// [`emit`](Self::emit), anchor labels with [`place`](Self::place), and
 /// finalise the buffer with [`build`](Self::build).
 ///
-/// Use [`push`](Self::push) to emit the smallest `PushN` instruction that
+/// Use [`emit_push`](Self::emit_push) to emit the smallest `PushN` instruction that
 /// faithfully represents the given `i64` value.
 ///
 /// # Examples
@@ -157,13 +188,13 @@ struct Fixup {
 /// let mut b = InstructionBuilder::new();
 /// let skip = b.label();
 ///
-/// b.push(1)
-///  .push(2)
-///  .gt()
-///  .jump_if(skip)
-///  .push(99)
-///  .place(skip)
-///  .halt();
+/// b.emit_push(1)
+///  .emit_push(2)
+///  .emit_gt()
+///  .emit_jump_if(skip)
+///  .emit_push(99)
+///  .place(skip).unwrap()
+///  .emit_halt();
 ///
 /// let program = b.build().unwrap();
 /// assert!(!program.code().is_empty());
@@ -180,6 +211,9 @@ pub struct InstructionBuilder {
 // tt-muncher: generate no-argument and single-Register emit wrappers from
 // the opcode table.  Entries with `label`, `model`, or `val` fields are
 // skipped because they have dedicated hand-written methods.
+//
+// All generated methods are prefixed with `emit_` to avoid conflicts with
+// standard trait methods (e.g. `Iterator::next`, `core::mem::drop`).
 // ---------------------------------------------------------------------------
 
 macro_rules! impl_builder_methods {
@@ -198,7 +232,7 @@ macro_rules! impl_builder_methods {
         impl_builder_methods!($($rest)*);
     };
 
-    // Skip PUSH1..PUSH8 -- `{val: ...}` -- dedicated push() handles them.
+    // Skip PUSH1..PUSH8 -- `{val: ...}` -- dedicated emit_push() handles them.
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
        {val: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
@@ -209,18 +243,10 @@ macro_rules! impl_builder_methods {
       $($rest:tt)* ) => {
         ::pastey::paste! {
             #[doc = $doc]
-            #[allow(clippy::should_implement_trait)]
-            pub fn [<$variant:snake>](&mut self) -> &mut Self {
+            pub fn [<emit_ $variant:snake>](&mut self) -> &mut Self {
                 self.emit(Instruction::$variant {})
             }
         }
-        impl_builder_methods!($($rest)*);
-    };
-
-    // Skip DROP -- `{reg: ...}` for Drop variant only -- hand-written as drop_reg()
-    // to avoid shadowing core::mem::drop.
-    ( ($code:literal, Drop, $mnem:literal, $doc:literal,
-       {reg: $($ftype:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
@@ -229,7 +255,7 @@ macro_rules! impl_builder_methods {
        {reg: $($ftype:tt)*}), $($rest:tt)* ) => {
         ::pastey::paste! {
             #[doc = $doc]
-            pub fn [<$variant:snake>](&mut self, reg: Register) -> &mut Self {
+            pub fn [<emit_ $variant:snake>](&mut self, reg: Register) -> &mut Self {
                 self.emit(Instruction::$variant { reg })
             }
         }
@@ -250,7 +276,8 @@ impl InstructionBuilder {
     /// Allocate a new, unplaced label.
     ///
     /// The returned [`LabelId`] can be passed to [`place`](Self::place),
-    /// [`jump`](Self::jump), and [`jump_if`](Self::jump_if) in any order.
+    /// [`emit_jump`](Self::emit_jump), and [`emit_jump_if`](Self::emit_jump_if)
+    /// in any order.
     ///
     /// # Examples
     ///
@@ -259,7 +286,7 @@ impl InstructionBuilder {
     ///
     /// let mut b = InstructionBuilder::new();
     /// let top = b.label();
-    /// b.place(top).nop().jump(top);
+    /// b.place(top).unwrap().emit_nop().emit_jump(top);
     /// let program = b.build().unwrap();
     /// assert!(!program.code().is_empty());
     /// ```
@@ -281,24 +308,22 @@ impl InstructionBuilder {
     ///
     /// `place` is the only place that emits `TARGET` automatically; if you
     /// need a bare `TARGET` (e.g. for direct opcode emission via
-    /// [`emit`](Self::emit)), use `b.target()` instead.
+    /// [`emit`](Self::emit)), use `b.emit_target()` instead.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `label` was already placed (each label may be placed exactly
-    /// once) or if `label` was not created by this builder.
-    pub fn place(&mut self, label: LabelId) -> &mut Self {
+    /// - [`Error::DuplicateLabel`] -- `label` was already placed.
+    /// - [`Error::ForeignLabel`] -- `label` was not created by this builder.
+    pub fn place(&mut self, label: LabelId) -> Result<&mut Self> {
         let slot = self
             .label_positions
             .get_mut(label.0)
-            .unwrap_or_else(|| panic!("label {} not created by this builder", label.0));
-        assert!(
-            slot.is_none(),
-            "label {id} placed more than once",
-            id = label.0,
-        );
+            .ok_or(Error::ForeignLabel { id: label.0 })?;
+        if slot.is_some() {
+            return Err(Error::DuplicateLabel { id: label.0 });
+        }
         *slot = Some(self.buf.len());
-        self.emit(Instruction::Target {})
+        Ok(self.emit(Instruction::Target {}))
     }
 
     // -----------------------------------------------------------------------
@@ -328,8 +353,12 @@ impl InstructionBuilder {
     /// The label byte is patched during [`build`](Self::build) with the
     /// label's *sequential* id (its `TARGET`'s position in stream order),
     /// not the allocation-order id returned by [`label`](Self::label).
-    pub fn jump(&mut self, label: LabelId) -> &mut Self {
-        self.emit_with_fixup(Instruction::Jump2 { label: u16::MAX }, label)
+    pub fn emit_jump(&mut self, label: LabelId) -> &mut Self {
+        self.emit_with_fixup(
+            Instruction::Jump2 { label: u16::MAX },
+            JumpKind::Jump,
+            label,
+        )
     }
 
     /// Emit a `JUMPI` conditional jump targeting `label`.
@@ -337,25 +366,25 @@ impl InstructionBuilder {
     /// Pops the top of the stack and jumps if the value is non-zero.
     /// Uses a wide `JumpI2` placeholder; [`build`](Self::build) narrows it
     /// to `JumpI1` when the sequential id fits in `u8`.
-    pub fn jump_if(&mut self, label: LabelId) -> &mut Self {
-        self.emit_with_fixup(Instruction::JumpI2 { label: u16::MAX }, label)
+    pub fn emit_jump_if(&mut self, label: LabelId) -> &mut Self {
+        self.emit_with_fixup(
+            Instruction::JumpI2 { label: u16::MAX },
+            JumpKind::JumpIf,
+            label,
+        )
     }
 
-    fn emit_with_fixup(&mut self, instr: Instruction, label: LabelId) -> &mut Self {
+    fn emit_with_fixup(&mut self, instr: Instruction, kind: JumpKind, label: LabelId) -> &mut Self {
         let site = self.buf.len();
         let enc = codec::encode(&instr);
         self.buf.extend_from_slice(&enc);
-        self.fixups.push(Fixup {
-            site,
-            opcode: instr.opcode(),
-            label,
-        });
+        self.fixups.push(Fixup { site, kind, label });
         self
     }
 
-    // Generated from the opcode table: no-arg and single-register methods.
-    // JUMP, JUMPI, ENERGY, and PUSH1..PUSH8 are excluded -- they have
-    // hand-written methods.
+    // Generated from the opcode table: emit_* no-arg and single-register
+    // methods.  JUMP, JUMPI, ENERGY, and PUSH1..PUSH8 are excluded -- they
+    // have dedicated hand-written methods.
     opcodes!(impl_builder_methods);
 
     // -----------------------------------------------------------------------
@@ -372,17 +401,8 @@ impl InstructionBuilder {
     /// * fits in i48 -- [`Push6`](Instruction::Push6) (7 bytes)
     /// * fits in i56 -- [`Push7`](Instruction::Push7) (8 bytes)
     /// * any i64     -- [`Push8`](Instruction::Push8) (9 bytes)
-    pub fn push(&mut self, val: i64) -> &mut Self {
+    pub fn emit_push(&mut self, val: i64) -> &mut Self {
         self.emit(minimal_push(val))
-    }
-
-    // -----------------------------------------------------------------------
-    // Registers (hand-written to avoid shadowing core::mem::drop)
-    // -----------------------------------------------------------------------
-
-    /// Emit a `DROP` instruction, marking the register as unset.
-    pub fn drop_reg(&mut self, reg: Register) -> &mut Self {
-        self.emit(Instruction::Drop { reg })
     }
 
     // -----------------------------------------------------------------------
@@ -390,7 +410,7 @@ impl InstructionBuilder {
     // -----------------------------------------------------------------------
 
     /// Emit an `ENERGY` instruction.
-    pub fn energy(&mut self, model: Register, sample: Register) -> &mut Self {
+    pub fn emit_energy(&mut self, model: Register, sample: Register) -> &mut Self {
         self.emit(Instruction::Energy { model, sample })
     }
 
@@ -422,6 +442,8 @@ impl InstructionBuilder {
     /// - [`Error::TooManyTargets`] -- the program contains more than
     ///   `u16::MAX + 1` `TARGET` opcodes (~65 536). This is well beyond any
     ///   realistic XQVM program.
+    /// - [`Error::FixupOutOfBounds`] -- a fixup site is outside the assembled
+    ///   buffer; this indicates a bug in the builder itself.
     ///
     /// # Examples
     ///
@@ -431,7 +453,7 @@ impl InstructionBuilder {
     ///
     /// let mut b = InstructionBuilder::new();
     /// let done = b.label();
-    /// b.push(0).jump_if(done).push(1).place(done).halt();
+    /// b.emit_push(0).emit_jump_if(done).emit_push(1).place(done).unwrap().emit_halt();
     ///
     /// let program = b.build().unwrap();
     ///
@@ -479,11 +501,12 @@ impl InstructionBuilder {
         }
 
         // alloc_to_seq[alloc_id] = sequential_id (or None if not placed).
+        // placed.len() <= u16::MAX + 1 (checked above), so seq_id fits in u16.
         let mut alloc_to_seq: Vec<Option<u16>> = vec![None; self.label_positions.len()];
         for (seq_id, &(alloc_id, _)) in placed.iter().enumerate() {
-            // Safe: bounded above by the u16::MAX + 1 check.
-            let seq_u16 = u16::try_from(seq_id)
-                .unwrap_or_else(|_| unreachable!("placed.len() bounded above by u16::MAX + 1"));
+            let seq_u16 = u16::try_from(seq_id).map_err(|_| Error::TooManyTargets {
+                count: placed.len(),
+            })?;
             if let Some(slot) = alloc_to_seq.get_mut(alloc_id) {
                 *slot = Some(seq_u16);
             }
@@ -497,21 +520,20 @@ impl InstructionBuilder {
                 .get(fixup.label.0)
                 .copied()
                 .flatten()
-                .unwrap_or_else(|| {
-                    unreachable!("placed validation ensures alloc_to_seq is populated")
-                });
-            let instr = match fixup.opcode {
-                Opcode::Jump2 => Instruction::Jump2 { label: seq_id },
-                Opcode::JumpI2 => Instruction::JumpI2 { label: seq_id },
-                _ => {
-                    unreachable!("fixups are emitted only for the wide jump forms (Jump2 / JumpI2)",)
-                }
+                .ok_or(Error::UnplacedLabel { id: fixup.label.0 })?;
+            let instr = match fixup.kind {
+                JumpKind::Jump => Instruction::Jump2 { label: seq_id },
+                JumpKind::JumpIf => Instruction::JumpI2 { label: seq_id },
             };
             let encoded = codec::encode(&instr);
             let end = fixup.site + encoded.len();
+            let buf_len = self.buf.len();
             self.buf
                 .get_mut(fixup.site..end)
-                .unwrap_or_else(|| panic!("fixup site {:#06X} out of buffer bounds", fixup.site))
+                .ok_or(Error::FixupOutOfBounds {
+                    site: fixup.site,
+                    buf_len,
+                })?
                 .copy_from_slice(&encoded);
         }
 
@@ -519,37 +541,35 @@ impl InstructionBuilder {
         //    in u8.  Process fixups in ascending site order so that the
         //    cumulative byte shrinkage (one byte per narrowed instruction)
         //    correctly maps original site positions to their shifted actuals.
-        let mut narrowable: Vec<(usize, Opcode, u16)> = self
-            .fixups
-            .iter()
-            .filter_map(|f| {
-                let seq_id = alloc_to_seq
-                    .get(f.label.0)
-                    .copied()
-                    .flatten()
-                    .unwrap_or_else(|| unreachable!("all fixups validated in step 1"));
-                (seq_id <= u16::from(u8::MAX)).then_some((f.site, f.opcode, seq_id))
-            })
-            .collect();
+        let mut narrowable: Vec<(usize, JumpKind, u8)> = Vec::new();
+        for f in &self.fixups {
+            let seq_id = alloc_to_seq
+                .get(f.label.0)
+                .copied()
+                .flatten()
+                .ok_or(Error::UnplacedLabel { id: f.label.0 })?;
+            if let Ok(narrow_id) = u8::try_from(seq_id) {
+                narrowable.push((f.site, f.kind, narrow_id));
+            }
+        }
         narrowable.sort_by_key(|&(site, _, _)| site);
-        for (shrinkage, (site, opcode, seq_id)) in narrowable.into_iter().enumerate() {
+        for (shrinkage, (site, kind, narrow_id)) in narrowable.into_iter().enumerate() {
             let actual = site - shrinkage;
-            let narrow = match opcode {
-                Opcode::Jump2 => Instruction::Jump1 {
-                    label: seq_id as u8,
-                },
-                Opcode::JumpI2 => Instruction::JumpI1 {
-                    label: seq_id as u8,
-                },
-                _ => unreachable!("only jump fixups are tracked"),
+            let narrow = match kind {
+                JumpKind::Jump => Instruction::Jump1 { label: narrow_id },
+                JumpKind::JumpIf => Instruction::JumpI1 { label: narrow_id },
             };
             let nb = codec::encode(&narrow);
             // `nb` is 2 bytes; the wide form was 3.  Replace the first two
             // bytes in place and remove the now-redundant third byte.
             let nb_len = nb.len();
+            let buf_len = self.buf.len();
             self.buf
                 .get_mut(actual..actual + nb_len)
-                .unwrap_or_else(|| panic!("narrow site {actual:#06X} out of buffer bounds"))
+                .ok_or(Error::FixupOutOfBounds {
+                    site: actual,
+                    buf_len,
+                })?
                 .copy_from_slice(&nb);
             let _ = self.buf.remove(actual + nb_len);
         }
@@ -565,8 +585,8 @@ impl InstructionBuilder {
 /// Return the smallest `PushN` instruction that faithfully represents `val`.
 fn minimal_push(val: i64) -> Instruction {
     let be = val.to_be_bytes();
-    for n in 1usize..=7 {
-        let bits = (n * 8) as u32;
+    for n in 1..=7 {
+        let bits = n * 8;
         let shift = 64 - bits;
         if (val << shift) >> shift == val {
             return match n {
@@ -601,7 +621,10 @@ fn minimal_push(val: i64) -> Instruction {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(unused_results, clippy::indexing_slicing)]
+#[expect(
+    unused_results,
+    reason = "builder methods return &mut Self; results are intentionally discarded in test chains"
+)]
 mod tests {
     use super::*;
     use crate::bytecode::stream::InstructionStream;
@@ -620,7 +643,7 @@ mod tests {
     #[test]
     fn push_zero_emits_push1() {
         let mut b = InstructionBuilder::new();
-        b.push(0).halt();
+        b.emit_push(0).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[0], Instruction::Push1 { val: [0x00] });
     }
@@ -628,7 +651,7 @@ mod tests {
     #[test]
     fn push_i8_emits_push1() {
         let mut b = InstructionBuilder::new();
-        b.push(42).halt();
+        b.emit_push(42).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[0], Instruction::Push1 { val: [42] });
     }
@@ -636,7 +659,7 @@ mod tests {
     #[test]
     fn push_minus_one_emits_push1() {
         let mut b = InstructionBuilder::new();
-        b.push(-1).halt();
+        b.emit_push(-1).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         // -1 as i8 = 0xFF
         assert_eq!(instrs[0], Instruction::Push1 { val: [0xFF] });
@@ -645,7 +668,7 @@ mod tests {
     #[test]
     fn push_i8_max_uses_push1() {
         let mut b = InstructionBuilder::new();
-        b.push(127).halt();
+        b.emit_push(127).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[0], Instruction::Push1 { val: [0x7F] });
     }
@@ -653,7 +676,7 @@ mod tests {
     #[test]
     fn push_i8_max_plus_one_uses_push2() {
         let mut b = InstructionBuilder::new();
-        b.push(128).halt();
+        b.emit_push(128).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[0], Instruction::Push2 { val: [0x00, 0x80] });
     }
@@ -661,7 +684,7 @@ mod tests {
     #[test]
     fn push_i64_max_uses_push8() {
         let mut b = InstructionBuilder::new();
-        b.push(i64::MAX).halt();
+        b.emit_push(i64::MAX).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(
             instrs[0],
@@ -674,7 +697,7 @@ mod tests {
     #[test]
     fn push_i64_min_uses_push8() {
         let mut b = InstructionBuilder::new();
-        b.push(i64::MIN).halt();
+        b.emit_push(i64::MIN).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(
             instrs[0],
@@ -692,7 +715,7 @@ mod tests {
         //   JumpI1   (2 bytes at 3) <- narrowed; seq id 0 fits in u8
         let mut b = InstructionBuilder::new();
         let top = b.label();
-        b.place(top).push(0).jump_if(top);
+        b.place(top).unwrap().emit_push(0).emit_jump_if(top);
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
@@ -716,7 +739,11 @@ mod tests {
         //   Halt     (1 byte  at 4)
         let mut b = InstructionBuilder::new();
         let done = b.label();
-        b.jump(done).nop().place(done).halt();
+        b.emit_jump(done)
+            .emit_nop()
+            .place(done)
+            .unwrap()
+            .emit_halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
@@ -733,12 +760,13 @@ mod tests {
     fn multiple_jumps_to_same_label() {
         let mut b = InstructionBuilder::new();
         let done = b.label();
-        b.push(0)
-            .jump_if(done)
-            .push(0)
-            .jump_if(done)
+        b.emit_push(0)
+            .emit_jump_if(done)
+            .emit_push(0)
+            .emit_jump_if(done)
             .place(done)
-            .halt();
+            .unwrap()
+            .emit_halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
@@ -763,11 +791,11 @@ mod tests {
         let second = b.label(); // alloc id 1
 
         // Reference both before placing.
-        b.jump_if(first).jump(second);
+        b.emit_jump_if(first).emit_jump(second);
         // Place `second` first (alloc id 1 -> seq id 0).
-        b.place(second).nop();
+        b.place(second).unwrap().emit_nop();
         // Then place `first` (alloc id 0 -> seq id 1).
-        b.place(first).halt();
+        b.place(first).unwrap().emit_halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
@@ -785,7 +813,7 @@ mod tests {
         // For a single label, seq id is 0 which always fits.
         let mut b = InstructionBuilder::new();
         let l = b.label();
-        b.jump(l).place(l).halt();
+        b.emit_jump(l).place(l).unwrap().emit_halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
@@ -797,7 +825,7 @@ mod tests {
     fn jump_if_narrows_to_jumpi1_for_small_seq_id() {
         let mut b = InstructionBuilder::new();
         let l = b.label();
-        b.push(1).jump_if(l).place(l).halt();
+        b.emit_push(1).emit_jump_if(l).place(l).unwrap().emit_halt();
 
         let program = b.build().unwrap();
         let instrs = decode_all(program.code());
@@ -808,7 +836,7 @@ mod tests {
     fn unplaced_label_returns_error() {
         let mut b = InstructionBuilder::new();
         let ghost = b.label();
-        b.jump(ghost).halt();
+        b.emit_jump(ghost).emit_halt();
         assert_eq!(b.build(), Err(Error::UnplacedLabel { id: 0 }));
     }
 
@@ -817,14 +845,20 @@ mod tests {
         let mut b = InstructionBuilder::new();
         let l0 = b.label();
         let _l1 = b.label(); // placed but never jumped to
-        b.jump(l0);
-        b.place(l0).nop();
+        b.emit_jump(l0);
+        b.place(l0).unwrap().emit_nop();
         // l1 is allocated but not placed, which is fine (not used).
         // But if we place it without referencing it, that's an error.
         let mut b2 = InstructionBuilder::new();
         let target = b2.label();
         let unused = b2.label();
-        b2.jump(target).place(target).nop().place(unused).halt();
+        b2.emit_jump(target)
+            .place(target)
+            .unwrap()
+            .emit_nop()
+            .place(unused)
+            .unwrap()
+            .emit_halt();
         assert_eq!(b2.build(), Err(Error::UnusedLabel { id: 1 }));
     }
 
@@ -839,7 +873,13 @@ mod tests {
     #[test]
     fn arithmetic_chain() {
         let mut b = InstructionBuilder::new();
-        b.push(10).push(3).add().push(2).mul().neg().halt();
+        b.emit_push(10)
+            .emit_push(3)
+            .emit_add()
+            .emit_push(2)
+            .emit_mul()
+            .emit_neg()
+            .emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(instrs[2], Instruction::Add {});
         assert_eq!(instrs[4], Instruction::Mul {});
@@ -849,7 +889,7 @@ mod tests {
     #[test]
     fn energy_method_encodes_both_registers() {
         let mut b = InstructionBuilder::new();
-        b.energy(Register(1), Register(2)).halt();
+        b.emit_energy(Register(1), Register(2)).emit_halt();
         let instrs = decode_all(b.build().unwrap().code());
         assert_eq!(
             instrs[0],
@@ -861,13 +901,11 @@ mod tests {
     }
 
     #[test]
-    fn place_twice_panics() {
-        let result = std::panic::catch_unwind(|| {
-            let mut b = InstructionBuilder::new();
-            let l = b.label();
-            b.place(l).place(l);
-        });
-        assert!(result.is_err(), "placing a label twice should panic");
+    fn place_twice_errors() {
+        let mut b = InstructionBuilder::new();
+        let l = b.label();
+        assert!(b.place(l).is_ok());
+        assert_eq!(b.place(l).unwrap_err(), Error::DuplicateLabel { id: 0 });
     }
 
     #[test]
@@ -876,7 +914,13 @@ mod tests {
         let mut b = InstructionBuilder::new();
         let l0 = b.label();
         let l1 = b.label();
-        b.place(l0).nop().jump(l1).place(l1).halt();
+        b.place(l0)
+            .unwrap()
+            .emit_nop()
+            .emit_jump(l1)
+            .place(l1)
+            .unwrap()
+            .emit_halt();
 
         let program = b.build().unwrap();
         // The runtime jump table records each TARGET's byte offset in

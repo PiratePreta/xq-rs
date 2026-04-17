@@ -15,6 +15,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#![expect(
+    clippy::print_stdout,
+    reason = "example binary: stdout output is intentional"
+)]
+
 //! Travelling Salesman Problem showcase using the XQVM interpreter.
 //!
 //! This example demonstrates a three-program XQVM pipeline for formulating,
@@ -28,12 +33,12 @@
 //! For N cities, the QUBO uses N*N binary variables x[city*N + position].
 //! The Hamiltonian is:
 //!
-//! H = H_dist + H_row + H_col
+//! H = `H_dist` + `H_row` + `H_col`
 //!
 //! Where:
-//! - H_dist: sum d[ci][cj]*x[ci*N+p]*x[cj*N+(p+1)%N] for adjacent cities
-//! - H_row:  penalty*(sum_p x[ci*N+p] - 1)^2 for each city ci
-//! - H_col:  penalty*(sum_c x[c*N+p]  - 1)^2 for each position p
+//! - `H_dist`: sum d[ci][cj]*x[ci*N+p]*x[cj*N+(p+1)%N] for adjacent cities
+//! - `H_row`:  penalty*(`sum_p` x[ci*N+p] - 1)^2 for each city ci
+//! - `H_col`:  penalty*(`sum_c` x[c*N+p]  - 1)^2 for each position p
 //!
 //! # Pipeline
 //!
@@ -61,6 +66,7 @@ fn main() -> Result<()> {
     // 4-city ring: distance i<->j = min(|i-j|, 4-|i-j|).
     // Row-major flat distance matrix (symmetric, zeros on diagonal).
     let n: usize = 4;
+    let n_i64 = i64::try_from(n).into_diagnostic()?;
     #[rustfmt::skip]
     let distances: Vec<i64> = vec![
         0, 1, 2, 3,
@@ -76,7 +82,7 @@ fn main() -> Result<()> {
         .wrap_err("encoder assembly failed")?;
 
     let mut vm = Vm::new();
-    let _ = vm.set_calldata(vec![RegVal::Int(n as i64), RegVal::VecInt(distances)]);
+    let _ = vm.set_calldata(vec![RegVal::Int(n_i64), RegVal::VecInt(distances)]);
     let _ = vm.set_output_slots(1);
     vm.run(&encoder_bc)
         .into_diagnostic()
@@ -139,7 +145,7 @@ fn main() -> Result<()> {
         qubo,
         sample_grid_val.clone(),
         sample_values_val,
-        RegVal::Int(n as i64),
+        RegVal::Int(n_i64),
     ]);
     let _ = vm.set_output_slots(2);
     vm.run(&verifier_bc)
@@ -164,7 +170,7 @@ fn main() -> Result<()> {
         .wrap_err("decoder assembly failed")?;
 
     let mut vm = Vm::new();
-    let _ = vm.set_calldata(vec![sample_grid_val, RegVal::Int(n as i64)]);
+    let _ = vm.set_calldata(vec![sample_grid_val, RegVal::Int(n_i64)]);
     let _ = vm.set_output_slots(1);
     vm.run(&decoder_bc)
         .into_diagnostic()
