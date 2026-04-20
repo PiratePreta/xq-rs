@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 Postquant Labs Incorporated
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+"""Cross-check the Python reference opcode table against conformance/opcodes.yaml.
+
+The Rust side is checked at compile time by xqvm/build.rs. This script is
+the Python counterpart: it loads the canonical YAML and compares every
+(code, mnemonic, stack_pop, stack_push, operand_count, operand_types)
+tuple against xqvm-py/xqvm/core/opcodes.py. Any mismatch prints a
+diff-style report and the script exits 1.
+
+Intended to be invoked from the `opcode-parity` CI job and the
+`make opcode-parity` Makefile target.
+"""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+YAML_PATH = REPO_ROOT / "conformance" / "opcodes.yaml"
+XQVM_PY_ROOT = REPO_ROOT / "xqvm-py"
+
+
+# The YAML operand schema (types: register / label / immediate, plus a
+# `width` in bytes) is richer than xqvm-py's OperandType enum
+# (REGISTER / TARGET / IMMEDIATE), and xqvm-py itself is internally
+# inconsistent about labels (JUMP1 uses TARGET, JUMP2 uses two
+# IMMEDIATEs). Harmonising the Python operand vocabulary is a Phase 3
+# follow-up; this script therefore compares only the fields that are
+# unambiguous across both schemas: code, mnemonic, stack effect, and
+# total operand byte width.
+
+
+@dataclass(frozen=True)
+class Row:
+    """Normalised opcode description for comparison."""
+
+    code: int
+    mnemonic: str
+    stack_pop: int
+    stack_push: int
+    operand_byte_width: int
+
+    def format_line(self) -> str:
+        return (
+            f"{self.code:#04x} {self.mnemonic:<8} "
+            f"pop={self.stack_pop} push={self.stack_push} "
+            f"operand_bytes={self.operand_byte_width}"
+        )
+
+
+def load_yaml_rows(path: Path) -> dict[int, Row]:
+    with path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    rows: dict[int, Row] = {}
+    for entry in data["opcodes"]:
+        code = int(entry["code"])
+        operand_byte_width = sum(int(op.get("width", 1)) for op in entry["operands"])
+        rows[code] = Row(
+            code=code,
+            mnemonic=entry["mnemonic"],
+            stack_pop=int(entry["stack_pop"]),
+            stack_push=int(entry["stack_push"]),
+            operand_byte_width=operand_byte_width,
+        )
+    return rows
+
+
+def load_python_rows() -> dict[int, Row]:
+    """Import xqvm-py's Opcode enum and convert to Row entries."""
+    sys.path.insert(0, str(XQVM_PY_ROOT))
+    try:
+        from xqvm.core.opcodes import Opcode  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    rows: dict[int, Row] = {}
+    for op in Opcode:
+        meta = op.value
+        rows[meta.code] = Row(
+            code=meta.code,
+            mnemonic=op.name,
+            stack_pop=meta.stack_pop,
+            stack_push=meta.stack_push,
+            operand_byte_width=meta.operand_count,
+        )
+    return rows
+
+
+def diff(yaml_rows: dict[int, Row], py_rows: dict[int, Row]) -> list[str]:
+    errors: list[str] = []
+
+    yaml_codes = set(yaml_rows)
+    py_codes = set(py_rows)
+    for code in sorted(yaml_codes - py_codes):
+        errors.append(f"MISSING in xqvm-py: {yaml_rows[code].format_line()}")
+    for code in sorted(py_codes - yaml_codes):
+        errors.append(f"MISSING in opcodes.yaml: {py_rows[code].format_line()}")
+
+    for code in sorted(yaml_codes & py_codes):
+        y = yaml_rows[code]
+        p = py_rows[code]
+        if y != p:
+            errors.append(f"MISMATCH at {code:#04x}:")
+            errors.append(f"  yaml: {y.format_line()}")
+            errors.append(f"  py:   {p.format_line()}")
+    return errors
+
+
+def main() -> int:
+    yaml_rows = load_yaml_rows(YAML_PATH)
+    py_rows = load_python_rows()
+
+    errors = diff(yaml_rows, py_rows)
+    if errors:
+        print("Opcode parity check FAILED:\n", file=sys.stderr)
+        for line in errors:
+            print(line, file=sys.stderr)
+        print(
+            f"\nCompared {len(yaml_rows)} yaml entries "
+            f"vs {len(py_rows)} xqvm-py entries.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"opcode parity OK ({len(yaml_rows)} entries)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

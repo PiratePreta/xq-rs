@@ -299,7 +299,7 @@ impl InstructionBuilder {
     /// Anchor `label` to the current write position and emit an inline
     /// `TARGET` opcode there.
     ///
-    /// Per `XQVM_SPEC.md`, every jump destination must contain a `TARGET`
+    /// Per `spec/xqvm/SPEC.md`, every jump destination must contain a `TARGET`
     /// instruction (a no-op at runtime, but required as a validation marker
     /// so jumps cannot land in the middle of a multi-byte instruction). The
     /// recorded label position is the byte offset of the `TARGET` opcode

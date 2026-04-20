@@ -1,0 +1,19 @@
+; mul_chain: output[0] = calldata[0] * calldata[1] * calldata[2]
+;
+; Chains MUL to exercise stack discipline across multiple arithmetic ops.
+
+PUSH 0
+INPUT r0
+PUSH 1
+INPUT r1
+PUSH 2
+INPUT r2
+LOAD r0
+LOAD r1
+MUL
+LOAD r2
+MUL
+STOW r3
+PUSH 0
+OUTPUT r3
+HALT

@@ -1,0 +1,24 @@
+; bqmx_quadratic: binary 2-variable model with a quadratic coupling
+; evaluated against the default-initialised binary sample [0, 0].
+;
+; Exercises SETQUAD + ENERGY. The sample is all-zero so the energy is 0
+; regardless of the coupling value — this vector's purpose is to verify
+; the encode/decode + setquad path, not to probe a non-zero outcome.
+; Non-zero energy vectors are blocked by a Phase 0 drift on the sample
+; default (see energy/sqmx_spin/program.xqasm).
+
+PUSH 2
+BQMX r0
+PUSH 0           ; i
+PUSH 1           ; j
+PUSH 7           ; value
+SETQUAD r0
+
+PUSH 2
+BSMX r1
+
+ENERGY r0 r1
+STOW r2
+PUSH 0
+OUTPUT r2
+HALT

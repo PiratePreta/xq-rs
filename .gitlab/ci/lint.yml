@@ -1,0 +1,37 @@
+# Rust linting (formatting, clippy, rustdoc, cargo-deny).
+#
+# Reuses the workspace's `make` targets so the CI definition and the
+# local workflow stay identical. Changing a lint rule means updating the
+# Makefile once, not here.
+
+.install-deps: &install-deps
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - make deps
+
+lint:fmt:
+    stage: lint
+    before_script:
+        - *install-deps
+    script:
+        - make fmt-check
+
+lint:clippy:
+    stage: lint
+    before_script:
+        - *install-deps
+    script:
+        - make lint-clippy
+
+lint:rustdoc:
+    stage: lint
+    before_script:
+        - *install-deps
+    script:
+        - make lint-doc
+
+lint:deny:
+    stage: lint
+    before_script:
+        - *install-deps
+    script:
+        - make lint-deny

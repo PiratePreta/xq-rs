@@ -29,6 +29,7 @@ mod table;
 mod instruction;
 mod opcode;
 mod operand;
+mod parity;
 mod register_effect;
 
 pub use self::{

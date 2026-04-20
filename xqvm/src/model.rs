@@ -37,7 +37,7 @@ pub enum Domain {
     ///
     /// `k` is required to be at least 2; the VM rejects `XQMX`/`XSMX`
     /// allocations with smaller `k` via [`crate::Error::InvalidDiscreteK`].
-    /// This range matches the `XQVM_SPEC.md` reference and is symmetric
+    /// This range matches the `spec/xqvm/SPEC.md` reference and is symmetric
     /// around zero, so the default sample value `0` is always in-domain.
     Discrete(i64),
 }

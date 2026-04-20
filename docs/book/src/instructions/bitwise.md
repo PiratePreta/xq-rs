@@ -22,6 +22,6 @@ None of these instructions have register effects.
   negative and \\(\mathit{i64}{::}\mathit{MIN} \gg 1\\) halves the magnitude
   instead of producing a positive result. This matches Rust's `i64 >> b`
   operator and Python's `>>` on integers, and it is what xq-py
-  (`XQVM_SPEC.md`) prescribes. Where logical (zero-filling) right shift is
+  (`spec/xqvm/SPEC.md`) prescribes. Where logical (zero-filling) right shift is
   required, mask with `BAND` first.
 - Both shift instructions error with `InvalidShift` if \\(b\\) is outside \\([0, 64)\\).

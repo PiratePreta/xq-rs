@@ -1,0 +1,25 @@
+# Python reference (`xqvm-py`) lint + test suite.
+#
+# These jobs run ruff (same lint/format enforced by the repo's
+# pre-commit hook) and pytest under `xqvm-py/tests/`. They install a
+# Python toolchain on top of the base `rust:latest` image so they can
+# share the target/ cache with the Rust jobs when reasonable.
+
+.install-python: &install-python
+    - apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv
+    - python3 -m pip install --break-system-packages --quiet -r xqvm-py/requirements.txt
+
+python:lint:
+    stage: lint
+    before_script:
+        - *install-python
+    script:
+        - python3 -m ruff check xqvm-py
+        - python3 -m ruff format --check xqvm-py
+
+python:test:
+    stage: test
+    before_script:
+        - *install-python
+    script:
+        - cd xqvm-py && python3 -m pytest tests/

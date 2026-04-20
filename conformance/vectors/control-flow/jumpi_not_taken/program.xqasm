@@ -1,0 +1,20 @@
+; jumpi_not_taken: same as jumpi_taken but with calldata[0] = 0,
+; exercising the fall-through path.
+
+PUSH 0
+INPUT r0
+LOAD r0
+JUMPI .0
+
+PUSH 0
+STOW r1
+JUMP .1
+
+TARGET .0
+PUSH 1
+STOW r1
+
+TARGET .1
+PUSH 0
+OUTPUT r1
+HALT

@@ -136,7 +136,7 @@ pub enum Error {
     /// `XQMX`/`XSMX` was called with a discrete-domain `k` smaller than 2.
     /// The signed domain `[-k, k-1]` collapses to a single value at `k = 1`
     /// and is empty at `k <= 0`, so neither carries useful semantics; the
-    /// reference (`XQVM_SPEC.md`) requires `k >= 2`.
+    /// reference (`spec/xqvm/SPEC.md`) requires `k >= 2`.
     #[error("XQMX/XSMX requires k >= 2 for the [-k, k-1] domain, got k = {k} at byte {pos:#06x}")]
     InvalidDiscreteK { pos: usize, k: i64 },
 

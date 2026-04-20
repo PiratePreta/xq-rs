@@ -1,0 +1,28 @@
+# Rust test suite — unit, integration, and doc tests driven by
+# cargo-nextest via the `make test-*` targets. Keeping these as separate
+# jobs lets GitLab's retry/re-run apply at the right granularity.
+
+.install-deps: &install-deps
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - make deps
+
+test:unit:
+    stage: test
+    before_script:
+        - *install-deps
+    script:
+        - make test-unit
+
+test:integration:
+    stage: test
+    before_script:
+        - *install-deps
+    script:
+        - make test-integration
+
+test:doc:
+    stage: test
+    before_script:
+        - *install-deps
+    script:
+        - make test-doc

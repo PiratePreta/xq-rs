@@ -1,0 +1,22 @@
+; exclude_pair: apply EXCLUDE between variables 0 and 1 with penalty 4,
+; then read back quadratic[0,1] and output it.
+;
+; EXCLUDE adds P*x_i*x_j to forbid both variables being simultaneously
+; set; we expect quadratic[0,1] = 4 afterwards.
+
+PUSH 2
+BQMX r0
+
+; EXCLUDE pops penalty, j, i
+PUSH 0           ; i
+PUSH 1           ; j
+PUSH 4           ; penalty
+EXCLUDE r0
+
+PUSH 0           ; i
+PUSH 1           ; j
+GETQUAD r0       ; push quadratic[0,1]
+STOW r1
+PUSH 0
+OUTPUT r1
+HALT

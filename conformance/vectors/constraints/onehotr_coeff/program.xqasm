@@ -1,0 +1,23 @@
+; onehotr_coeff: apply ONEHOTR over a single grid row of 3 variables
+; with penalty 2, then read back a coefficient it produced.
+;
+; ONEHOTR expands the one-hot constraint (exactly one of the row's
+; variables is set) into linear + quadratic terms; we inspect
+; linear[0] for a deterministic scalar summary.
+
+PUSH 3           ; size = 3 variables
+BQMX r0
+PUSH 1           ; rows
+PUSH 3           ; cols
+RESIZE r0        ; 1x3 grid
+
+PUSH 0           ; row index
+PUSH 2           ; penalty
+ONEHOTR r0
+
+PUSH 0
+GETLINE r0
+STOW r1
+PUSH 0
+OUTPUT r1
+HALT

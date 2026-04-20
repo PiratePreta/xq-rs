@@ -24,7 +24,7 @@
 //!
 //! `JUMP1`/`JUMP2`/`JUMPI1`/`JUMPI2` operands are these sequential ids: the
 //! VM looks up `jump_table.get(label)` to recover the target byte offset.
-//! This matches the xq-py reference behaviour described in `XQVM_SPEC.md`.
+//! This matches the xq-py reference behaviour described in `spec/xqvm/SPEC.md`.
 //!
 //! # Examples
 //!
