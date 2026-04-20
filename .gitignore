@@ -40,3 +40,11 @@ certs/
 docs/book/build/
 mermaid.min.js
 mermaid-init.js
+
+### Python ###
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+*.egg-info/

@@ -1,0 +1,23 @@
+# Documentation pipeline — asserts the committed
+# docs/bytecode-semantics.md is in sync with conformance/opcodes.yaml,
+# then builds the mdbook.
+
+.install-deps: &install-deps
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - make deps-docs
+
+.install-python: &install-python
+    - apt-get update && apt-get install -y --no-install-recommends python3 python3-pip
+    - python3 -m pip install --break-system-packages --quiet pyyaml
+
+docs:build:
+    stage: docs
+    before_script:
+        - *install-deps
+        - *install-python
+    script:
+        - make docs-check
+        - make docs
+    artifacts:
+        paths:
+            - docs/book/build/

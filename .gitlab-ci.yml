@@ -1,3 +1,10 @@
+# Root pipeline — composition only.
+#
+# Jobs are authored in per-stage files under .gitlab/ci/ and pulled in
+# via `include:` so each pipeline concern (lint, test, conformance,
+# docs, python) can be reasoned about on its own and edited without
+# touching the root.
+
 default:
     image: rust:latest
     cache:
@@ -12,79 +19,15 @@ default:
 variables:
     CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
 
-.install-deps: &install-deps
-    - export PATH="${CARGO_HOME}/bin:${PATH}"
-    - make deps
-
 stages:
     - lint
     - test
+    - conformance
     - docs
 
-# -- Formatting -------------------------------------------------------------
-
-lint:fmt:
-    stage: lint
-    before_script:
-        - *install-deps
-    script:
-        - make fmt-check
-
-# -- Lints ------------------------------------------------------------------
-
-lint:clippy:
-    stage: lint
-    before_script:
-        - *install-deps
-    script:
-        - make lint-clippy
-
-lint:rustdoc:
-    stage: lint
-    before_script:
-        - *install-deps
-    script:
-        - make lint-doc
-
-lint:deny:
-    stage: lint
-    before_script:
-        - *install-deps
-    script:
-        - make lint-deny
-
-# -- Tests ------------------------------------------------------------------
-
-test:unit:
-    stage: test
-    before_script:
-        - *install-deps
-    script:
-        - make test-unit
-
-test:integration:
-    stage: test
-    before_script:
-        - *install-deps
-    script:
-        - make test-integration
-
-test:doc:
-    stage: test
-    before_script:
-        - *install-deps
-    script:
-        - make test-doc
-
-# -- Documentation ----------------------------------------------------------
-
-docs:build:
-    stage: docs
-    before_script:
-        - export PATH="${CARGO_HOME}/bin:${PATH}"
-        - make deps-docs
-    script:
-        - make docs
-    artifacts:
-        paths:
-            - docs/book/build/
+include:
+    - local: .gitlab/ci/lint.yml
+    - local: .gitlab/ci/test.yml
+    - local: .gitlab/ci/python.yml
+    - local: .gitlab/ci/conformance.yml
+    - local: .gitlab/ci/docs.yml

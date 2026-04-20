@@ -1,0 +1,29 @@
+; implies_chain: IMPLIES between variables 0 and 1 with penalty 3.
+;
+; IMPLIES adds a penalty P when x_i = 1 but x_j = 0 (the implication
+; x_i ⇒ x_j is violated). The coefficient contributions depend on the
+; penalty and are deterministic across impls; we output quadratic[0,1]
+; to give the harness a scalar to compare on.
+
+PUSH 2
+BQMX r0
+
+PUSH 0
+PUSH 1
+PUSH 3
+IMPLIES r0       ; i=0, j=1, penalty=3
+
+PUSH 0
+PUSH 1
+GETQUAD r0
+STOW r1
+PUSH 0
+OUTPUT r1
+
+; Also surface linear[0] for richer cross-check
+PUSH 0
+GETLINE r0
+STOW r2
+PUSH 1
+OUTPUT r2
+HALT

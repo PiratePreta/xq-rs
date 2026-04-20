@@ -1,0 +1,15 @@
+; sub_wrap: output[0] = calldata[0] - calldata[1] (wrapping on i64)
+;
+; Exercises SUB with a negative result to verify signed semantics.
+
+PUSH 0
+INPUT r0
+PUSH 1
+INPUT r1
+LOAD r0
+LOAD r1
+SUB
+STOW r2
+PUSH 0
+OUTPUT r2
+HALT

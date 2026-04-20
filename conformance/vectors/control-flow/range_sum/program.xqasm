@@ -1,0 +1,23 @@
+; range_sum: sum 0..calldata[0] into output[0] using RANGE/LIDX/NEXT.
+;
+; calldata[0] = 5 ⇒ 0+1+2+3+4 = 10.
+
+PUSH 0
+INPUT r0       ; r0 = calldata[0] = count
+
+PUSH 0
+STOW r1        ; r1 = accumulator
+
+PUSH 0
+LOAD r0
+RANGE          ; loop [0, 0+count)
+LIDX r2        ; r2 = current index
+LOAD r1
+LOAD r2
+ADD
+STOW r1
+NEXT
+
+PUSH 0
+OUTPUT r1
+HALT

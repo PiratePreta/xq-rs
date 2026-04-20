@@ -1,9 +1,11 @@
 .PHONY: all \
-        deps deps-docs deps-miri \
+        deps deps-docs deps-miri deps-python \
         lint lint-clippy lint-doc lint-deny \
         fmt fmt-rust fmt-taplo fmt-check fmt-check-rust fmt-check-taplo \
-        test test-unit test-integration test-doc test-miri \
-        docs docs-serve
+        test test-unit test-integration test-doc test-miri test-python \
+        opcode-parity opcode-parity-rust opcode-parity-python \
+        conformance conformance-rust conformance-python \
+        docs docs-regen docs-check docs-serve
 
 all: fmt lint test
 
@@ -19,6 +21,9 @@ deps-docs:
 deps-miri:
 	rustup toolchain install nightly --component miri
 	cargo +nightly miri setup
+
+deps-python:
+	python3 -m pip install --user --upgrade pyyaml pytest ruff
 
 # -- Formatting -------------------------------------------------------------
 
@@ -69,11 +74,44 @@ test-doc:
 test-miri:
 	cargo +nightly miri test --workspace --all-features
 
+test-python:
+	cd xqvm-py && python3 -m pytest tests/
+
+# -- Conformance ------------------------------------------------------------
+
+# Cross-implementation parity (opcode table, spec conformance vectors).
+# `cargo build -p xqvm` exercises the compile-time YAML ↔ opcodes! macro
+# check via xqvm/build.rs; the Python script covers the xqvm-py side.
+opcode-parity: opcode-parity-rust opcode-parity-python
+
+opcode-parity-rust:
+	cargo build -p xqvm
+
+opcode-parity-python:
+	python3 scripts/check-opcode-parity.py
+
+conformance: conformance-rust conformance-python
+
+conformance-rust:
+	cargo test -p xquad-conformance --no-default-features --features rust
+
+conformance-python:
+	cargo test -p xquad-conformance --no-default-features --features python
+
 # -- Documentation ----------------------------------------------------------
 
-docs:
+docs: docs-check
 	mdbook-mermaid install .
 	mdbook build
+
+# Regenerate docs/bytecode-semantics.md from conformance/opcodes.yaml.
+docs-regen:
+	python3 scripts/gen-bytecode-docs.py
+
+# Assert the committed docs/bytecode-semantics.md matches the regenerated
+# output; used by the CI docs-build job to prevent silent drift.
+docs-check:
+	python3 scripts/gen-bytecode-docs.py --check
 
 docs-serve:
 	mdbook-mermaid install .

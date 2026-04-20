@@ -610,7 +610,7 @@ impl Vm {
     }
 
     fn exec_lidx(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
-        // Per `XQVM_SPEC.md` (`LIDX`), copy the current loop index into `reg`.
+        // Per `spec/xqvm/SPEC.md` (`LIDX`), copy the current loop index into `reg`.
         // For `RANGE` loops the values *are* indices, so `LIDX` and `LVAL`
         // produce the same result. For `ITER` loops `LIDX` reports the
         // *original* vec position (`start_offset + index`), so loop bodies
@@ -685,7 +685,7 @@ impl Vm {
     }
 
     fn exec_iter(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
-        // Per `XQVM_SPEC.md` (`ITER`): pop `end_idx`, then `start_idx`, read
+        // Per `spec/xqvm/SPEC.md` (`ITER`): pop `end_idx`, then `start_idx`, read
         // the source vec from `reg`, and copy `vec[start_idx..end_idx]` into
         // the loop frame. The slice is duplicated so that mutations to the
         // source vec inside the loop body do not affect what `LVAL` sees.
@@ -1667,7 +1667,7 @@ impl Vm {
         model: Register,
         sample: Register,
     ) -> Result<StepResult, Error> {
-        // Per `XQVM_SPEC.md` (`ENERGY`) and the xq-py reference
+        // Per `spec/xqvm/SPEC.md` (`ENERGY`) and the xq-py reference
         // (`compute_energy` in `xqvm/core/xqmx.py`), the model register must
         // hold a Model and the sample register must hold a Sample. A Model
         // passed in the sample slot is rejected -- that "model-as-sample"

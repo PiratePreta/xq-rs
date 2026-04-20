@@ -1,0 +1,42 @@
+# Cross-implementation conformance — opcode table parity + vector
+# suite. Each job is parameterised on a single runtime so that a
+# Python-side regression cannot mask a Rust-side pass (or vice versa).
+#
+# * opcode-parity — Rust-side is enforced at compile time by
+#   `xqvm/build.rs` (triggered by `cargo build -p xqvm`); the Python
+#   side is a separate script because we can't assert against a
+#   Python file from Rust's type system.
+# * spec-conformance-rust / -python — run the shared
+#   `xquad-conformance` crate with the matching feature flag.
+
+.install-deps: &install-deps
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - make deps
+
+.install-python: &install-python
+    - apt-get update && apt-get install -y --no-install-recommends python3 python3-pip
+    - python3 -m pip install --break-system-packages --quiet pyyaml
+
+opcode-parity:
+    stage: lint
+    before_script:
+        - *install-deps
+        - *install-python
+    script:
+        - make opcode-parity
+
+spec-conformance-rust:
+    stage: conformance
+    before_script:
+        - *install-deps
+    script:
+        - make conformance-rust
+
+spec-conformance-python:
+    stage: conformance
+    before_script:
+        - *install-deps
+        - *install-python
+        - python3 -m pip install --break-system-packages --quiet -r xqvm-py/requirements.txt
+    script:
+        - make conformance-python
