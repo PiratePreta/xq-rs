@@ -68,6 +68,75 @@ Copyright (c) David Tolnay <dtolnay@gmail.com>
 https://github.com/dtolnay/syn
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+pyo3 0.28.x (Apache-2.0 OR MIT)
+Copyright (c) The PyO3 Project and Contributors
+https://github.com/PyO3/pyo3
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+serde_yaml_ng 0.10.x (Apache-2.0 OR MIT)
+Copyright (c) 2016 David Tolnay
+Copyright (c) 2024 serde_yaml_ng Contributors
+https://github.com/acatton/serde-yaml-ng
+--------------------------------------------------------------------------------
+
+================================================================================
+APACHE-2.0 LICENSED COMPONENTS
+================================================================================
+
+The following components are licensed under the Apache License 2.0.
+
+--------------------------------------------------------------------------------
+dwave-neal 0.6.x (Apache-2.0)
+Copyright (c) D-Wave Systems Inc.
+https://github.com/dwavesystems/dwave-neal
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+dimod (Apache-2.0)
+Copyright (c) D-Wave Systems Inc.
+https://github.com/dwavesystems/dimod
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+dwave-samplers 1.7.x (Apache-2.0)
+Copyright (c) D-Wave Systems Inc.
+https://github.com/dwavesystems/dwave-samplers
+--------------------------------------------------------------------------------
+
+================================================================================
+APACHE-2.0 WITH LLVM-EXCEPTION LICENSED COMPONENTS
+================================================================================
+
+The following component is licensed under the Apache License 2.0 with the
+LLVM exception. The LLVM exception is a patent-grant companion to Apache-2.0
+and is strictly more permissive; it is compatible with AGPL-3.0-or-later.
+
+--------------------------------------------------------------------------------
+target-lexicon 0.13.x (Apache-2.0 WITH LLVM-exception)
+Copyright (c) Bytecode Alliance
+https://github.com/bytecodealliance/target-lexicon
+--------------------------------------------------------------------------------
+
+================================================================================
+BSD-3-CLAUSE LICENSED COMPONENTS
+================================================================================
+
+The following components are licensed under the 3-clause BSD License.
+
+--------------------------------------------------------------------------------
+numpy 2.4.x (BSD-3-Clause)
+Copyright (c) 2005-2026, NumPy Developers
+https://numpy.org
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+networkx 3.6.x (BSD-3-Clause)
+Copyright (C) 2004-2026, NetworkX Developers
+https://networkx.org
+--------------------------------------------------------------------------------
+
 ================================================================================
 UNICODE-3.0 LICENSED COMPONENTS
 ================================================================================

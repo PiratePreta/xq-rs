@@ -2,7 +2,7 @@
 
 Mechanical cross-implementation check that the Rust production VM
 ([`xqvm`](../xqvm/)) and the Python reference VM
-([`xqvm-py`](../xqvm-py/)) agree on every observable behaviour defined
+([`xqvm_py`](../xqvm_py/)) agree on every observable behaviour defined
 by [`spec/xqvm/SPEC.md`](../spec/xqvm/SPEC.md).
 
 The harness is a Rust test crate (`xquad-conformance`). Each vector
@@ -109,7 +109,7 @@ the build is broken. Concrete enforcement:
 
 - **Opcode table** — `xqvm/build.rs` asserts `opcodes.yaml ↔ opcodes!
   x-macro` at compile time; `scripts/check-opcode-parity.py` asserts
-  `opcodes.yaml ↔ xqvm-py/xqvm/core/opcodes.py` in CI.
+  `opcodes.yaml ↔ xqvm_py/opcodes.py` in CI.
 - **Bytecode encoding** — [`verify_bytecode_fresh`](src/lib.rs) asserts
   `program.xqasm` round-trips to `program.xqb` on every vector run.
 - **Observable behaviour** — [`check_vector`](src/lib.rs) asserts the
@@ -125,7 +125,7 @@ cargo test -p xquad-conformance
 # Rust only
 cargo test -p xquad-conformance --no-default-features --features rust
 
-# Python only (needs python3 + xqvm-py importable from xqvm-py/)
+# Python only (needs python3 + xqvm_py importable from xqvm_py/)
 cargo test -p xquad-conformance --no-default-features --features python
 
 # Manual CLI for authoring / triaging a single vector

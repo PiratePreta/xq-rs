@@ -1291,60 +1291,84 @@ impl Vm {
 
     fn exec_get_line(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let i = self.pop(pos)?;
-        let m = self
+        let grid = self
             .reg(reg)
-            .as_model()
+            .as_xqmx_grid()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
+        let size = grid.size();
         let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
             pos,
             index: i,
-            len: m.size,
+            len: size,
         })?;
-        self.push_stack(m.get_linear(usize_i), pos)?;
+        if usize_i >= size {
+            return Err(Error::IndexOutOfBounds {
+                pos,
+                index: i,
+                len: size,
+            });
+        }
+        self.push_stack(grid.linear(usize_i), pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_set_line(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let val = self.pop(pos)?;
         let i = self.pop(pos)?;
-        let m = self
+        let mut grid = self
             .reg_mut(reg)
-            .as_model_mut()
+            .as_xqmx_grid_mut()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
+        let size = grid.size();
         let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
             pos,
             index: i,
-            len: m.size,
+            len: size,
         })?;
-        m.set_linear(usize_i, val);
+        if usize_i >= size {
+            return Err(Error::IndexOutOfBounds {
+                pos,
+                index: i,
+                len: size,
+            });
+        }
+        grid.linear_set(usize_i, val);
         Ok(StepResult::Continue)
     }
 
     fn exec_add_line(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let delta = self.pop(pos)?;
         let i = self.pop(pos)?;
-        let m = self
+        let mut grid = self
             .reg_mut(reg)
-            .as_model_mut()
+            .as_xqmx_grid_mut()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
+        let size = grid.size();
         let usize_i = usize::try_from(i).map_err(|_| Error::IndexOutOfBounds {
             pos,
             index: i,
-            len: m.size,
+            len: size,
         })?;
-        m.add_linear(usize_i, delta);
+        if usize_i >= size {
+            return Err(Error::IndexOutOfBounds {
+                pos,
+                index: i,
+                len: size,
+            });
+        }
+        grid.linear_add(usize_i, delta);
         Ok(StepResult::Continue)
     }
 
@@ -1433,42 +1457,43 @@ impl Vm {
         if rows <= 0 || cols <= 0 {
             return Err(Error::InvalidGridDimensions { pos, rows, cols });
         }
-        let m = self
+        let usize_rows =
+            usize::try_from(rows).map_err(|_| Error::InvalidGridDimensions { pos, rows, cols })?;
+        let usize_cols =
+            usize::try_from(cols).map_err(|_| Error::InvalidGridDimensions { pos, rows, cols })?;
+        let mut grid = self
             .reg_mut(reg)
-            .as_model_mut()
+            .as_xqmx_grid_mut()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
-        // rows and cols are validated > 0; try_from handles out-of-range on 32-bit targets.
-        m.rows =
-            usize::try_from(rows).map_err(|_| Error::InvalidGridDimensions { pos, rows, cols })?;
-        m.cols =
-            usize::try_from(cols).map_err(|_| Error::InvalidGridDimensions { pos, rows, cols })?;
+        grid.set_grid(usize_rows, usize_cols);
         Ok(StepResult::Continue)
     }
 
     fn exec_row_find(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let value = self.pop(pos)?;
         let row = self.pop(pos)?;
-        let m = self
+        let grid = self
             .reg(reg)
-            .as_model()
+            .as_xqmx_grid()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
         let usize_row = usize::try_from(row).map_err(|_| Error::IndexOutOfBounds {
             pos,
             index: row,
-            len: m.rows,
+            len: grid.rows(),
         })?;
-        let row_start = usize_row * m.cols;
-        // m.cols ≤ i64::MAX (validated via exec_resize); try_from never fails.
-        let result = (0..m.cols)
-            .find(|&col| m.get_linear(row_start + col) == value)
+        let cols = grid.cols();
+        let row_start = usize_row * cols;
+        // cols ≤ i64::MAX (validated via exec_resize); try_from never fails.
+        let result = (0..cols)
+            .find(|&col| grid.linear(row_start + col) == value)
             .map_or(-1, |c| i64::try_from(c).unwrap_or(-1));
         self.push_stack(result, pos)?;
         Ok(StepResult::Continue)
@@ -1477,22 +1502,24 @@ impl Vm {
     fn exec_col_find(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let value = self.pop(pos)?;
         let col = self.pop(pos)?;
-        let m = self
+        let grid = self
             .reg(reg)
-            .as_model()
+            .as_xqmx_grid()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
         let usize_col = usize::try_from(col).map_err(|_| Error::IndexOutOfBounds {
             pos,
             index: col,
-            len: m.cols,
+            len: grid.cols(),
         })?;
-        // m.rows ≤ i64::MAX (validated via exec_resize); try_from never fails.
-        let result = (0..m.rows)
-            .find(|&row| m.get_linear(row * m.cols + usize_col) == value)
+        let rows = grid.rows();
+        let cols = grid.cols();
+        // rows ≤ i64::MAX (validated via exec_resize); try_from never fails.
+        let result = (0..rows)
+            .find(|&row| grid.linear(row * cols + usize_col) == value)
             .map_or(-1, |r| i64::try_from(r).unwrap_or(-1));
         self.push_stack(result, pos)?;
         Ok(StepResult::Continue)
@@ -1500,43 +1527,44 @@ impl Vm {
 
     fn exec_row_sum(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let row = self.pop(pos)?;
-        let m = self
+        let grid = self
             .reg(reg)
-            .as_model()
+            .as_xqmx_grid()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
         let usize_row = usize::try_from(row).map_err(|_| Error::IndexOutOfBounds {
             pos,
             index: row,
-            len: m.rows,
+            len: grid.rows(),
         })?;
-        let row_start = usize_row * m.cols;
-        let sum: i64 = (0..m.cols).map(|c| m.get_linear(row_start + c)).sum();
+        let cols = grid.cols();
+        let row_start = usize_row * cols;
+        let sum: i64 = (0..cols).map(|c| grid.linear(row_start + c)).sum();
         self.push_stack(sum, pos)?;
         Ok(StepResult::Continue)
     }
 
     fn exec_col_sum(&mut self, pos: usize, reg: Register) -> Result<StepResult, Error> {
         let col = self.pop(pos)?;
-        let m = self
+        let grid = self
             .reg(reg)
-            .as_model()
+            .as_xqmx_grid()
             .map_err(|got| Error::RegisterType {
                 reg: reg.slot(),
-                expected: "model",
+                expected: "model|sample",
                 got,
             })?;
         let usize_col = usize::try_from(col).map_err(|_| Error::IndexOutOfBounds {
             pos,
             index: col,
-            len: m.cols,
+            len: grid.cols(),
         })?;
-        let sum: i64 = (0..m.rows)
-            .map(|r| m.get_linear(r * m.cols + usize_col))
-            .sum();
+        let rows = grid.rows();
+        let cols = grid.cols();
+        let sum: i64 = (0..rows).map(|r| grid.linear(r * cols + usize_col)).sum();
         self.push_stack(sum, pos)?;
         Ok(StepResult::Continue)
     }

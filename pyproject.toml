@@ -1,0 +1,52 @@
+# xquad repo root pyproject.
+#
+# Declares the uv workspace spanning every Python package in the repo
+# (xqapi, xqvm_py, xqcp, xqsa) plus the dev tools used to lint and test
+# them. No buildable project of its own — `uv sync` installs workspace
+# members in editable mode into a shared `.venv/`.
+#
+# Per-package pyproject.toml files under each member directory carry the
+# actual project metadata, dependency lists, and build backend.
+
+[tool.uv.workspace]
+members = [ "xqapi", "xqvm_py", "xqcp", "xqsa" ]
+
+[dependency-groups]
+dev = [
+    "maturin>=1.7,<2",
+    "pytest>=8",
+    "pyyaml>=6",
+    "ruff>=0.7",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff — hoisted from xqvm-py/ruff.toml (QUI-439 heritage). Applies to
+# every Python package in the workspace.
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length    = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+    "UP", # pyupgrade
+]
+
+[tool.ruff.lint.per-file-ignores]
+"xqsa/tests/test_*.py" = [ "E402" ] # imports after pytest.importorskip
+
+[tool.ruff.lint.isort]
+known-first-party = [ "xqvm_py", "xqcp", "xqsa", "xqapi_py" ]
+
+# ---------------------------------------------------------------------------
+# Pytest — consolidated discovery root so `pytest` from repo root picks up
+# every package's tests/. Each package also carries its own conftest if
+# needed.
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = [ "xqvm_py/tests", "xqcp/tests", "xqsa/tests" ]

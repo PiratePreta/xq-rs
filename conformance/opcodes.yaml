@@ -3,7 +3,7 @@
 # This file is the single source of truth for the XQVM opcode set. Both the
 # Rust production implementation (xqvm/src/bytecode/types/table.rs,
 # validated at compile time by xqvm/build.rs) and the Python reference
-# implementation (xqvm-py/xqvm/core/opcodes.py, validated by
+# implementation (xqvm_py/opcodes.py, validated by
 # scripts/check-opcode-parity.py) are checked against this table.
 #
 # Schema per entry:

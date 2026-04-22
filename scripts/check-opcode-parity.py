@@ -21,7 +21,7 @@
 The Rust side is checked at compile time by xqvm/build.rs. This script is
 the Python counterpart: it loads the canonical YAML and compares every
 (code, mnemonic, stack_pop, stack_push, operand_count, operand_types)
-tuple against xqvm-py/xqvm/core/opcodes.py. Any mismatch prints a
+tuple against xqvm_py/opcodes.py. Any mismatch prints a
 diff-style report and the script exits 1.
 
 Intended to be invoked from the `opcode-parity` CI job and the
@@ -38,12 +38,11 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 YAML_PATH = REPO_ROOT / "conformance" / "opcodes.yaml"
-XQVM_PY_ROOT = REPO_ROOT / "xqvm-py"
 
 
 # The YAML operand schema (types: register / label / immediate, plus a
-# `width` in bytes) is richer than xqvm-py's OperandType enum
-# (REGISTER / TARGET / IMMEDIATE), and xqvm-py itself is internally
+# `width` in bytes) is richer than xqvm_py's OperandType enum
+# (REGISTER / TARGET / IMMEDIATE), and xqvm_py itself is internally
 # inconsistent about labels (JUMP1 uses TARGET, JUMP2 uses two
 # IMMEDIATEs). Harmonising the Python operand vocabulary is a Phase 3
 # follow-up; this script therefore compares only the fields that are
@@ -87,10 +86,14 @@ def load_yaml_rows(path: Path) -> dict[int, Row]:
 
 
 def load_python_rows() -> dict[int, Row]:
-    """Import xqvm-py's Opcode enum and convert to Row entries."""
-    sys.path.insert(0, str(XQVM_PY_ROOT))
+    """Import xqvm_py's Opcode enum and convert to Row entries."""
+    # The repo root sits on sys.path so ``xqvm_py`` resolves to the
+    # flat-layout package directory (the repo root / package directory
+    # being identical after QUI-440). We don't need the maturin-built
+    # ``xqapi_py`` for this check — only the pure-Python opcode table.
+    sys.path.insert(0, str(REPO_ROOT))
     try:
-        from xqvm.core.opcodes import Opcode  # type: ignore[import-not-found]
+        from xqvm_py.opcodes import Opcode  # type: ignore[import-not-found]
     finally:
         sys.path.pop(0)
 
@@ -113,7 +116,7 @@ def diff(yaml_rows: dict[int, Row], py_rows: dict[int, Row]) -> list[str]:
     yaml_codes = set(yaml_rows)
     py_codes = set(py_rows)
     for code in sorted(yaml_codes - py_codes):
-        errors.append(f"MISSING in xqvm-py: {yaml_rows[code].format_line()}")
+        errors.append(f"MISSING in xqvm_py: {yaml_rows[code].format_line()}")
     for code in sorted(py_codes - yaml_codes):
         errors.append(f"MISSING in opcodes.yaml: {py_rows[code].format_line()}")
 
@@ -138,7 +141,7 @@ def main() -> int:
             print(line, file=sys.stderr)
         print(
             f"\nCompared {len(yaml_rows)} yaml entries "
-            f"vs {len(py_rows)} xqvm-py entries.",
+            f"vs {len(py_rows)} xqvm_py entries.",
             file=sys.stderr,
         )
         return 1

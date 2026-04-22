@@ -282,6 +282,8 @@ Utilities for mapping 2-D coordinates to flat array indices.
 
 Read and write the linear (bias) and quadratic (coupling) coefficients of an XQMX register. Missing entries read as `0`; writes create the entry on first call. Zero values are removed from sparse storage to maintain sparsity. `reg` must hold an XQMX.
 
+The linear opcodes (`GETLINE`, `SETLINE`, `ADDLINE`) accept either MODEL or SAMPLE mode — sample values are stored densely in `values[i]`, model biases sparsely in `linear[i]`. The quadratic opcodes (`GETQUAD`, `SETQUAD`, `ADDQUAD`) require MODEL mode: samples carry no quadratic storage, and `reg` must hold an XQMX in MODEL mode; error `XQMXModeError` otherwise.
+
 #### Linear Coefficients
 
 | Code | Mnemonic | Arguments | Stack effect | Register effect | Interpretation |
@@ -302,7 +304,7 @@ Read and write the linear (bias) and quadratic (coupling) coefficients of an XQM
 
 ### XQMX Grid
 
-A model can optionally be given 2-D grid dimensions so that variables are addressed as `(row, col)` with flat index `row * cols + col`. `reg` must hold an XQMX.
+An XQMX register (model or sample) can optionally be given 2-D grid dimensions so that variables are addressed as `(row, col)` with flat index `row * cols + col`. `reg` must hold an XQMX. These opcodes accept either MODEL or SAMPLE mode — row/column reads scan the register's `linear` surface (models: sparse `linear[idx]`; samples: dense `values[idx]`).
 
 | Code | Mnemonic | Arguments | Stack effect | Register effect | Interpretation |
 |------|----------|-----------|--------------|-----------------|----------------|

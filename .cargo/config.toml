@@ -1,0 +1,22 @@
+# Cargo workspace configuration.
+#
+# The only setting here today is macOS-specific linker flags that let the
+# `xqapi-py` cdylib target link without resolving Python symbols at build
+# time — those get bound at runtime when the .so is loaded by a Python
+# interpreter. Without `-undefined dynamic_lookup` `cargo build -p
+# xqapi-py` fails on macOS with a long list of `_Py*` unresolved symbols.
+#
+# Linux uses a shared-library linker that already tolerates undefined
+# symbols by default, so no flag is needed there.
+
+[target.x86_64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-undefined",
+    "-C", "link-arg=dynamic_lookup",
+]
+
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-undefined",
+    "-C", "link-arg=dynamic_lookup",
+]

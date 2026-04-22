@@ -168,6 +168,17 @@ impl XqmxModel {
         self.quadratic.len()
     }
 
+    /// Iterate the nonzero linear (bias) terms as `(index, coefficient)`.
+    pub fn iter_linear(&self) -> impl Iterator<Item = (usize, i64)> + '_ {
+        self.linear.iter().map(|(&i, &v)| (i, v))
+    }
+
+    /// Iterate the nonzero quadratic (coupling) terms as
+    /// `(i, j, coefficient)` with `i <= j`.
+    pub fn iter_quadratic(&self) -> impl Iterator<Item = (usize, usize, i64)> + '_ {
+        self.quadratic.iter().map(|(&(i, j), &v)| (i, j, v))
+    }
+
     /// Compute the Hamiltonian energy H(s) for a given sample vector.
     ///
     /// H(s) = `sum_i` linear\[i\] * s\[i\] + sum_{i<j} quadratic\[(i,j)\] * s\[i\] * s\[j\]
@@ -209,6 +220,12 @@ impl XqmxModel {
 
 /// A candidate solution for an XQMX model.
 ///
+/// Samples carry optional grid dimensions (`rows`, `cols`) so that
+/// grid-addressed opcodes (`ROWSUM`, `COLSUM`, `ROWFIND`, `COLFIND`,
+/// `RESIZE`) can operate on samples the same way they do on models
+/// per `spec/xqvm/SPEC.md` §303. Default is `0` / `0` (ungridded); set
+/// via `RESIZE`.
+///
 /// # Examples
 ///
 /// ```rust
@@ -223,11 +240,20 @@ pub struct XqmxSample {
     pub domain: Domain,
     /// One value per variable.
     pub values: Vec<i64>,
+    /// Grid rows (set by `RESIZE`; `0` if ungridded).
+    pub rows: usize,
+    /// Grid columns (set by `RESIZE`; `0` if ungridded).
+    pub cols: usize,
 }
 
 impl XqmxSample {
-    /// Create a new sample.
+    /// Create a new sample with no grid dimensions.
     pub fn new(domain: Domain, values: Vec<i64>) -> Self {
-        Self { domain, values }
+        Self {
+            domain,
+            values,
+            rows: 0,
+            cols: 0,
+        }
     }
 }

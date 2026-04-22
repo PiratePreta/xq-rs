@@ -5,6 +5,7 @@ members = [
     "xqasm",
     "xqcli",
     "conformance",
+    "xqapi",
 ]
 
 [workspace.package]

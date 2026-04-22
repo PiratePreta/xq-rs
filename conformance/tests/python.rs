@@ -3,8 +3,8 @@
 
 //! Generated conformance tests against the Python reference runtime.
 //!
-//! Each test shells out to `python -m xqvm run` from the `xqvm-py`
-//! package and compares the JSON output against `expected.json`.
+//! Each test shells out to `uv run python -m xqvm_py run` and
+//! compares the JSON output against `expected.json`.
 //! Gated behind the `python` feature so CI can disable it on jobs
 //! without a Python interpreter available.
 

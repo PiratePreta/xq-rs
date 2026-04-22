@@ -13,7 +13,11 @@ lint:fmt:
     before_script:
         - *install-deps
     script:
-        - make fmt-check
+        # fmt-check-python is intentionally omitted here — it needs `uv`
+        # which this job does not install. Python formatting is covered
+        # by `lint:python` in .gitlab/ci/python.yml.
+        - make fmt-check-rust
+        - make fmt-check-taplo
 
 lint:clippy:
     stage: lint

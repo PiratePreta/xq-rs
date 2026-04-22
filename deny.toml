@@ -11,6 +11,9 @@ allow = [
     "AGPL-3.0-or-later",
     "MIT",
     "Apache-2.0",
+    # Strictly more permissive than plain Apache-2.0; pulled in by pyo3's
+    # build-dep target-lexicon (LLVM-adjacent tooling).
+    "Apache-2.0 WITH LLVM-exception",
     "Unicode-3.0",
     "ISC",
 ]

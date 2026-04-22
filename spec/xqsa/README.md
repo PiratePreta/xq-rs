@@ -1,8 +1,7 @@
 # XQSA Specification (draft)
 
 **Status:** draft. Authoritative specification is pending formalisation of
-the solver-adapter contract from the `xqvm-py/xqsa/` reference
-implementation.
+the solver-adapter contract from the `xqsa/` reference implementation.
 
 XQSA (X-Quadratic Solver Adapters) defines the interface between the
 XQVM toolchain and external quadratic optimization solvers (simulated
@@ -25,5 +24,5 @@ The specification will cover:
 
 ## Reference implementation
 
-[`../../xqvm-py/xqsa/`](../../xqvm-py/xqsa/) — currently wraps `dwave-neal`
-simulated annealing.
+[`../../xqsa/`](../../xqsa/) — currently wraps `dwave-neal` simulated
+annealing.
