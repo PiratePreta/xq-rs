@@ -14,7 +14,7 @@ workspace = true
 # --- Feature gates ----------------------------------------------------------
 #
 # The test harness runs vectors through two runtimes: the Rust `xqvm` crate
-# (in-process) and the `xqvm-py` reference (`python -m xqvm run`
+# (in-process) and the `xqvm_py` reference (`uv run python -m xqvm_py run`
 # subprocess). Each runtime has its own test file gated by a feature so CI
 # can parameterise:
 #
@@ -31,10 +31,10 @@ python  = [  ]
 # --- Dependencies -----------------------------------------------------------
 
 [dependencies]
-xqvm       = { workspace = true }
-xqasm      = { workspace = true }
-serde      = { version = "1", features = [ "derive" ] }
-serde_json = "1"
+xqvm.workspace  = true
+xqasm.workspace = true
+serde           = { version = "1", features = [ "derive" ] }
+serde_json      = "1"
 
 [build-dependencies]
 walkdir = "2"

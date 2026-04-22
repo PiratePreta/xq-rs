@@ -1,0 +1,14 @@
+{
+  "_note": "canonical CI golden",
+  "_seed": 42,
+  "energy": -650,
+  "n": 4,
+  "tour": [
+    0,
+    3,
+    1,
+    2
+  ],
+  "tour_distance": 150,
+  "valid": 1
+}

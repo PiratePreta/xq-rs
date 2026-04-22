@@ -54,17 +54,61 @@ cargo build --release
 
 The binary is placed at `target/release/xq`.
 
+### Python workflow (REPL + examples)
+
+Once per environment, run the baseline local-setup target:
+
+```sh
+make xquad
+```
+
+This syncs the Python workspace (`xqvm_py`, `xqcp`, `xqsa`, `xqapi`) into
+`.venv/`, builds the `xqapi_py` pyo3 extension via maturin, writes a workspace
+`.pth` so scripts anywhere in the repo can `import xqcp` / `xqsa` / `xqvm_py`
+naturally, and installs the `xquad` CLI binary under `~/.cargo/bin/`.
+
+Open a Python REPL with all workspace packages ready:
+
+```sh
+make repl
+```
+
+Inside the REPL:
+
+```python
+from xqapi_py.vm import Vm, XqmxModel, XqmxSample
+from xqapi_py.asm import parse_xqasm, assemble_source, disassemble
+from xqcp import Problem, Types
+from xqsa import NealBackend
+```
+
+Run the bundled examples (TSP, Max-Cut) end-to-end. Each runner compiles the
+problem via `xqcp`, runs encoder → SA (via `xqsa.NealBackend`) → verifier →
+decoder on the chosen VM, and prints the decoded solution.
+
+```sh
+# Single run, stdout output:
+uv run --no-sync python examples/tsp/runner.py --seed 42
+uv run --no-sync python examples/maxcut/runner.py --seed 42 --interpreter rust
+
+# Run every example on both interpreters, diff against golden.json:
+make example-smoke
+```
+
+See [examples/tsp/README.md](examples/tsp/README.md) and
+[examples/maxcut/README.md](examples/maxcut/README.md) for per-example details.
+
 ### Run an example
 
 ```sh
 # Assemble a source file
-xq asm program.xqasm -o program.xqbc
+xquad asm program.xqasm -o program.xqbc
 
 # Disassemble to inspect the encoding
-xq dism program.xqbc
+xquad dism program.xqbc
 
 # Execute
-xq run program.xqbc
+xquad run program.xqbc
 ```
 
 ### A minimal program
@@ -80,7 +124,7 @@ HALT
 Assemble and run:
 
 ```sh
-xq asm add.xqasm -o add.xqbc && xq run add.xqbc
+xquad asm add.xqasm -o add.xqbc && xquad run add.xqbc
 ```
 
 ## Architecture
@@ -98,8 +142,10 @@ enum, mnemonic strings, and operand arity are all derived from it.
 The binary format is a bare instruction stream with no header. Each instruction is
 an opcode byte followed by its operands in big-endian byte order.
 
-See `crates/vm/examples/tsp/` for a complete worked example: a Travelling Salesman
-Problem encoded as a QUBO via three `.xqasm` programs driven by a Rust harness.
+See [`examples/tsp/`](examples/tsp/) for a complete end-to-end worked example:
+a Travelling Salesman Problem driven from xqcp DSL through the VM and solver,
+runnable on either the Python reference VM or the Rust VM. The Rust-native
+`cargo run --example tsp` showcase still lives at [`xqvm/examples/tsp/`](xqvm/examples/tsp/).
 
 ## Contributing
 

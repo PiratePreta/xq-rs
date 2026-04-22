@@ -1,0 +1,20 @@
+[package]
+name                 = "xqapi-py"
+description          = "PyO3 bindings exposing xqvm + xqasm to Python; produces the `xqapi_py` Python extension"
+version              = "0.1.0"
+edition              = "2024"
+license.workspace    = true
+repository.workspace = true
+publish              = false
+
+[lints]
+workspace = true
+
+[lib]
+name       = "xqapi_py"
+crate-type = [ "cdylib", "rlib" ]
+
+[dependencies]
+xqvm.workspace  = true
+xqasm.workspace = true
+pyo3            = { version = "0.28", features = [ "extension-module" ] }

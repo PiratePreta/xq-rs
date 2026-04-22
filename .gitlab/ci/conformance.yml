@@ -2,41 +2,57 @@
 # suite. Each job is parameterised on a single runtime so that a
 # Python-side regression cannot mask a Rust-side pass (or vice versa).
 #
-# * opcode-parity — Rust-side is enforced at compile time by
+# * lint:opcode-parity — Rust-side is enforced at compile time by
 #   `xqvm/build.rs` (triggered by `cargo build -p xqvm`); the Python
 #   side is a separate script because we can't assert against a
 #   Python file from Rust's type system.
-# * spec-conformance-rust / -python — run the shared
-#   `xquad-conformance` crate with the matching feature flag.
+# * conformance:rust / conformance:python — run the shared
+#   `xquad-conformance` crate with the matching feature flag. The
+#   python side shells out to `uv run python -m xqvm_py run …` so
+#   the venv (editable xqvm_py + maturin-built xqapi_py) is active.
 
 .install-deps: &install-deps
     - export PATH="${CARGO_HOME}/bin:${PATH}"
     - make deps
 
-.install-python: &install-python
-    - apt-get update && apt-get install -y --no-install-recommends python3 python3-pip
-    - python3 -m pip install --break-system-packages --quiet pyyaml
+.install-uv: &install-uv
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="${HOME}/.local/bin:${PATH}"
+    - uv sync
 
-opcode-parity:
+lint:opcode-parity:
     stage: lint
     before_script:
         - *install-deps
-        - *install-python
+        - *install-uv
     script:
         - make opcode-parity
 
-spec-conformance-rust:
+conformance:rust:
     stage: conformance
     before_script:
         - *install-deps
     script:
         - make conformance-rust
 
-spec-conformance-python:
+conformance:python:
     stage: conformance
     before_script:
         - *install-deps
-        - *install-python
-        - python3 -m pip install --break-system-packages --quiet -r xqvm-py/requirements.txt
+        - *install-uv
     script:
         - make conformance-python
+
+# NOTE: the example-smoke job (ran `xqcp DSL -> xqapi_py.asm -> Vm
+# -> xqsa -> decode` against a committed golden.json on both the
+# Python and Rust interpreters) is intentionally not wired here.
+# Initial rollout exposed a cross-platform / cross-interpreter
+# divergence: on Linux CI the Rust path produced a reverse-direction
+# Hamiltonian cycle (same edges, same distance, same energy) for the
+# same QUBO + seed that matched golden on the Python path. Locally
+# (macOS arm64) both paths match. The runner + Makefile target
+# (`make example-smoke`) still exist for local use; CI integration
+# is deferred until the divergence is characterised and either fixed
+# or the smoke-test contract is tightened to compare invariants
+# (energy, validity, distance) instead of the literal permutation.
+# Tracked as QUI-465.

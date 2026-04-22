@@ -1,0 +1,36 @@
+[build-system]
+requires      = [ "hatchling" ]
+build-backend = "hatchling.build"
+
+[project]
+name = "xqvm_py"
+description = "Python reference implementation of the X-Quadratic Virtual Machine (conformance oracle)."
+requires-python = ">=3.13"
+license = { text = "AGPL-3.0-or-later" }
+dynamic = [ "version" ]
+dependencies = [
+    "xqapi_py",
+]
+
+[tool.uv.sources]
+xqapi_py.workspace = true
+
+[tool.hatch.version]
+path = "__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "." ]
+exclude = [
+    "tests/**",
+    "xqcp/**",
+    "xqsa/**",
+    "pyproject.toml",
+    "CLAUDE.md",
+]
+
+[tool.hatch.metadata]
+# The package directory IS the project root; the default flat-layout
+# layout assumption (project-root/package-name/) does not apply. The
+# `packages = ["."]` line above tells hatchling to take this directory
+# as the wheel source.
+allow-direct-references = true

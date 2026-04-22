@@ -43,8 +43,37 @@ mermaid-init.js
 
 ### Python ###
 __pycache__/
-*.pyc
-*.pyo
-.venv/
-.pytest_cache/
+*.py[cod]
+*$py.class
+*.so
 *.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+wheels/
+
+.venv/
+.venv
+venv/
+env/
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+.ipynb_checkpoints
+
+### IDE ###
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

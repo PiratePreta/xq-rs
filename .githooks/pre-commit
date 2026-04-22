@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# xquad pre-commit hook.
+#
+# Runs fast format + lint checks on staged files only:
+#   - *.py   — `uv run ruff check` + `uv run ruff format --check`
+#   - *.toml — `taplo fmt --check`
+#
+# Does not run pytest / cargo test / cargo clippy — those live in CI
+# and the `make all` target. The purpose of this hook is to stop
+# formatting-only CI failures before they leave the workstation.
+#
+# Install once per clone with:
+#
+#     make install-hooks
+#
+# or manually:
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass with `git commit --no-verify` when you must.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Collect staged files, limited to those that exist in the worktree
+# (avoids rename-only / delete-only cases).
+#
+# macOS ships bash 3.2 which lacks `mapfile`; read files one at a time
+# with a null-delimited loop for portability.
+py_files=()
+toml_files=()
+while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    [ -f "$f" ] || continue
+    case "$f" in
+        *.py)   py_files+=("$f") ;;
+        *.toml) toml_files+=("$f") ;;
+    esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+failed=0
+
+if [ ${#py_files[@]} -gt 0 ]; then
+    echo "pre-commit: ruff check  (${#py_files[@]} file(s))"
+    if ! uv run --quiet ruff check "${py_files[@]}"; then
+        failed=1
+    fi
+    echo "pre-commit: ruff format --check  (${#py_files[@]} file(s))"
+    if ! uv run --quiet ruff format --check "${py_files[@]}"; then
+        failed=1
+    fi
+fi
+
+if [ ${#toml_files[@]} -gt 0 ]; then
+    echo "pre-commit: taplo fmt --check  (${#toml_files[@]} file(s))"
+    # taplo emits INFO lines for every file it touches; quiet those and
+    # let ERROR lines through. Exit code drives pass/fail.
+    if ! taplo fmt --check "${toml_files[@]}" 2> >(grep -v '^ INFO' >&2); then
+        failed=1
+    fi
+fi
+
+if [ "$failed" -ne 0 ]; then
+    echo
+    echo "pre-commit: one or more checks failed." >&2
+    echo "Run \`make fmt\` to autofix, or \`git commit --no-verify\` to bypass." >&2
+    exit 1
+fi
+
+exit 0

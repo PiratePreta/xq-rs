@@ -6,15 +6,16 @@
     - export PATH="${CARGO_HOME}/bin:${PATH}"
     - make deps-docs
 
-.install-python: &install-python
-    - apt-get update && apt-get install -y --no-install-recommends python3 python3-pip
-    - python3 -m pip install --break-system-packages --quiet pyyaml
+.install-uv: &install-uv
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="${HOME}/.local/bin:${PATH}"
+    - uv sync
 
 docs:build:
     stage: docs
     before_script:
         - *install-deps
-        - *install-python
+        - *install-uv
     script:
         - make docs-check
         - make docs

@@ -1,25 +1,26 @@
-# Python reference (`xqvm-py`) lint + test suite.
+# Python workspace lint + test suite.
 #
-# These jobs run ruff (same lint/format enforced by the repo's
-# pre-commit hook) and pytest under `xqvm-py/tests/`. They install a
-# Python toolchain on top of the base `rust:latest` image so they can
-# share the target/ cache with the Rust jobs when reasonable.
+# The xquad Python tree lives in four packages: xqvm_py (VM reference),
+# xqcp (DSL), xqsa (solver adapters), and xqapi (pyo3 bindings). All
+# four are managed as a single uv workspace (see root pyproject.toml);
+# `uv sync` installs them editable + builds xqapi's cdylib via maturin.
 
-.install-python: &install-python
-    - apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv
-    - python3 -m pip install --break-system-packages --quiet -r xqvm-py/requirements.txt
+.install-uv: &install-uv
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="${HOME}/.local/bin:${PATH}"
+    - uv sync
 
-python:lint:
+lint:python:
     stage: lint
     before_script:
-        - *install-python
+        - *install-uv
     script:
-        - python3 -m ruff check xqvm-py
-        - python3 -m ruff format --check xqvm-py
+        - make lint-python
+        - make fmt-check-python
 
-python:test:
+test:python:
     stage: test
     before_script:
-        - *install-python
+        - *install-uv
     script:
-        - cd xqvm-py && python3 -m pytest tests/
+        - make test-python
