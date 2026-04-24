@@ -24,6 +24,7 @@ stages:
     - test
     - conformance
     - docs
+    - release
 
 include:
     - local: .gitlab/ci/lint.yml
@@ -31,3 +32,4 @@ include:
     - local: .gitlab/ci/python.yml
     - local: .gitlab/ci/conformance.yml
     - local: .gitlab/ci/docs.yml
+    - local: .gitlab/ci/release.yml

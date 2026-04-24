@@ -50,10 +50,14 @@ fn main() {
     let manifest_dir = PathBuf::from(
         env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by cargo"),
     );
-    let yaml_path = manifest_dir
-        .join("..")
-        .join("conformance")
-        .join("opcodes.yaml");
+
+    // `xqvm/opcodes.yaml` is a symlink to `../conformance/opcodes.yaml`
+    // in the workspace (keeping the conformance copy authoritative),
+    // but cargo follows the symlink when packaging so the published
+    // tarball ships a real file at `xqvm/opcodes.yaml`. Read the
+    // symlinked path so both the workspace build and the packaged
+    // build resolve identically.
+    let yaml_path = manifest_dir.join("opcodes.yaml");
 
     println!("cargo:rerun-if-changed={}", yaml_path.display());
 

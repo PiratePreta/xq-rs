@@ -1,0 +1,136 @@
+# Release pipeline — publishes the xquad toolchain to crates.io and
+# PyPI on every tag of the form `v<digit>...`.
+#
+# Required protected CI variables (set once in project settings →
+# CI/CD → Variables; both are masked + protected):
+#
+#   CARGO_REGISTRY_TOKEN  crates.io API token for ops@postquant.xyz
+#                         scoped to xqvm + xqasm + xqcli (publish-new
+#                         + publish-update).
+#
+#   PYPI_TOKEN            PyPI API token for ops@postquant.xyz scoped to
+#                         xqffi + xqcp + xqsa + xqvm_py + xquad. First
+#                         release needs an account-wide token because
+#                         per-project tokens require the project to
+#                         already exist on PyPI.
+#
+# See RELEASING.md for the full tag-cut checklist.
+
+# ---------------------------------------------------------------------------
+# Shared rules
+# ---------------------------------------------------------------------------
+
+# Run only on pushed tags like v0.1.0, v0.0.1-rc1, v1.2.3, …
+.on-release-tag: &on-release-tag
+    rules:
+        - if: $CI_COMMIT_TAG =~ /^v\d/
+
+# Run on every MR and push; never on the release tag (that's what the
+# actual release jobs are for). These dry-runs prove the release path
+# works without publishing.
+.on-pr-or-push: &on-pr-or-push
+    rules:
+        - if: $CI_COMMIT_TAG =~ /^v\d/
+          when: never
+        - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+        - if: $CI_COMMIT_BRANCH
+          when: on_success
+
+# uv + maturin + twine for the Python publish jobs. We stay on
+# rust:latest (the workspace default) so cargo is available for
+# maturin's cdylib build; uv provides the wheel builder for the
+# pure-Python peers.
+.setup-python-publish: &setup-python-publish
+    - apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv curl ca-certificates
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="${HOME}/.local/bin:${PATH}"
+    - uv --version
+    - uv tool install maturin --with-requirements /dev/null
+    - uv tool install twine
+    - export PATH="${HOME}/.local/share/uv/tools/maturin/bin:${HOME}/.local/share/uv/tools/twine/bin:${PATH}"
+    - maturin --version
+    - twine --version
+
+# ---------------------------------------------------------------------------
+# Release jobs (tag-triggered)
+# ---------------------------------------------------------------------------
+
+# Publish the three Rust crates to crates.io in topological dependency
+# order: xqvm (no deps) → xqasm (depends on xqvm) → xqcli (depends on
+# both). The `xqffi` crate keeps `publish = false` — it's a pyo3
+# cdylib consumed via the PyPI wheel, not a crates.io dependency.
+release:crates:
+    stage: release
+    <<: *on-release-tag
+    script:
+        - cargo --version
+        - cargo publish --locked -p xqvm --token "${CARGO_REGISTRY_TOKEN}"
+        - cargo publish --locked -p xqasm --token "${CARGO_REGISTRY_TOKEN}"
+        - cargo publish --locked -p xqcli --token "${CARGO_REGISTRY_TOKEN}"
+
+# Publish the Python distributions to PyPI. Order matters: xquad is
+# the umbrella meta-package and depends on the peers, so it must land
+# *after* them or `pip install xquad` cannot resolve its deps.
+#
+#   1. xqffi            (pyo3 cdylib — maturin builds manylinux wheels)
+#   2. xqvm_py          (pure-Python reference VM)
+#   3. xqcp             (DSL)
+#   4. xqsa             (solver adapters)
+#   5. xquad            (umbrella — depends on 1-4)
+#
+# maturin publish uploads wheels for the current runner's platform
+# tag. The full matrix (linux-x86_64 + linux-aarch64 + macos-arm64 +
+# windows-x86_64) requires a multi-runner fan-out; for v0.1.0 we ship
+# linux-x86_64 only and track the matrix as a RELEASING.md follow-up.
+release:pypi:
+    stage: release
+    needs:
+        - release:crates
+    <<: *on-release-tag
+    before_script:
+        - *setup-python-publish
+    script:
+        - maturin publish --manifest-path xqffi/Cargo.toml --username __token__ --password "${PYPI_TOKEN}" --skip-existing
+        # `uv build` inside a workspace member defaults to the workspace-
+        # root `dist/`; pin `--out-dir dist` so `twine upload dist/*`
+        # resolves files under the package subdir we just cd'd into.
+        - for pkg in xqvm_py xqcp xqsa xquad; do
+              (cd "${pkg}" && uv build --out-dir dist && twine upload --non-interactive --skip-existing --username __token__ --password "${PYPI_TOKEN}" dist/*);
+          done
+
+# ---------------------------------------------------------------------------
+# Dry-run jobs (MR / push — validate the release path without publishing)
+# ---------------------------------------------------------------------------
+
+# `cargo publish --dry-run` validates the packaged crate without
+# uploading: Cargo.toml metadata, license files, doc build, dependency
+# versions, etc. Running for every MR catches release-blocking
+# regressions long before the tag is cut.
+#
+# Only `xqvm` can be dry-run in isolation because xqasm + xqcli's
+# workspace dependencies resolve against crates.io (where the
+# just-bumped xqvm hasn't been pushed yet during a dry-run). The real
+# `release:crates` job publishes `xqvm` first so the downstream
+# dry-runs can resolve it; there is no dry-run path that exercises
+# the same ordering without touching the live registry.
+release:dry-run:crates:
+    stage: lint
+    <<: *on-pr-or-push
+    script:
+        - cargo --version
+        - cargo publish --locked --dry-run -p xqvm
+
+# maturin build + twine check validate that wheels + sdists would
+# upload cleanly. No token needed; no network upload.
+release:dry-run:pypi:
+    stage: lint
+    <<: *on-pr-or-push
+    before_script:
+        - *setup-python-publish
+    script:
+        - maturin build --release --manifest-path xqffi/Cargo.toml --out xqffi/dist
+        - twine check xqffi/dist/*
+        # See release:pypi for the `--out-dir dist` rationale.
+        - for pkg in xqvm_py xqcp xqsa xquad; do
+              (cd "${pkg}" && uv build --out-dir dist && twine check dist/*);
+          done

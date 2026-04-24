@@ -24,8 +24,12 @@ thiserror.workspace = true
 # std-only optional dependencies
 miette = { workspace = true, optional = true }
 
+# Path-only dev-dep; overrides the version-carrying workspace alias
+# because cargo strips dev-dependencies from the published tarball
+# and chasing an `xqasm` version on crates.io during xqvm's dry-run
+# fails (xqvm gets published before xqasm).
 [dev-dependencies]
-xqasm.workspace  = true
+xqasm            = { path = "../xqasm" }
 miette.workspace = true
 
 [build-dependencies]
