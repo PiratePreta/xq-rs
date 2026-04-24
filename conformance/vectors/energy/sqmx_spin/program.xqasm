@@ -1,11 +1,8 @@
-; sqmx_spin: spin (Ising) 2-variable model evaluated against the
-; default-initialised spin sample. Exercises SQMX + SSMX + ENERGY.
-;
-; The non-trivial case (e.g. sample = [-1, -1]) is currently blocked by
-; a Phase 0 drift between impls (Rust SSMX defaults to [-1, -1], Python
-; defaults to [0, 0]); tracked as a separate ticket. This vector uses
-; zero coefficients so the energy is zero on both impls regardless of
-; how the sample happens to be initialised.
+; sqmx_spin: spin (Ising) 2-variable model with zero coefficients
+; evaluated against the default-initialised spin sample. Exercises
+; SQMX + SSMX + ENERGY. Pair with sqmx_nonzero_linear for the
+; non-trivial case that depends on the canonical [-1, ..., -1]
+; default (QUI-453).
 
 PUSH 2
 SQMX r0
