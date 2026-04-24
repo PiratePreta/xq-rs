@@ -180,23 +180,31 @@ pub fn run_rust(vector: &Vector) -> Result<Outcome, String> {
     vm.run(&program)
         .map_err(|e| format!("vm.run failed: {e:?}"))?;
 
-    // Unset output slots default to Int(0) in the Rust VM; the Python
-    // CLI shim mirrors that convention so Some(0) is the neutral value
-    // in `expected.json`. Non-scalar outputs (vec, model, sample) are
-    // serialised through `fold_regval_to_i64` as a defensive fallback.
-    let outputs: Vec<Option<i64>> = vm
+    let mut outputs: Vec<Option<i64>> = vm
         .outputs()
         .iter()
         .map(|rv| match rv {
+            RegVal::Unset => None,
             RegVal::Int(n) => Some(*n),
             other => Some(fold_regval_to_i64(other)),
         })
         .collect();
+    trim_trailing_unset(&mut outputs);
     let final_stack = vm.stack().to_vec();
     Ok(Outcome {
         outputs,
         final_stack,
     })
+}
+
+/// Drop trailing `None` entries so outputs report a sparse map rather than
+/// a fixed-width array padded with `null`. A vector that writes only slot 0
+/// out of 16 reserved slots thus produces `[value]`, not
+/// `[value, null, null, …]` — matching `spec/xqvm/SPEC.md:46`.
+fn trim_trailing_unset(outputs: &mut Vec<Option<i64>>) {
+    while matches!(outputs.last(), Some(None)) {
+        let _ = outputs.pop();
+    }
 }
 
 /// Execute the vector against the Python reference VM.
@@ -240,11 +248,12 @@ pub fn run_python(vector: &Vector) -> Result<Outcome, String> {
     let parsed: PyOut = serde_json::from_str(stdout.trim())
         .map_err(|e| format!("failed to parse python stdout as JSON: {e}\n{stdout}"))?;
 
-    let outputs = parsed
+    let mut outputs: Vec<Option<i64>> = parsed
         .outputs
         .into_iter()
         .map(|v| v.and_then(|val| val.as_i64()))
         .collect();
+    trim_trailing_unset(&mut outputs);
     let final_stack: Vec<i64> = parsed
         .final_stack
         .into_iter()

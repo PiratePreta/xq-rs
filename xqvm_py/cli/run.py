@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         "--outputs",
         type=int,
         default=16,
-        help="Number of output slots reserved (extras beyond this index are 0).",
+        help="Number of output slots reserved (outputs beyond this index are null).",
     )
 
     args = parser.parse_args(argv)
@@ -123,12 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     executor = Executor()
     output_map = executor.execute(program, input_data=input_data)
 
-    # Unset slots are reported as 0 to match the Rust VM, whose output
-    # vector is pre-filled with RegVal::default() (== Int(0)) and cannot
-    # distinguish "never written" from "explicitly zero". Tracked in
-    # QUI-459; see conformance/README.md for the current contract.
+    # Unset slots are reported as null (None) to match the spec's sparse-map
+    # semantics: output slots never written by the program are absent.
     outputs: list[Any] = [
-        _serialise_value(output_map[slot]) if slot in output_map else 0 for slot in range(args.outputs)
+        _serialise_value(output_map[slot]) if slot in output_map else None for slot in range(args.outputs)
     ]
     final_stack = [_serialise_value(v) for v in executor.state.stack]
 

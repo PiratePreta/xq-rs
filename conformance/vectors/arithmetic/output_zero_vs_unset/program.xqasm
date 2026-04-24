@@ -1,0 +1,11 @@
+; output_zero_vs_unset: explicitly write 0 to slot 0, leave slot 1 unset.
+;
+; Regression guard for QUI-459: asserts that an explicitly-written zero
+; is preserved in the outputs, and that a slot never touched by OUTPUT
+; is absent from the sparse output map (not reported as 0).
+
+PUSH 0
+STOW r0
+PUSH 0
+OUTPUT r0
+HALT

@@ -71,17 +71,19 @@ the first value, slot 1 the second, and so on.
 
 ```json
 {
-  "outputs": [42, 0, 0],
+  "outputs": [42],
   "final_stack": []
 }
 ```
 
-Output slots that remain unset by the program are reported as `0`
-(matches the Rust VM's `RegVal::default()` pre-fill — the VM cannot
-currently distinguish "never written" from "explicitly zero").
-Spec-compliant sparse reporting is tracked as a follow-up. The length
-of `outputs` must equal `output_slots`. `final_stack` is the residual
-stack at `HALT` (bottom to top); an empty stack is typical.
+`outputs` is a sparse map per `spec/xqvm/SPEC.md:46` — each entry is
+either an `i64` (the value written by `OUTPUT`) or `null` (the slot
+was reserved but explicitly zeroed by a peer entry). Trailing unset
+slots are omitted entirely, so a program that writes slot 0 out of 16
+reserved slots produces `[42]`, not `[42, null, …]`. Explicitly-written
+zeroes are preserved; only slots that `OUTPUT` never touched disappear.
+`final_stack` is the residual stack at `HALT` (bottom to top); an
+empty stack is typical.
 
 ## Authoring a new vector
 

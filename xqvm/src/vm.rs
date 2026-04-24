@@ -270,9 +270,10 @@ impl Vm {
 
     /// Set the number of output slots writable by the program via `OUTPUT`.
     ///
-    /// Slots are initialised to [`RegVal::Int(0)`](RegVal::Int).
+    /// Slots are initialised to [`RegVal::Unset`]. Use [`Vm::outputs`] after
+    /// execution to inspect results; `Unset` means the slot was never written.
     pub fn set_output_slots(&mut self, n: usize) -> &mut Self {
-        self.outputs = vec![RegVal::default(); n];
+        self.outputs = vec![RegVal::Unset; n];
         self
     }
 
@@ -878,6 +879,12 @@ impl Vm {
                 index: idx,
                 len: self.outputs.len(),
             })?;
+        if matches!(self.reg(reg), RegVal::Unset) {
+            return Err(Error::UnsetRegister {
+                pos,
+                reg: reg.slot(),
+            });
+        }
         let val = self.reg(reg).clone();
         *self
             .outputs
@@ -1986,6 +1993,22 @@ mod tests {
         let err = vm.run(&program).unwrap_err();
         assert!(
             matches!(err, Error::UnsetRegister { reg: 0, .. }),
+            "expected UnsetRegister, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn output_on_unset_register_faults() {
+        // OUTPUT must fault on an unset register so a missing STOW surfaces
+        // as an error rather than silently leaving the slot "never written".
+        let mut b = InstructionBuilder::new();
+        let _ = b.emit_push(0).emit_output(Register(7)).emit_halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let _ = vm.set_output_slots(1);
+        let err = vm.run(&program).unwrap_err();
+        assert!(
+            matches!(err, Error::UnsetRegister { reg: 7, .. }),
             "expected UnsetRegister, got {err:?}"
         );
     }
