@@ -1,15 +1,15 @@
 # xquad repo root pyproject.
 #
 # Declares the uv workspace spanning every Python package in the repo
-# (xqapi, xqvm_py, xqcp, xqsa) plus the dev tools used to lint and test
-# them. No buildable project of its own — `uv sync` installs workspace
-# members in editable mode into a shared `.venv/`.
+# (xqffi, xqvm_py, xqcp, xqsa, xquad) plus the dev tools used to lint
+# and test them. No buildable project of its own — `uv sync` installs
+# workspace members in editable mode into a shared `.venv/`.
 #
 # Per-package pyproject.toml files under each member directory carry the
 # actual project metadata, dependency lists, and build backend.
 
 [tool.uv.workspace]
-members = [ "xqapi", "xqvm_py", "xqcp", "xqsa" ]
+members = [ "xqffi", "xqvm_py", "xqcp", "xqsa", "xquad" ]
 
 [dependency-groups]
 dev = [
@@ -40,7 +40,7 @@ select = [
 "xqsa/tests/test_*.py" = [ "E402" ] # imports after pytest.importorskip
 
 [tool.ruff.lint.isort]
-known-first-party = [ "xqvm_py", "xqcp", "xqsa", "xqapi_py" ]
+known-first-party = [ "xqvm_py", "xqcp", "xqsa", "xqffi", "xquad" ]
 
 # ---------------------------------------------------------------------------
 # Pytest — consolidated discovery root so `pytest` from repo root picks up
@@ -49,4 +49,4 @@ known-first-party = [ "xqvm_py", "xqcp", "xqsa", "xqapi_py" ]
 # ---------------------------------------------------------------------------
 
 [tool.pytest.ini_options]
-testpaths = [ "xqvm_py/tests", "xqcp/tests", "xqsa/tests" ]
+testpaths = [ "xqvm_py/tests", "xqcp/tests", "xqsa/tests", "xquad/tests" ]

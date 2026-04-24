@@ -210,7 +210,7 @@ fn trim_trailing_unset(outputs: &mut Vec<Option<i64>>) {
 /// Execute the vector against the Python reference VM.
 ///
 /// Shells out via `uv run python -m xqvm_py run …` so the workspace
-/// venv (with `xqvm_py` installed editable and the `xqapi_py` pyo3
+/// venv (with `xqvm_py` installed editable and the `xqffi` pyo3
 /// extension built by maturin) is activated automatically. Override
 /// the interpreter wrapper with `XQUAD_CONFORMANCE_PYTHON` (defaults
 /// to `uv`).

@@ -90,7 +90,7 @@ def load_python_rows() -> dict[int, Row]:
     # The repo root sits on sys.path so ``xqvm_py`` resolves to the
     # flat-layout package directory (the repo root / package directory
     # being identical after QUI-440). We don't need the maturin-built
-    # ``xqapi_py`` for this check — only the pure-Python opcode table.
+    # ``xqffi`` for this check — only the pure-Python opcode table.
     sys.path.insert(0, str(REPO_ROOT))
     try:
         from xqvm_py.opcodes import Opcode  # type: ignore[import-not-found]

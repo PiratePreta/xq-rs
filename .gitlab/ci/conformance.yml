@@ -9,7 +9,7 @@
 # * conformance:rust / conformance:python — run the shared
 #   `xquad-conformance` crate with the matching feature flag. The
 #   python side shells out to `uv run python -m xqvm_py run …` so
-#   the venv (editable xqvm_py + maturin-built xqapi_py) is active.
+#   the venv (editable xqvm_py + maturin-built xqffi) is active.
 
 .install-deps: &install-deps
     - export PATH="${CARGO_HOME}/bin:${PATH}"
@@ -43,7 +43,7 @@ conformance:python:
     script:
         - make conformance-python
 
-# NOTE: the example-smoke job (ran `xqcp DSL -> xqapi_py.asm -> Vm
+# NOTE: the example-smoke job (ran `xqcp DSL -> xqffi.asm -> Vm
 # -> xqsa -> decode` against a committed golden.json on both the
 # Python and Rust interpreters) is intentionally not wired here.
 # Initial rollout exposed a cross-platform / cross-interpreter

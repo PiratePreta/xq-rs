@@ -83,7 +83,7 @@ def program_from_xqasm(source: str, name: str = "") -> Program:
 
     This is the single entry point xqvm-py uses to turn assembly text
     into an executable ``Program``. The actual parsing + assembly is
-    done by ``xqapi_py.asm.parse_xqasm`` (a pyo3 binding to Rust
+    done by ``xqffi.asm.parse_xqasm`` (a pyo3 binding to Rust
     ``xqasm``); this helper just adapts the wire dict into the Python
     dataclass layout the executor expects.
 
@@ -91,7 +91,7 @@ def program_from_xqasm(source: str, name: str = "") -> Program:
     replaces what used to be ``xqvm.assembler.assemble(src).program``
     — xqvm-py no longer ships its own assembler.
     """
-    from xqapi_py.asm import parse_xqasm
+    from xqffi.asm import parse_xqasm
 
     wire = parse_xqasm(source)
     instructions = [Instruction(Opcode.from_code(code), tuple(ops), int(pc)) for code, ops, pc in wire["instructions"]]

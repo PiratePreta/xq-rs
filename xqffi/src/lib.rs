@@ -19,11 +19,15 @@
 //!
 //! Exposes two Python submodules:
 //!
-//! - `xqapi_py.asm` — bindings around [`xqasm`]: `parse_xqasm`,
-//!   `assemble_source`, `disassemble`.
-//! - `xqapi_py.vm` — bindings around [`xqvm::Vm`]: a `Vm` class with the
-//!   standard `set_calldata` / `set_output_slots` / `run` / `outputs` /
-//!   `stack` surface.
+//! - `xqffi.asm` — bindings around [`xqasm`]: `parse_xqasm`,
+//!   `assemble_source`, `disassemble`, `instruction_count`.
+//! - `xqffi.vm` — bindings around [`xqvm::Vm`]: a low-level `Vm` class
+//!   with the `set_calldata` / `set_output_slots` / `run` / `outputs` /
+//!   `stack` surface that the conformance harness drives, plus thin
+//!   `XqmxModel` / `XqmxSample` wrappers with getters and setters.
+//!
+//! User-facing convenience (`Program`, `Session`, `RunResult`, model/sample
+//! dict conversion) lives in the `xquad` pure-Python umbrella package.
 //!
 //! The crate ships as a Python extension (`cdylib`) built via `maturin`;
 //! the `rlib` output is also enabled so Rust tests and in-workspace
@@ -34,29 +38,29 @@ use pyo3::prelude::*;
 mod asm;
 mod vm;
 
-/// Module entry point — registered as `xqapi_py` by maturin (via the
+/// Module entry point — registered as `xqffi` by maturin (via the
 /// `module-name` field in `pyproject.toml`, which matches the `[lib] name`
 /// in `Cargo.toml`).
 ///
-/// Submodules (`xqapi_py.asm`, `xqapi_py.vm`) are registered both as
+/// Submodules (`xqffi.asm`, `xqffi.vm`) are registered both as
 /// attributes of the parent module *and* in `sys.modules` so
-/// `from xqapi_py.asm import parse_xqasm` resolves. `add_submodule`
+/// `from xqffi.asm import parse_xqasm` resolves. `add_submodule`
 /// alone only sets the attribute; pyo3's module tree doesn't
 /// automatically populate `sys.modules` the way `__init__.py`-based
 /// packages do.
 #[pymodule]
-fn xqapi_py(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn xqffi(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sys_modules = py.import("sys")?.getattr("modules")?;
 
-    let asm_module = PyModule::new(py, "xqapi_py.asm")?;
+    let asm_module = PyModule::new(py, "xqffi.asm")?;
     asm::register(py, &asm_module)?;
     m.add_submodule(&asm_module)?;
-    sys_modules.set_item("xqapi_py.asm", &asm_module)?;
+    sys_modules.set_item("xqffi.asm", &asm_module)?;
 
-    let vm_module = PyModule::new(py, "xqapi_py.vm")?;
+    let vm_module = PyModule::new(py, "xqffi.vm")?;
     vm::register(py, &vm_module)?;
     m.add_submodule(&vm_module)?;
-    sys_modules.set_item("xqapi_py.vm", &vm_module)?;
+    sys_modules.set_item("xqffi.vm", &vm_module)?;
 
     Ok(())
 }

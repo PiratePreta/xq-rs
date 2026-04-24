@@ -42,13 +42,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from xqapi_py.asm import assemble_source
-from xqapi_py.vm import Vm as RustVm
-from xqapi_py.vm import XqmxModel as RustModel
-from xqapi_py.vm import XqmxSample as RustSample
-from xqcp import Problem, Types
-from xqsa import NealBackend
-from xqvm_py import XQMX, Executor, Vec, XQMXDomain, XQMXMode, program_from_xqasm
+from xquad.cp import Problem, Types
+from xquad.sa import NealBackend
+from xquad.types import XQMX, Vec, XQMXDomain
+from xquad.vm import VM, VMBackend
 
 
 def build_problem(n: int, seed: int) -> tuple[Problem, list[tuple[int, int, int]]]:
@@ -105,82 +102,38 @@ def flatten_edges(edges: list[tuple[int, int, int]]) -> list[int]:
     return out
 
 
-def run_python(programs: Any, n: int, edges: list[tuple[int, int, int]], seed: int) -> tuple[int, int, list[int]]:
-    """Full pipeline on the pure-Python reference VM."""
-    edges_vec = Vec.from_list(flatten_edges(edges))
-
-    ex = Executor()
-    ex.execute(program_from_xqasm(programs.encoder), {0: n, 1: edges_vec})
-    model = ex.state.output[0]
-    assert isinstance(model, XQMX)
-
-    backend = NealBackend(seed=seed)
-    sample = backend.solve(model).sample
-
-    ex = Executor()
-    ex.execute(program_from_xqasm(programs.verifier), {0: model, 1: sample, 2: n})
-    energy = ex.state.output[0]
-    valid = ex.state.output[1]
-
-    ex = Executor()
-    ex.execute(program_from_xqasm(programs.decoder), {0: sample, 1: n})
-    part_vec = ex.state.output[0]
-    partition = [part_vec.get(i) for i in range(n)]
-
-    return energy, valid, partition
-
-
-def _rust_model_to_xqvm_py(rust_model: RustModel) -> XQMX:
-    py_model = XQMX(
-        mode=XQMXMode.MODEL,
-        domain=XQMXDomain.BINARY,
-        size=rust_model.size,
-        rows=rust_model.rows,
-        cols=rust_model.cols,
-    )
-    for idx, coeff in rust_model.linear_items():
-        py_model.linear[idx] = coeff
-    for (i, j), coeff in rust_model.quadratic_items():
-        py_model.quadratic[i, j] = coeff
-    return py_model
-
-
-def _xqvm_py_sample_to_rust(sample: XQMX) -> RustSample:
-    values = [sample.linear.get(i, 0) for i in range(sample.size)]
-    return RustSample(domain="binary", values=values, rows=sample.rows, cols=sample.cols)
-
-
-def run_rust(programs: Any, n: int, edges: list[tuple[int, int, int]], seed: int) -> tuple[int, int, list[int]]:
-    """Full pipeline on the Rust pyo3-bound VM.
-
-    SA runs on xqvm_py types (its only supported surface); the
-    Rust path converts at the SA boundary.
-    """
+def run(
+    programs: Any, n: int, edges: list[tuple[int, int, int]], seed: int, backend: VMBackend
+) -> tuple[int, int, list[int]]:
+    """Full pipeline on the selected VM backend."""
     flat = flatten_edges(edges)
 
-    vm = RustVm()
+    vm = VM(backend=backend)
     vm.set_calldata([n, flat])
     vm.set_output_slots(1)
-    vm.run(assemble_source(programs.encoder))
-    rust_model = vm.outputs()[0]
-    assert isinstance(rust_model, RustModel)
+    vm.run(programs.encoder)
+    model = vm.outputs()[0]
+    assert isinstance(model, XQMX)
 
-    backend = NealBackend(seed=seed)
-    py_sample = backend.solve(_rust_model_to_xqvm_py(rust_model)).sample
-    rust_sample = _xqvm_py_sample_to_rust(py_sample)
+    sa_backend = NealBackend(seed=seed)
+    sample = sa_backend.solve(model).sample
 
-    vm = RustVm()
-    vm.set_calldata([rust_model, rust_sample, n])
+    vm = VM(backend=backend)
+    vm.set_calldata([model, sample, n])
     vm.set_output_slots(2)
-    vm.run(assemble_source(programs.verifier))
+    vm.run(programs.verifier)
     outs = vm.outputs()
     energy, valid = outs[0], outs[1]
 
-    vm = RustVm()
-    vm.set_calldata([rust_sample, n])
+    vm = VM(backend=backend)
+    vm.set_calldata([sample, n])
     vm.set_output_slots(1)
-    vm.run(assemble_source(programs.decoder))
-    partition = list(vm.outputs()[0])
+    vm.run(programs.decoder)
+    part_out = vm.outputs()[0]
+    if isinstance(part_out, Vec):
+        partition = [part_out.get(i) for i in range(n)]
+    else:
+        partition = list(part_out)
 
     return energy, valid, partition
 
@@ -207,8 +160,8 @@ def main() -> int:
     problem, edges = build_problem(args.n, args.seed)
     programs = problem.compile()
 
-    run = run_python if args.interpreter == "python" else run_rust
-    energy, valid, partition = run(programs, args.n, edges, args.seed)
+    backend = VMBackend.PYTHON if args.interpreter == "python" else VMBackend.RUST
+    energy, valid, partition = run(programs, args.n, edges, args.seed, backend)
     partition = canonicalize_partition(partition)
 
     result = {

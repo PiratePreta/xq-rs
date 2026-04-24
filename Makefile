@@ -15,8 +15,8 @@ all: fmt lint test
 
 # Bootstrap everything a contributor needs to use the XQuad toolchain
 # locally:
-#   - Python workspace (xqvm_py, xqcp, xqsa, xqapi) synced into .venv/
-#     with the maturin-built xqapi_py extension and the workspace .pth
+#   - Python workspace (xqvm_py, xqcp, xqsa, xqffi) synced into .venv/
+#     with the maturin-built xqffi extension and the workspace .pth
 #     so any script in the repo can `import xqcp` etc.
 #   - Rust CLI installed as the `xquad` binary under ~/.cargo/bin/ so
 #     `xquad run …`, `xquad dsm …`, etc. work from any shell.
@@ -40,13 +40,13 @@ deps-miri:
 	rustup toolchain install nightly --component miri
 	cargo +nightly miri setup
 
-# Sync the Python workspace (xqapi, xqvm_py, xqcp, xqsa) into .venv/
+# Sync the Python workspace (xqffi, xqvm_py, xqcp, xqsa) into .venv/
 # via uv. Assumes `uv` is already on $PATH; CI installs it in its
 # before_script.
 #
-# `uv sync` alone can skip rebuilding the maturin-built xqapi cdylib
+# `uv sync` alone can skip rebuilding the maturin-built xqffi cdylib
 # when Cargo source has changed but uv's editable-wheel cache is
-# still valid, leaving .venv/.../xqapi_py.*.so stale. An explicit
+# still valid, leaving .venv/.../xqffi.*.so stale. An explicit
 # `maturin develop` after sync guarantees the extension matches
 # current Rust sources — essential for local runs of
 # `make example-smoke`, `make test-python`, etc.
@@ -60,7 +60,7 @@ deps-miri:
 # root themselves. With the .pth in place they just work.
 deps-python:
 	uv sync
-	uv run --active maturin develop --manifest-path xqapi/Cargo.toml
+	uv run --active maturin develop --manifest-path xqffi/Cargo.toml
 	@.venv/bin/python -c "from pathlib import Path; import site; Path(site.getsitepackages()[0], 'xq-rs-workspace.pth').write_text(str(Path('.').resolve()))"
 
 # Point git at the repo-tracked .githooks/ directory so the pre-commit
@@ -83,7 +83,7 @@ fmt-taplo:
 	taplo fmt
 
 fmt-python:
-	uv run ruff format xqvm_py xqcp xqsa xqapi examples
+	uv run ruff format xqvm_py xqcp xqsa xqffi xquad examples
 
 fmt-check: fmt-check-rust fmt-check-taplo fmt-check-python
 
@@ -94,7 +94,7 @@ fmt-check-taplo:
 	taplo fmt --check
 
 fmt-check-python:
-	uv run ruff format --check xqvm_py xqcp xqsa xqapi examples
+	uv run ruff format --check xqvm_py xqcp xqsa xqffi xquad examples
 
 # -- Lints ------------------------------------------------------------------
 
@@ -110,7 +110,7 @@ lint-deny:
 	cargo deny check
 
 lint-python:
-	uv run ruff check xqvm_py xqcp xqsa xqapi examples
+	uv run ruff check xqvm_py xqcp xqsa xqffi xquad examples
 
 # -- Tests ------------------------------------------------------------------
 
@@ -135,8 +135,12 @@ test-doc:
 test-miri:
 	cargo +nightly miri test --workspace --all-features
 
-test-python:
-	uv run pytest xqvm_py/tests xqcp/tests xqsa/tests
+# `uv run pytest` alone skips rebuilding xqffi's maturin-built cdylib
+# when Rust sources have changed (uv's editable-wheel cache masks the
+# edit). Depend on deps-python so a fresh maturin develop runs first;
+# CI already has this via the job's before_script.
+test-python: deps-python
+	uv run --no-sync pytest xqvm_py/tests xqcp/tests xqsa/tests xquad/tests
 
 # -- Conformance ------------------------------------------------------------
 
@@ -157,14 +161,14 @@ conformance-rust:
 	cargo test -p xquad-conformance --no-default-features --features rust
 
 # spec-conformance-python shells out to `uv run python -m xqvm_py run`
-# from within the Rust test; the xqapi_py extension (maturin-built)
+# from within the Rust test; the xqffi extension (maturin-built)
 # and xqvm_py (editable) must both be installed in .venv/ first.
 conformance-python:
 	cargo test -p xquad-conformance --no-default-features --features python
 
 # -- Dev ergonomics ---------------------------------------------------------
 
-# Open a Python REPL with the xqapi_py extension fresh and the
+# Open a Python REPL with the xqffi extension fresh and the
 # workspace packages (xqvm_py, xqcp, xqsa) importable. Depends on
 # deps-python so the .so / .pth stay current; `uv run --no-sync`
 # skips the implicit sync that would otherwise revert maturin's
