@@ -4,20 +4,61 @@
 # via `include:` so each pipeline concern (lint, test, conformance,
 # docs, python) can be reasoned about on its own and edited without
 # touching the root.
+#
+# Caching strategy (see QUI-460 for context):
+#
+#   Two default cache entries per job. The first is Cargo.lock-keyed
+#   and holds the build artefacts that change with the lock (registry
+#   / git / target). The second is cargo-tools-lock-keyed and holds
+#   `.cargo/bin/` — prebuilt dev-tool binaries that only rebuild when
+#   scripts/cargo-tools.lock changes.
+#
+#   Both keys are hash-only (no `prefix:`), which makes them project-
+#   wide rather than branch-scoped: any branch whose Cargo.lock /
+#   cargo-tools.lock hash matches main's hits main's cache directly
+#   — no fallback needed for the common case. A branch that bumps
+#   either lock file cold-starts on its first pipeline; this is a
+#   deliberate tradeoff against the complexity of a cache-warmer job
+#   on main, since lock-file bumps are rare.
+#
+#   GitLab's `fallback_keys:` is exact-match, not prefix-match, so a
+#   static fallback string like `main-cargo` would never match main's
+#   hash-based key and is omitted rather than misleading.
 
 default:
     image: rust:latest
+    # Cancel in-flight pipelines on push; saves runner minutes when
+    # developers push rapidly on a WIP branch.
+    interruptible: true
     cache:
-        key:
-            files:
-                - Cargo.lock
-        paths:
-            - .cargo/registry/
-            - .cargo/git/
-            - target/
+        - key:
+              files:
+                  - Cargo.lock
+          paths:
+              - .cargo/registry/
+              - .cargo/git/
+              - target/
+        - key:
+              files:
+                  - scripts/cargo-tools.lock
+          paths:
+              - .cargo/bin/
 
 variables:
     CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
+    # Skip incremental build artefacts; they bloat the cache without
+    # a hit-rate win on CI's one-shot workloads.
+    CARGO_INCREMENTAL: "0"
+    # Faster compilations — CI doesn't debug into these binaries.
+    CARGO_PROFILE_DEV_DEBUG: "0"
+    # Coloured terminal output makes GitLab's log viewer pleasant.
+    CARGO_TERM_COLOR: "always"
+    # Fail early on sparse-registry hiccups rather than retrying 30s
+    # with no feedback.
+    CARGO_NET_RETRY: "2"
+    # Use the sparse registry protocol (default on 1.68+, belt-and-
+    # braces for older runner images).
+    CARGO_REGISTRIES_CRATES_IO_PROTOCOL: "sparse"
 
 stages:
     - lint

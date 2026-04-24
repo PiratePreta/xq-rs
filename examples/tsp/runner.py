@@ -101,14 +101,36 @@ def tour_distance(tour: list[int], distances: list[int], n: int) -> int:
 
 
 def canonicalize_tour(tour: list[int]) -> list[int]:
-    """Rotate the tour so city 0 leads. TSP tours are cyclic, so the
-    rotation has no semantic effect but makes the output stable across
-    interpreters (SA's variable-ordering heuristics can emit rotations
-    of the same cycle depending on how the BQM was built)."""
+    """Collapse a TSP tour to its canonical representation.
+
+    A Hamiltonian cycle on `n` cities has 2n equivalent orderings: `n`
+    rotations (the starting city is arbitrary) times 2 directions
+    (forward vs reverse traversal). Both equivalences are semantic
+    no-ops — same set of edges, same total distance, same energy —
+    but naive sampler output can emit any of the 2n representations.
+
+    This function picks the canonical one:
+
+    1. Rotate so city 0 leads (handles the n rotations).
+    2. Between the forward tour and its reverse, pick the lex-smaller
+       one (handles the 2 directions).
+
+    Rust and Python interpreters on different host platforms have been
+    observed to disagree on direction alone (QUI-465) due to
+    iteration-order differences in the decoder's XQMX scan; both
+    invariants (energy / tour_distance / validity) stay identical.
+    Lex-min canonicalisation closes that gap and lets
+    `make example-smoke` diff byte-for-byte against `golden.json`.
+    """
     if 0 not in tour:
         return tour
     idx = tour.index(0)
-    return tour[idx:] + tour[:idx]
+    rotated = tour[idx:] + tour[:idx]
+    if len(rotated) <= 2:
+        return rotated
+    # Reverse the tail (all cities after city 0) so city 0 still leads.
+    reversed_direction = [rotated[0]] + rotated[:0:-1]
+    return min(rotated, reversed_direction)
 
 
 def run(programs: Any, n: int, distances: list[int], seed: int, backend: VMBackend) -> tuple[int, int, list[int]]:
