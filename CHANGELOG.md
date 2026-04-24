@@ -73,8 +73,8 @@ Five Python distributions on **PyPI**:
   [`scripts/check-atomic-spec-mr.sh`](scripts/check-atomic-spec-mr.sh))
   — VM-semantics MRs must touch `spec` + `xqvm` + `xqvm_py` +
   `conformance` in the same MR. Enforced by the
-  `lint:atomic-spec-mr` CI job; exempt one-sided fixes via
-  `[atomic-spec-exempt]` in a commit message.
+  `lint:atomic-spec-mr` CI job; exempt one-sided fixes via an
+  `Atomic-Spec-Exempt: <reason>` commit trailer.
 
 ### Changed
 

@@ -29,11 +29,12 @@
 #     HEAD_REF = HEAD.
 #
 # Escape hatch:
-#   If a commit message in the MR range contains the token
-#   [atomic-spec-exempt], the guard is bypassed. Use this for
-#   deliberately one-sided changes (e.g. a Python-only fix that
-#   aligns to existing Rust behaviour) and spell the reason out in
-#   the commit body so reviewers can tell.
+#   If a commit message in the MR range carries a git-style trailer
+#   `Atomic-Spec-Exempt: <reason>` on its own line, the guard is
+#   bypassed. Use this for deliberately one-sided changes (e.g. a
+#   Python-only fix that aligns to existing Rust behaviour). The
+#   trailer format is deliberate — prose mentions of the token in a
+#   commit body don't accidentally bypass the guard.
 #
 # Exit codes:
 #   0  — pass (zero layers touched, all four touched, or exempt)
@@ -68,8 +69,9 @@ fi
 
 # --- Escape hatch: commit-message exemption --------------------------------
 
-if git log --format=%B "${BASE_REF}..${HEAD_REF}" | grep -qF '[atomic-spec-exempt]'; then
-    echo "guard: [atomic-spec-exempt] present in a commit message — bypassed"
+if git log --format=%B "${BASE_REF}..${HEAD_REF}" \
+    | grep -Eq '^[[:space:]]*Atomic-Spec-Exempt:[[:space:]]*[^[:space:]]'; then
+    echo "guard: Atomic-Spec-Exempt trailer present in a commit message — bypassed"
     exit 0
 fi
 
@@ -167,6 +169,9 @@ echo "  xqvm_py     (xqvm_py/{executor,opcodes,xqmx,state,vector,..}.py): $([[ $
 echo "  conformance (conformance/{vectors/**,opcodes.yaml})             : $([[ ${has_conformance} -eq 1 ]] && echo '✓' || echo '✗')"
 echo ""
 echo "If this MR is deliberately one-sided (e.g. a Python-only fix aligning to"
-echo "existing Rust behaviour), add [atomic-spec-exempt] to a commit message and"
-echo "state the reason. See docs/xquad-development-workflow.md for the contract."
+echo "existing Rust behaviour), add a commit-message trailer of the form:"
+echo ""
+echo "    Atomic-Spec-Exempt: <reason>"
+echo ""
+echo "See docs/xquad-development-workflow.md for the contract."
 exit 1

@@ -88,10 +88,25 @@ exempt cases:
 - **Conformance-only coverage addition.** A new vector exercises
   existing semantics. No spec / impl changes.
 
-**To take an exemption, add `[atomic-spec-exempt]` to a commit
-message in the MR** and explain the reason in the commit body or the
-MR description. The guard scans all commit messages in the MR range
-and bypasses when it finds the token. Reviewers should see the
+**To take an exemption, add a commit-message trailer of the form
+`Atomic-Spec-Exempt: <reason>` on its own line.** The trailer format
+mirrors `Signed-off-by:` / `Co-authored-by:` — unambiguous to the
+guard, visible to reviewers, and impossible to trigger accidentally
+from prose that happens to mention the token. Example:
+
+```
+Align Python SSMX default to Rust's [-1, -1, …] initialisation.
+
+Python was shipping empty-dict samples where Rust used vec![-1; size];
+this aligns the Python side. No Rust change needed.
+
+Atomic-Spec-Exempt: one-sided Python fix bringing impl in line with
+  existing Rust behaviour — no semantics change, no Rust diff, no
+  new vector.
+```
+
+The guard scans every commit message in the MR range and bypasses
+when it finds at least one trailer. Reviewers should see the
 exemption and confirm the rationale holds; there is no approval
 process beyond review.
 
@@ -102,7 +117,7 @@ coherent change:
 
 1. Open an MR from `experimentation` to `main`.
 2. The MR must either respect the atomic spec-MR rule directly or
-   carry `[atomic-spec-exempt]` with justification.
+   carry an `Atomic-Spec-Exempt:` trailer with justification.
 3. The MR body explicitly lists each ticket it consumes (QUI-*), so
    Linear status moves in lockstep with git state.
 4. Squash-merge on green CI. `experimentation` then rebases onto

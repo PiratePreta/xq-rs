@@ -5,9 +5,9 @@
   "n": 4,
   "tour": [
     0,
-    3,
+    2,
     1,
-    2
+    3
   ],
   "tour_distance": 150,
   "valid": 1

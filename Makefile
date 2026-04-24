@@ -29,12 +29,21 @@ xquad: deps-python
 
 # -- Dependencies -----------------------------------------------------------
 
+# Install (or verify) the pinned cargo-based dev tools. Versions come
+# from scripts/cargo-tools.lock; the install script short-circuits
+# when a tool is already on PATH at the pinned version so a warm
+# local environment — or a CI cache hit — pays zero cost. First-
+# install goes through cargo-binstall (prebuilt binaries in seconds)
+# with a cargo-install-from-source fallback.
 deps: deps-docs
 	rustup component add clippy rustfmt
-	cargo install taplo-cli cargo-deny cargo-nextest --locked
+	bash scripts/install-cargo-tools.sh
 
+# `deps-docs` is a no-op alias for `deps` now that mdbook / mdbook-
+# mermaid are bundled into the single tool-install flow. Kept as a
+# phony target so CI jobs referencing `deps-docs` don't break.
 deps-docs:
-	cargo install mdbook mdbook-mermaid --locked
+	bash scripts/install-cargo-tools.sh
 
 deps-miri:
 	rustup toolchain install nightly --component miri
