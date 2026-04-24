@@ -68,6 +68,13 @@ Five Python distributions on **PyPI**:
   distribution.
 - **Release pipeline** (`.gitlab/ci/release.yml`, `RELEASING.md`) —
   tag-triggered publishing to crates.io + PyPI with per-MR dry-runs.
+- **Atomic spec-MR development discipline**
+  ([`docs/xquad-development-workflow.md`](docs/xquad-development-workflow.md),
+  [`scripts/check-atomic-spec-mr.sh`](scripts/check-atomic-spec-mr.sh))
+  — VM-semantics MRs must touch `spec` + `xqvm` + `xqvm_py` +
+  `conformance` in the same MR. Enforced by the
+  `lint:atomic-spec-mr` CI job; exempt one-sided fixes via
+  `[atomic-spec-exempt]` in a commit message.
 
 ### Changed
 
