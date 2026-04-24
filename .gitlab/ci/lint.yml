@@ -39,3 +39,18 @@ lint:deny:
         - *install-deps
     script:
         - make lint-deny
+
+# Atomic spec-MR guard — enforces the two-impl development discipline
+# documented in docs/xquad-development-workflow.md. VM-semantics MRs
+# must touch spec + xqvm + xqvm_py + conformance in the same MR.
+# Runs on merge requests only; the guard is about MR shape, not about
+# branch-level pushes.
+lint:atomic-spec-mr:
+    stage: lint
+    image: alpine:3
+    rules:
+        - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    before_script:
+        - apk add --no-cache bash git
+    script:
+        - bash scripts/check-atomic-spec-mr.sh "${CI_MERGE_REQUEST_DIFF_BASE_SHA}" HEAD
