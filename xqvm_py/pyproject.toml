@@ -5,6 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "xqvm_py"
 description = "Python reference implementation of the X-Quadratic Virtual Machine (conformance oracle)."
+readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "AGPL-3.0-or-later" }
 dynamic = [ "version" ]
