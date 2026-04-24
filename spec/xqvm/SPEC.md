@@ -242,9 +242,11 @@ These instructions allocate typed objects into registers.
 
 | Code | Mnemonic | Arguments | Stack effect | Register effect | Interpretation |
 |------|----------|-----------|--------------|-----------------|----------------|
-| `0x43` | `BSMX` | `reg` | `[..., size] → [...]` | `write` — `reg ← xqmx(sample, binary, size)` | Pop `size`. Create a binary `[0,1]` sample XQMX with `size` variables. Linear table stores variable assignments. Write to `reg`. |
-| `0x44` | `SSMX` | `reg` | `[..., size] → [...]` | `write` — `reg ← xqmx(sample, spin, size)` | Pop `size`. Create a spin `[-1,+1]` sample XQMX. Write to `reg`. |
-| `0x45` | `XSMX` | `reg` | `[..., size, k] → [...]` | `write` — `reg ← xqmx(sample, discrete(k), size)` | Pop `k`, then `size`. Create a discrete `[-k,...,k-1]` sample XQMX. Error if `k < 2`. Write to `reg`. |
+| `0x43` | `BSMX` | `reg` | `[..., size] → [...]` | `write` — `reg ← xqmx(sample, binary, size)` | Pop `size`. Create a binary `[0,1]` sample XQMX with `size` variables; every position initialised to `0`. Linear table stores variable assignments. Write to `reg`. |
+| `0x44` | `SSMX` | `reg` | `[..., size] → [...]` | `write` — `reg ← xqmx(sample, spin, size)` | Pop `size`. Create a spin `[-1,+1]` sample XQMX; every position initialised to `-1` (a valid spin state). Write to `reg`. |
+| `0x45` | `XSMX` | `reg` | `[..., size, k] → [...]` | `write` — `reg ← xqmx(sample, discrete(k), size)` | Pop `k`, then `size`. Create a discrete `[-k,...,k-1]` sample XQMX; every position initialised to `0`. Error if `k < 2`. Write to `reg`. |
+
+Sample allocation is dense: after `BSMX`/`SSMX`/`XSMX` every position `i` in `[0, size)` holds its domain-default value. Reads via `GETLINE` see that default until a matching write overrides it. This mirrors the Rust runtime's `vec![default; size]` storage; the Python reference VM pre-populates the equivalent sparse entries (QUI-453).
 
 #### Vec Allocators
 

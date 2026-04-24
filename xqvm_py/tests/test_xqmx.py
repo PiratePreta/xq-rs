@@ -75,11 +75,13 @@ class TestXQMXConstruction:
         assert x.size == 10
 
     def test_spin_sample(self):
-        """spin_sample creates correct XQMX."""
+        """spin_sample creates correct XQMX with every position at -1 (QUI-453)."""
         x = XQMX.spin_sample(size=12)
         assert x.mode == XQMXMode.SAMPLE
         assert x.domain == XQMXDomain.SPIN
         assert x.size == 12
+        assert all(x.get_linear(i) == -1 for i in range(12))
+        assert len(x.linear) == 12
 
     def test_discrete_sample(self):
         """discrete_sample creates correct XQMX."""

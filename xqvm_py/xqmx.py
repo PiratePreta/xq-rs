@@ -127,13 +127,20 @@ class XQMX:
 
     @classmethod
     def spin_sample(cls, size: int, rows: int = 0, cols: int = 0) -> XQMX:
-        """Create a spin [-1,+1] sample XQMX."""
+        """Create a spin [-1,+1] sample XQMX with all positions at -1.
+
+        Pre-populates `linear` so a fresh sample is a valid spin state,
+        matching Rust's `exec_ssmx` (`vec![-1; size]`). Binary and
+        discrete samples have a default of 0, which is already the
+        sparse-dict fallback — only spin needs pre-population.
+        """
         return cls(
             mode=XQMXMode.SAMPLE,
             domain=XQMXDomain.SPIN,
             size=size,
             rows=rows,
             cols=cols,
+            linear={i: -1 for i in range(size)},
         )
 
     @classmethod
