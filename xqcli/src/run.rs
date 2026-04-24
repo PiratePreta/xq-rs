@@ -138,11 +138,13 @@ pub(crate) fn exec(args: Args) -> miette::Result<()> {
 /// Print VM output slots and remaining stack to stdout.
 fn print_results(vm: &Vm) {
     let outputs = vm.outputs();
-    let has_outputs = outputs.iter().any(|v| v != &RegVal::default());
+    let has_outputs = outputs.iter().any(|v| !matches!(v, RegVal::Unset));
     if has_outputs {
         println!("outputs:");
         for (i, v) in outputs.iter().enumerate() {
-            println!("  [{i}] = {v:?}");
+            if !matches!(v, RegVal::Unset) {
+                println!("  [{i}] = {v:?}");
+            }
         }
     }
 
