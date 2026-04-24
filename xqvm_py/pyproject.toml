@@ -9,11 +9,11 @@ requires-python = ">=3.13"
 license = { text = "AGPL-3.0-or-later" }
 dynamic = [ "version" ]
 dependencies = [
-    "xqapi_py",
+    "xqffi",
 ]
 
 [tool.uv.sources]
-xqapi_py.workspace = true
+xqffi.workspace = true
 
 [tool.hatch.version]
 path = "__init__.py"

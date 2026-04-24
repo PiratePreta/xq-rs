@@ -4,9 +4,10 @@ requires-python = ">=3.13"
 
 [manifest]
 members = [
-    "xqapi-py",
     "xqcp",
+    "xqffi",
     "xqsa",
+    "xquad",
     "xqvm-py",
 ]
 
@@ -287,23 +288,19 @@ wheels = [
 ]
 
 [[package]]
-name = "xqapi-py"
-source = { editable = "xqapi" }
-
-[[package]]
 name = "xqcp"
 version = "0.1.0"
 source = { editable = "xqcp" }
 dependencies = [
-    { name = "xqapi-py" },
     { name = "xqvm-py" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "xqapi-py", editable = "xqapi" },
-    { name = "xqvm-py", editable = "xqvm_py" },
-]
+requires-dist = [{ name = "xqvm-py", editable = "xqvm_py" }]
+
+[[package]]
+name = "xqffi"
+source = { editable = "xqffi" }
 
 [[package]]
 name = "xqsa"
@@ -321,11 +318,30 @@ requires-dist = [
 ]
 
 [[package]]
-name = "xqvm-py"
-source = { editable = "xqvm_py" }
+name = "xquad"
+version = "0.1.0"
+source = { editable = "xquad" }
 dependencies = [
-    { name = "xqapi-py" },
+    { name = "xqcp" },
+    { name = "xqffi" },
+    { name = "xqsa" },
+    { name = "xqvm-py" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "xqapi-py", editable = "xqapi" }]
+requires-dist = [
+    { name = "xqcp", editable = "xqcp" },
+    { name = "xqffi", editable = "xqffi" },
+    { name = "xqsa", editable = "xqsa" },
+    { name = "xqvm-py", editable = "xqvm_py" },
+]
+
+[[package]]
+name = "xqvm-py"
+source = { editable = "xqvm_py" }
+dependencies = [
+    { name = "xqffi" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "xqffi", editable = "xqffi" }]

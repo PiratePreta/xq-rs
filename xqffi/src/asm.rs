@@ -15,7 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `xqapi_py.asm` — `PyO3` bindings around the Rust `xqasm` crate.
+//! `xqffi.asm` — `PyO3` bindings around the Rust `xqasm` crate.
 //!
 //! Three entry points:
 //!
@@ -141,9 +141,27 @@ fn disassemble(bytecode: &[u8]) -> PyResult<String> {
     String::from_utf8(out).map_err(|e| PyValueError::new_err(format!("disassembly not UTF-8: {e}")))
 }
 
+/// Count decoded instructions in raw wire-format bytecode.
+///
+/// # Errors
+///
+/// Raises `ValueError` if the bytecode cannot be decoded.
+#[pyfunction]
+fn instruction_count(bytecode: &[u8]) -> PyResult<usize> {
+    let program = xqvm::Program::decode(bytecode)
+        .map_err(|e| PyValueError::new_err(format!("decode error: {e:?}")))?;
+    let mut stream = xqvm::InstructionStream::from_program(&program);
+    let mut n: usize = 0;
+    while stream.next().is_some() {
+        n += 1;
+    }
+    Ok(n)
+}
+
 pub(crate) fn register(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_xqasm, m)?)?;
     m.add_function(wrap_pyfunction!(assemble_source, m)?)?;
     m.add_function(wrap_pyfunction!(disassemble, m)?)?;
+    m.add_function(wrap_pyfunction!(instruction_count, m)?)?;
     Ok(())
 }

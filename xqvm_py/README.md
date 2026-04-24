@@ -21,7 +21,7 @@ technical specification.
 - Pure-Python **executor**, **state** model, **opcodes**, **xqmx**
   (sparse quadratic matrix), **vector**, and **tracer**.
 - **No** assembler or disassembler: the Rust `xqasm` crate is the only
-  implementation, exposed to Python via `xqapi_py.asm` (pyo3). Tests
+  implementation, exposed to Python via `xqffi.asm` (pyo3). Tests
   and the CLI shim call
   [`xqvm_py.program_from_xqasm`](program.py) to turn `.xqasm` text
   into an executable `Program`.
@@ -49,7 +49,7 @@ xqvm_py/                  <-- this directory IS the package (flat layout)
 From the xquad workspace root:
 
 ```sh
-uv sync                                       # installs xqvm_py editable + xqapi_py via maturin
+uv sync                                       # installs xqvm_py editable + xqffi via maturin
 uv run pytest xqvm_py/tests                   # run the full test suite
 echo "PUSH 5
 PUSH 3

@@ -62,8 +62,8 @@ Once per environment, run the baseline local-setup target:
 make xquad
 ```
 
-This syncs the Python workspace (`xqvm_py`, `xqcp`, `xqsa`, `xqapi`) into
-`.venv/`, builds the `xqapi_py` pyo3 extension via maturin, writes a workspace
+This syncs the Python workspace (`xqvm_py`, `xqcp`, `xqsa`, `xqffi`) into
+`.venv/`, builds the `xqffi` pyo3 extension via maturin, writes a workspace
 `.pth` so scripts anywhere in the repo can `import xqcp` / `xqsa` / `xqvm_py`
 naturally, and installs the `xquad` CLI binary under `~/.cargo/bin/`.
 
@@ -76,8 +76,9 @@ make repl
 Inside the REPL:
 
 ```python
-from xqapi_py.vm import Vm, XqmxModel, XqmxSample
-from xqapi_py.asm import parse_xqasm, assemble_source, disassemble
+from xquad.vm import Vm, XqmxModel, XqmxSample
+from xquad.asm import parse_xqasm, assemble_source, disassemble
+from xquad.program import Program
 from xqcp import Problem, Types
 from xqsa import NealBackend
 ```

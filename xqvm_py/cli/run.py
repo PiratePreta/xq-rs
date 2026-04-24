@@ -18,14 +18,14 @@
 """Implementation of the ``python -m xqvm_py run`` subcommand.
 
 Supports both ``.xqasm`` source and ``.xqb`` bytecode input. Both paths
-go through the Rust assembler via ``xqapi_py.asm``:
+go through the Rust assembler via ``xqffi.asm``:
 
 * ``.xqasm`` — text is passed directly to ``program_from_xqasm``.
 * ``.xqb``  — bytes are first disassembled back to ``.xqasm`` text (via
-  ``xqapi_py.asm.disassemble``) and then parsed. The disassembly output
+  ``xqffi.asm.disassemble``) and then parsed. The disassembly output
   is not fully round-trippable as source today (it carries pc offsets
   and ``.N`` labels); programmatic ``.xqb`` support will be revisited
-  alongside the Phase 5 xqapi work.
+  alongside the Phase 5 xqffi work.
 
 xqvm-py ships no Python assembler of its own — the previous
 ``xqvm.assembler`` tree was removed in QUI-440.
@@ -48,7 +48,7 @@ def _load_program(path: Path, *, text: bool) -> Program:
         source = path.read_text(encoding="utf-8")
         return program_from_xqasm(source, name=path.stem)
     if path.suffix == ".xqb":
-        from xqapi_py.asm import disassemble
+        from xqffi.asm import disassemble
 
         source = disassemble(path.read_bytes())
         return program_from_xqasm(source, name=path.stem)

@@ -3,16 +3,22 @@ requires      = [ "hatchling" ]
 build-backend = "hatchling.build"
 
 [project]
-name = "xqcp"
-description = "High-level constraint programming DSL compiling to XQVM assembly."
+name = "xquad"
+description = "Umbrella meta-package for the XQuad toolchain — re-exports xqffi, xqcp, xqsa under a unified namespace."
 requires-python = ">=3.13"
 license = { text = "AGPL-3.0-or-later" }
 version = "0.1.0"
 dependencies = [
+    "xqffi",
+    "xqcp",
+    "xqsa",
     "xqvm_py",
 ]
 
 [tool.uv.sources]
+xqffi.workspace   = true
+xqcp.workspace    = true
+xqsa.workspace    = true
 xqvm_py.workspace = true
 
 [tool.hatch.build.targets.wheel]
@@ -23,6 +29,6 @@ exclude = [
 ]
 
 [tool.hatch.metadata]
-# The package directory IS the project root; flat layout mirrors
-# xqvm_py (see its pyproject.toml for the rationale).
+# Flat layout: the package directory IS the project root, matching the
+# rest of the workspace (xqvm_py / xqcp / xqsa).
 allow-direct-references = true

@@ -1,6 +1,6 @@
 [package]
-name                 = "xqapi-py"
-description          = "PyO3 bindings exposing xqvm + xqasm to Python; produces the `xqapi_py` Python extension"
+name                 = "xqffi"
+description          = "PyO3 FFI bindings exposing xqvm + xqasm to Python; produces the `xqffi` Python extension"
 version              = "0.1.0"
 edition              = "2024"
 license.workspace    = true
@@ -11,7 +11,7 @@ publish              = false
 workspace = true
 
 [lib]
-name       = "xqapi_py"
+name       = "xqffi"
 crate-type = [ "cdylib", "rlib" ]
 
 [dependencies]

@@ -3,13 +3,13 @@ requires      = [ "maturin>=1.7,<2" ]
 build-backend = "maturin"
 
 [project]
-name            = "xqapi_py"
-description     = "PyO3 bindings exposing the XQuad Rust runtime (xqvm + xqasm) to Python"
+name            = "xqffi"
+description     = "PyO3 FFI bindings exposing the XQuad Rust runtime (xqvm + xqasm) to Python"
 requires-python = ">=3.13"
 license         = { text = "AGPL-3.0-or-later" }
 dynamic         = [ "version" ]
 
 [tool.maturin]
 manifest-path = "Cargo.toml"
-module-name   = "xqapi_py"
+module-name   = "xqffi"
 strip         = true

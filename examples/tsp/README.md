@@ -37,8 +37,8 @@ Flags:
    - Objective: sum of distances between consecutive positions in the
      tour. One-hot row/column penalties (weight 100) pin each city to
      exactly one position and each position to exactly one city.
-2. **Assemble** — `xqapi_py.asm.assemble_source` (Python path) /
-   `xqapi_py.asm.parse_xqasm` (via `program_from_xqasm`) turns the
+2. **Assemble** — `xquad.asm.assemble_source` (Python path) /
+   `xquad.asm.parse_xqasm` (via `program_from_xqasm`) turns the
    `.xqasm` text into bytecode or a `Program` dataclass.
 3. **Encode** — run the encoder program on the chosen VM to produce
    the fully-populated `XqmxModel`.

@@ -15,7 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `xqapi_py.vm` — `PyO3` bindings around [`xqvm::Vm`].
+//! `xqffi.vm` — `PyO3` bindings around [`xqvm::Vm`].
 //!
 //! Exposes three Python classes:
 //!
@@ -31,11 +31,6 @@
 //! Calldata is now heterogeneous: each element may be an `int`, a
 //! `list[int]` (mapped to `RegVal::VecInt`), an `XqmxModel`, or an
 //! `XqmxSample`. `outputs()` mirrors the inverse dispatch.
-//!
-//! **Note** (tracked in QUI-459): `Vm::outputs()` currently flattens
-//! unset slots to `Int(0)` and cannot distinguish "never written" from
-//! "explicitly zero". When QUI-459 lands, the Python surface here will
-//! change to emit `None` for genuinely unset slots.
 
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -44,7 +39,7 @@ use pyo3::types::PyList;
 use xqvm::{Domain, Program, RegVal, Vm, XqmxModel, XqmxSample};
 
 /// Python wrapper around [`xqvm::XqmxModel`].
-#[pyclass(name = "XqmxModel", module = "xqapi_py.vm", skip_from_py_object)]
+#[pyclass(name = "XqmxModel", module = "xqffi.vm", skip_from_py_object)]
 #[derive(Clone)]
 struct PyXqmxModel {
     inner: XqmxModel,
@@ -64,13 +59,11 @@ impl PyXqmxModel {
         Ok(Self { inner })
     }
 
-    /// Domain name: `"binary"`, `"spin"`, or `"discrete"`.
     #[getter]
     fn domain(&self) -> &'static str {
         domain_name(&self.inner.domain)
     }
 
-    /// For `"discrete"` models, the `k` parameter; otherwise `None`.
     #[getter]
     fn k(&self) -> Option<i64> {
         match &self.inner.domain {
@@ -126,19 +119,15 @@ impl PyXqmxModel {
 
     fn __repr__(&self) -> String {
         format!(
-            "XqmxModel(domain={}, size={}, rows={}, cols={}, linear_len={}, quadratic_len={})",
+            "XqmxModel(domain={}, size={})",
             domain_name(&self.inner.domain),
             self.inner.size,
-            self.inner.rows,
-            self.inner.cols,
-            self.inner.linear_len(),
-            self.inner.quadratic_len(),
         )
     }
 }
 
 /// Python wrapper around [`xqvm::XqmxSample`].
-#[pyclass(name = "XqmxSample", module = "xqapi_py.vm", skip_from_py_object)]
+#[pyclass(name = "XqmxSample", module = "xqffi.vm", skip_from_py_object)]
 #[derive(Clone)]
 struct PyXqmxSample {
     inner: XqmxSample,
@@ -196,17 +185,15 @@ impl PyXqmxSample {
 
     fn __repr__(&self) -> String {
         format!(
-            "XqmxSample(domain={}, len={}, rows={}, cols={})",
+            "XqmxSample(domain={}, len={})",
             domain_name(&self.inner.domain),
             self.inner.values.len(),
-            self.inner.rows,
-            self.inner.cols,
         )
     }
 }
 
 /// Python wrapper around [`xqvm::Vm`].
-#[pyclass(name = "Vm", module = "xqapi_py.vm")]
+#[pyclass(name = "Vm", module = "xqffi.vm")]
 struct PyVm {
     inner: Vm,
 }
@@ -323,7 +310,6 @@ fn py_to_regval(obj: &Bound<'_, PyAny>) -> PyResult<RegVal> {
     if let Ok(sample) = obj.extract::<PyRef<'_, PyXqmxSample>>() {
         return Ok(RegVal::Sample(sample.inner.clone()));
     }
-    // Python bools are also int-extractable; steer them to RegVal::Int.
     if let Ok(n) = obj.extract::<i64>() {
         return Ok(RegVal::Int(n));
     }

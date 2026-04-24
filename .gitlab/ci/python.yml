@@ -1,9 +1,10 @@
 # Python workspace lint + test suite.
 #
-# The xquad Python tree lives in four packages: xqvm_py (VM reference),
-# xqcp (DSL), xqsa (solver adapters), and xqapi (pyo3 bindings). All
-# four are managed as a single uv workspace (see root pyproject.toml);
-# `uv sync` installs them editable + builds xqapi's cdylib via maturin.
+# The xquad Python tree lives in five packages: xqvm_py (VM reference),
+# xqcp (DSL), xqsa (solver adapters), xqffi (pyo3 bindings), and xquad
+# (umbrella meta-package). All are managed as a single uv workspace
+# (see root pyproject.toml); `uv sync` installs them editable + builds
+# xqffi's cdylib via maturin.
 
 .install-uv: &install-uv
     - curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -24,3 +25,35 @@ test:python:
         - *install-uv
     script:
         - make test-python
+
+# Smoke-test the xquad umbrella package: a single `import xquad` should
+# resolve every subnamespace and exercise the encode -> execute -> sample
+# pipeline. Catches regressions where a peer package's public surface
+# changes without the umbrella re-export keeping up.
+test:xquad:
+    stage: test
+    before_script:
+        - *install-uv
+    script:
+        - |
+            uv run python - <<'PY'
+            import xquad
+            from xquad import asm, vm, cp, sa, types
+            # Peer-identity: re-export, not copy.
+            import xqcp as _cp
+            import xqsa as _sa
+            import xqvm_py.xqmx as _xqmx
+            import xqvm_py.vector as _vec
+            assert cp.Problem is _cp.Problem
+            assert sa.NealBackend is _sa.NealBackend
+            assert types.XQMX is _xqmx.XQMX
+            assert types.Vec is _vec.Vec
+            assert types.triu is _xqmx.triu
+            # End-to-end: run a trivial program through the unified VM.
+            src = "PUSH 7\nPUSH 5\nADD\nSTOW r0\nPUSH 0\nOUTPUT r0\nHALT\n"
+            v = vm.VM(backend=vm.VMBackend.RUST)
+            v.set_output_slots(1)
+            v.run(src)
+            assert v.outputs() == [12], v.outputs()
+            print("xquad umbrella smoke test OK")
+            PY
