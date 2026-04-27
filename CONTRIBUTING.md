@@ -62,25 +62,45 @@ make test-miri        # cargo +nightly miri test (requires make deps-miri)
 
 ## Commits
 
-- Subject line: 50 characters or fewer, written in the imperative mood ("Add feature", not "Added feature")
+All commit messages must follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+
+**Scope** is optional. When used, it should be the crate or package name (e.g. `xqvm`, `xqcp`, `conformance`).
+
+**Rules:**
+
+- Subject line: imperative mood, lowercase start, no trailing period, max 72 characters
 - Separate subject from body with a blank line
 - Body: wrap at 72 characters; explain *what* and *why*, not *how*
-- Reference issues at the end of the body where applicable:
-  - `Fixes QUI-NNN` — closes a bug report
-  - `Implements QUI-NNN` — closes a feature request
-  - `Reverts QUI-NNN` — references a revert
-- Each commit is a logical cohesive change, which should pass tests and lints.
+- Footer: `Fixes QUI-NNN` or `Implements QUI-NNN` to link Linear tickets
+- Breaking changes: append `!` after type/scope (e.g. `feat(xqvm)!: remove deprecated API`) or add a `BREAKING CHANGE:` footer
+- Each commit is a logical cohesive change, which should pass tests and lints
+
+A `commit-msg` hook validates the format automatically. Install hooks with:
+
+```sh
+git config core.hooksPath .githooks
+```
 
 Example:
 
 ```
-Add opcode encoding for single-qubit gates
+fix(xqasm): handle forward label references in nested loops
 
-Introduce the initial set of single-qubit gate opcodes to the bytecode
-definition. Each opcode maps to a standard gate identifier and carries
-a target qubit operand.
+The two-pass label resolver was not accounting for label offsets
+inside nested RANGE blocks, causing incorrect jump targets when
+a forward reference crossed a loop boundary.
 
-Implements QUI-12
+Fixes QUI-456
 ```
 
 ## Semver Compliance
