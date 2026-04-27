@@ -26,7 +26,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use xquad_conformance::{Impl, check, load_vector, run_python, run_rust, verify_bytecode_fresh};
+use xquad_conformance::{Impl, check, load_vector, run_python, run_rust};
 
 fn main() -> ExitCode {
     let args = Args::parse_env();
@@ -54,11 +54,6 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        if let Err(e) = verify_bytecode_fresh(&vector) {
-            eprintln!("[xqb] {category}/{name}: {e}");
-            failures += 1;
-            continue;
-        }
         for &imp in impls {
             total += 1;
             let outcome = match imp {

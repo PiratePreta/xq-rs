@@ -21,10 +21,12 @@
 //! the form `<category>/<name>/` containing:
 //!
 //! - `program.xqasm` — assembly source (canonical, human-readable).
-//! - `program.xqb` — assembled bytecode (checked in; re-assembled by the
-//!   harness and `cmp`'d to catch assembler drift).
 //! - `inputs.json` — `{"calldata": [i64, ...]}`.
 //! - `expected.json` — `{"outputs": [i64|null, ...], "final_stack": [i64, ...]}`.
+//!
+//! The harness assembles `program.xqasm` in-process for every run.
+//! Encoding correctness is owned by the `xqasm` crate's own test suite,
+//! so no pre-assembled bytecode artifact is committed.
 //!
 //! The Rust runner ([`run_rust`]) executes the program in-process via
 //! [`xqvm::Vm`]. The Python runner ([`run_python`]) shells out to
@@ -95,8 +97,6 @@ pub struct Vector {
     pub dir: PathBuf,
     /// Contents of `program.xqasm`.
     pub program_xqasm: String,
-    /// Contents of `program.xqb` (canonical committed bytecode).
-    pub program_xqb: Vec<u8>,
     /// Parsed `inputs.json`.
     pub inputs: Inputs,
     /// Parsed `expected.json`.
@@ -111,13 +111,12 @@ fn conformance_root() -> PathBuf {
 /// Load a vector by `<category>/<name>` relative path segments.
 ///
 /// # Errors
-/// Returns any I/O error reading the four required files, or a
+/// Returns any I/O error reading the three required files, or a
 /// [`io::Error`] wrapping a JSON parse failure for `inputs.json` or
 /// `expected.json`.
 pub fn load_vector(category: &str, name: &str) -> io::Result<Vector> {
     let dir = conformance_root().join("vectors").join(category).join(name);
     let program_xqasm = fs::read_to_string(dir.join("program.xqasm"))?;
-    let program_xqb = fs::read(dir.join("program.xqb"))?;
     let inputs: Inputs = serde_json::from_str(&fs::read_to_string(dir.join("inputs.json"))?)
         .map_err(io::Error::other)?;
     let expected: Expected = serde_json::from_str(&fs::read_to_string(dir.join("expected.json"))?)
@@ -127,32 +126,9 @@ pub fn load_vector(category: &str, name: &str) -> io::Result<Vector> {
         name: name.to_owned(),
         dir,
         program_xqasm,
-        program_xqb,
         inputs,
         expected,
     })
-}
-
-/// Re-assemble `program.xqasm` and compare to the committed `program.xqb`.
-///
-/// Any mismatch means the committed bytecode is stale relative to the
-/// canonical assembly source — either a known-breaking assembler change
-/// (needs vector regeneration) or an unintended assembler drift (a bug).
-///
-/// # Errors
-/// Returns an error message on assembly failure or bytecode mismatch.
-pub fn verify_bytecode_fresh(vector: &Vector) -> Result<(), String> {
-    let program = xqasm::assemble_source(&vector.program_xqasm)
-        .map_err(|e| format!("assemble_source failed: {e}"))?;
-    let reencoded = program.encode();
-    if reencoded != vector.program_xqb {
-        return Err(format!(
-            "program.xqb is stale: {} bytes committed, {} bytes re-assembled",
-            vector.program_xqb.len(),
-            reencoded.len()
-        ));
-    }
-    Ok(())
 }
 
 /// Execute the vector against the in-process Rust VM.
@@ -313,13 +289,13 @@ pub enum Impl {
     Python,
 }
 
-/// End-to-end: load a vector, verify bytecode freshness, run the chosen
-/// impl, compare to expected. The call site is a single-line test body;
-/// any failure panics with a specific message.
+/// End-to-end: load a vector, run the chosen impl, compare to expected.
+/// The call site is a single-line test body; any failure panics with a
+/// specific message.
 ///
 /// # Panics
-/// Panics when the vector cannot be loaded, bytecode is stale, the
-/// chosen runtime fails, or the outcome diverges from `expected.json`.
+/// Panics when the vector cannot be loaded, the chosen runtime fails,
+/// or the outcome diverges from `expected.json`.
 #[expect(
     clippy::panic,
     reason = "test-harness entry point: panic is the expected failure channel for #[test]"
@@ -327,8 +303,6 @@ pub enum Impl {
 pub fn check_vector(category: &str, name: &str, imp: Impl) {
     let vector = load_vector(category, name)
         .unwrap_or_else(|e| panic!("load_vector({category}/{name}): {e}"));
-    verify_bytecode_fresh(&vector)
-        .unwrap_or_else(|e| panic!("bytecode freshness check failed for {category}/{name}: {e}"));
     let outcome = match imp {
         Impl::Rust => run_rust(&vector),
         Impl::Python => run_python(&vector),
