@@ -136,7 +136,7 @@ pub fn load_vector(category: &str, name: &str) -> io::Result<Vector> {
 /// # Errors
 /// Returns an error message if assembly, VM setup, or execution fails.
 pub fn run_rust(vector: &Vector) -> Result<Outcome, String> {
-    use xqvm::{RegVal, Vm};
+    use xqvm::RegVal;
 
     let program = xqasm::assemble_source(&vector.program_xqasm)
         .map_err(|e| format!("assemble_source failed: {e}"))?;
@@ -148,12 +148,36 @@ pub fn run_rust(vector: &Vector) -> Result<Outcome, String> {
         .copied()
         .map(RegVal::Int)
         .collect();
+
+    let outcome = run_rust_program(&program, &calldata, vector.inputs.output_slots)?;
+
+    // Bytecode round-trip: encode → decode → execute and verify parity.
+    let bytecode = program.encode();
+    let decoded =
+        xqvm::Program::decode(&bytecode).map_err(|e| format!("bytecode decode failed: {e:?}"))?;
+    let bc_outcome = run_rust_program(&decoded, &calldata, vector.inputs.output_slots)?;
+    if outcome != bc_outcome {
+        return Err(format!(
+            "Rust bytecode parity mismatch:\n  source:   {outcome:?}\n  bytecode: {bc_outcome:?}"
+        ));
+    }
+
+    Ok(outcome)
+}
+
+fn run_rust_program(
+    program: &xqvm::Program,
+    calldata: &[xqvm::RegVal],
+    output_slots: usize,
+) -> Result<Outcome, String> {
+    use xqvm::{RegVal, Vm};
+
     let mut vm = Vm::new();
     let _ = vm
-        .set_calldata(calldata)
-        .set_output_slots(vector.inputs.output_slots);
+        .set_calldata(calldata.to_vec())
+        .set_output_slots(output_slots);
 
-    vm.run(&program)
+    vm.run(program)
         .map_err(|e| format!("vm.run failed: {e:?}"))?;
 
     let mut outputs: Vec<Option<i64>> = vm
@@ -199,14 +223,46 @@ pub fn run_python(vector: &Vector) -> Result<Outcome, String> {
     let runner = std::env::var("XQUAD_CONFORMANCE_PYTHON").unwrap_or_else(|_| "uv".into());
     let repo_root = conformance_root().join("..");
 
-    let output = Command::new(&runner)
-        .args([
-            "run", "python", "-m", "xqvm_py", "run", "--text", "--inputs",
-        ])
+    let outcome = run_python_file(
+        &runner,
+        &repo_root,
+        vector,
+        &vector.dir.join("program.xqasm"),
+    )?;
+
+    // Bytecode round-trip: assemble → .xqb temp file → Python decoder path.
+    let program = xqasm::assemble_source(&vector.program_xqasm)
+        .map_err(|e| format!("assemble_source failed: {e}"))?;
+    let bytecode = program.encode();
+
+    let tmp = tempfile::Builder::new()
+        .suffix(".xqb")
+        .tempfile()
+        .map_err(|e| format!("failed to create temp file: {e}"))?;
+    fs::write(tmp.path(), &bytecode).map_err(|e| format!("failed to write temp .xqb: {e}"))?;
+
+    let bc_outcome = run_python_file(&runner, &repo_root, vector, tmp.path())?;
+    if outcome != bc_outcome {
+        return Err(format!(
+            "Python bytecode parity mismatch:\n  source:   {outcome:?}\n  bytecode: {bc_outcome:?}"
+        ));
+    }
+
+    Ok(outcome)
+}
+
+fn run_python_file(
+    runner: &str,
+    repo_root: &std::path::Path,
+    vector: &Vector,
+    program_path: &std::path::Path,
+) -> Result<Outcome, String> {
+    let output = Command::new(runner)
+        .args(["run", "python", "-m", "xqvm_py", "run", "--inputs"])
         .arg(vector.dir.join("inputs.json"))
         .args(["--outputs", &vector.inputs.output_slots.to_string()])
-        .arg(vector.dir.join("program.xqasm"))
-        .current_dir(&repo_root)
+        .arg(program_path)
+        .current_dir(repo_root)
         .output()
         .map_err(|e| format!("failed to spawn `{runner} run python -m xqvm_py`: {e}"))?;
 

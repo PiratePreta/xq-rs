@@ -283,6 +283,12 @@ Spec changes are governed by the conformance harness: any modification affecting
 
 Behavioural parity between `xqvm_py` (Python reference) and the Rust `xqvm` crate is enforced by the `xquad-conformance` test suite. Vectors live in `conformance/vectors/`. New semantics require a new vector; divergence between impls fails CI with no drift-tracking middle ground.
 
+### Atomic Spec-MR Rule
+
+Any MR that changes VM semantics must touch **all four** layers in the same MR: (1) `spec/xqvm/SPEC.md`, (2) `xqvm/src/**/*.rs`, (3) `xqvm_py/{executor,opcodes,xqmx,state,vector,tracer,errors}.py`, (4) `conformance/vectors/**` or `conformance/opcodes.yaml`. CI enforces this via `lint:atomic-spec-mr` (`scripts/check-atomic-spec-mr.sh`). MRs touching 0 or all 4 layers pass; partial changes (1-3 layers) fail.
+
+For deliberately one-sided changes (e.g. aligning one impl to existing behaviour), add an `Atomic-Spec-Exempt: <reason>` trailer to a commit message. The guard scans every commit in the MR range and bypasses when it finds at least one trailer. See `docs/xquad-development-workflow.md` for the full rationale and exempt cases.
+
 ### Rust-Python Bindings (xqffi)
 
 `xqvm_py` consumes `xqffi.asm` only -- its executor stays pure-Python so `xqvm_py` remains an independent conformance oracle. Build with `maturin develop --manifest-path xqffi/Cargo.toml` (handled by `make deps-python`).
@@ -295,7 +301,7 @@ Behavioural parity between `xqvm_py` (Python reference) and the Rust `xqvm` crat
 
 | Stage | What it covers |
 | --- | --- |
-| lint | clippy, rustdoc, cargo-deny, ruff, format checks, opcode parity |
+| lint | clippy, rustdoc, cargo-deny, ruff, format checks, opcode parity, atomic spec-MR guard |
 | test | unit, integration, doc tests (Rust); pytest (Python) |
 | conformance | Rust + Python conformance vectors, example smoke tests |
 | docs | mdbook build + bytecode-semantics freshness check |

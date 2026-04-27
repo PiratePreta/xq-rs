@@ -39,19 +39,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from xqvm_py import Executor, Program, program_from_xqasm
+from xqvm_py import Executor, Program, program_from_bytecode, program_from_xqasm
 
 
 def _load_program(path: Path, *, text: bool) -> Program:
-    """Load ``.xqasm`` text (or a ``.xqb`` round-tripped via disassembly)."""
+    """Load ``.xqasm`` text or ``.xqb`` bytecode."""
     if text or path.suffix == ".xqasm":
         source = path.read_text(encoding="utf-8")
         return program_from_xqasm(source, name=path.stem)
     if path.suffix == ".xqb":
-        from xqffi.asm import disassemble
-
-        source = disassemble(path.read_bytes())
-        return program_from_xqasm(source, name=path.stem)
+        return program_from_bytecode(path.read_bytes(), name=path.stem)
     raise SystemExit(
         f"xqvm-py: unknown file extension {path.suffix!r}; pass a .xqasm "
         "source (or use --text to force text interpretation)."
@@ -131,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     final_stack = [_serialise_value(v) for v in executor.state.stack]
 
     json.dump(
-        {"outputs": outputs, "final_stack": final_stack},
+        {"outputs": outputs, "final_stack": final_stack, "steps": executor.steps},
         sys.stdout,
         separators=(",", ":"),
     )

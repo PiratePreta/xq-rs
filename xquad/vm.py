@@ -25,7 +25,6 @@ with the canonical Python types from `xquad.types`.
 
 from __future__ import annotations
 
-import warnings
 from enum import Enum, auto
 from typing import Any
 
@@ -34,6 +33,7 @@ from xqffi.vm import Vm as _RustVm
 from xqffi.vm import XqmxModel as ModelFFI
 from xqffi.vm import XqmxSample as SampleFFI
 from xqvm_py.executor import Executor as _PyExecutor
+from xqvm_py.program import program_from_bytecode as _program_from_bytecode
 from xqvm_py.program import program_from_xqasm as _program_from_xqasm
 from xqvm_py.vector import Vec
 from xqvm_py.xqmx import XQMX, XQMXDomain
@@ -195,6 +195,7 @@ class VM:
         else:
             self._py_outputs: dict[int, Any] = {}
             self._py_stack: list[int] = []
+            self._py_steps: int = 0
 
     @property
     def backend(self) -> VMBackend:
@@ -220,10 +221,11 @@ class VM:
             self._run_python(source)
 
     def run_bytecode(self, bytecode: bytes) -> None:
-        """Execute pre-assembled bytecode (Rust backend only)."""
-        if self._backend == VMBackend.PYTHON:
-            raise NotImplementedError("run_bytecode is not supported on the Python backend; use run(source) instead")
-        self._run_rust(bytecode)
+        """Execute pre-assembled bytecode on the selected backend."""
+        if self._backend == VMBackend.RUST:
+            self._run_rust(bytecode)
+        else:
+            self._run_python_bytecode(bytecode)
 
     # -- results -------------------------------------------------------------
 
@@ -240,12 +242,7 @@ class VM:
     def steps(self) -> int:
         if self._backend == VMBackend.RUST:
             return self._rust_vm.steps()
-        warnings.warn(
-            "step counting is not supported on the Python backend; returning 0",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return 0
+        return self._py_steps
 
     def reset(self) -> None:
         self._calldata = []
@@ -256,6 +253,7 @@ class VM:
         else:
             self._py_outputs = {}
             self._py_stack = []
+            self._py_steps = 0
 
     # -- private -------------------------------------------------------------
 
@@ -270,7 +268,15 @@ class VM:
 
     def _run_python(self, source: str) -> None:
         program = _program_from_xqasm(source)
+        self._execute_python(program)
+
+    def _run_python_bytecode(self, bytecode: bytes) -> None:
+        program = _program_from_bytecode(bytecode)
+        self._execute_python(program)
+
+    def _execute_python(self, program) -> None:
         cd = _prepare_calldata_python(self._calldata)
         executor = _PyExecutor()
-        self._py_outputs = executor.execute(program, cd)
+        self._py_outputs = executor.execute(program, cd, step_limit=self._step_limit)
         self._py_stack = list(executor.state.stack)
+        self._py_steps = executor.steps

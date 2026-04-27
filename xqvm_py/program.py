@@ -78,6 +78,33 @@ def run_program(instructions: list[Instruction], input_data: dict[int, Any] | No
     return ex
 
 
+def program_from_bytecode(bytecode: bytes, name: str = "") -> Program:
+    """Decode raw ``.xqb`` bytecode into an executable ``Program``.
+
+    Pure-Python decoder — no FFI dependency. The wire format is a flat
+    stream of ``[opcode_u8, operand_bytes...]`` with no header or length
+    prefixes. Each opcode's ``OpcodeMeta.operand_count`` determines the
+    number of trailing bytes.
+    """
+    instructions: list[Instruction] = []
+    pos = 0
+    while pos < len(bytecode):
+        code = bytecode[pos]
+        opcode = Opcode.from_code(code)
+        if opcode is None:
+            raise ValueError(f"unknown opcode 0x{code:02X} at byte offset {pos}")
+        n = opcode.meta.operand_count
+        if pos + 1 + n > len(bytecode):
+            raise ValueError(
+                f"truncated operands for {opcode.name} at byte offset {pos}: "
+                f"need {n} bytes, have {len(bytecode) - pos - 1}"
+            )
+        operands = tuple(bytecode[pos + 1 : pos + 1 + n])
+        instructions.append(Instruction(opcode, operands))
+        pos += 1 + n
+    return Program(instructions=instructions, name=name)
+
+
 def program_from_xqasm(source: str, name: str = "") -> Program:
     """Parse ``.xqasm`` source via the Rust xqasm crate and wrap the result.
 
