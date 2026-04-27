@@ -92,10 +92,9 @@ fn discover_vectors(root: &Path) -> Vec<(String, String)> {
                 .file_name()
                 .into_string()
                 .expect("vector name utf-8");
-            // Require the four canonical files; skip incomplete directories.
+            // Require the three canonical files; skip incomplete directories.
             let dir = vector_entry.path();
             if dir.join("program.xqasm").exists()
-                && dir.join("program.xqb").exists()
                 && dir.join("inputs.json").exists()
                 && dir.join("expected.json").exists()
             {
