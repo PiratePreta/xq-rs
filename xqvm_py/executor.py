@@ -213,6 +213,7 @@ class Executor:
         self,
         program: Program,
         input_data: dict[int, Any] | None = None,
+        step_limit: int = 0,
     ) -> dict[int, Any]:
         """
         Execute a program to completion.
@@ -220,6 +221,7 @@ class Executor:
         Args:
             program: The program to execute
             input_data: Optional input data keyed by slot number
+            step_limit: Maximum steps before raising RuntimeError (0 = unlimited)
 
         Returns:
             Output data keyed by slot number
@@ -242,9 +244,17 @@ class Executor:
                 target_counter += 1
 
         while not self.state.halted and self.state.pc < len(program):
+            if step_limit > 0 and self.state.steps >= step_limit:
+                raise RuntimeError(f"StepLimitExceeded: execution exceeded {step_limit} steps")
+            self.state.steps += 1
             self.step()
 
         return dict(self.state.output)
+
+    @property
+    def steps(self) -> int:
+        """Total steps executed since the last `execute()` call."""
+        return self.state.steps
 
     def step(self) -> bool:
         """

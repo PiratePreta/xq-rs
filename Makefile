@@ -35,7 +35,7 @@ xquad: deps-python
 # local environment — or a CI cache hit — pays zero cost. First-
 # install goes through cargo-binstall (prebuilt binaries in seconds)
 # with a cargo-install-from-source fallback.
-deps: deps-docs
+deps: deps-docs install-hooks
 	rustup component add clippy rustfmt
 	bash scripts/install-cargo-tools.sh
 

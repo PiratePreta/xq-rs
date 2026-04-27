@@ -48,6 +48,7 @@ from .program import (
     Instruction,
     Program,
     make_program,
+    program_from_bytecode,
     program_from_xqasm,
     run_program,
 )
@@ -108,6 +109,7 @@ __all__ = [
     "expand_implies",
     "expand_onehot",
     "make_program",
+    "program_from_bytecode",
     "program_from_xqasm",
     "require_model_mode",
     "require_sample_mode",

@@ -192,6 +192,25 @@ When updating project conventions, keep this file up to date.
 - Reference any related issues in the MR description.
 - Ensure all CI pipeline stages pass. Use the checklist in the template.
 
+### Atomic Spec-MR Rule
+
+Any MR that changes VM semantics must touch **all four** of these layers in the same MR:
+
+1. `spec/xqvm/SPEC.md` — the normative specification
+2. `xqvm/src/**/*.rs` — the Rust production implementation
+3. `xqvm_py/{executor,opcodes,xqmx,state,vector,tracer,errors}.py` — the Python reference implementation
+4. `conformance/vectors/**` or `conformance/opcodes.yaml` — cross-impl parity coverage
+
+CI enforces this via `lint:atomic-spec-mr` (`scripts/check-atomic-spec-mr.sh`). MRs touching 0 or all 4 layers pass; partial changes fail.
+
+**Exemptions:** For deliberately one-sided changes (e.g. aligning one impl to existing behaviour), add a `Atomic-Spec-Exempt: <reason>` trailer to a commit message:
+
+```
+Atomic-Spec-Exempt: Python-only fix bringing impl in line with existing Rust behaviour
+```
+
+See [docs/xquad-development-workflow.md](docs/xquad-development-workflow.md) for the full rationale and exempt cases.
+
 ---
 
 **License**: This document is licensed under AGPL-3.0-or-later

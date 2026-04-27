@@ -159,6 +159,7 @@ class MachineState:
     input: dict[int, Any] = field(default_factory=dict)
     output: dict[int, Any] = field(default_factory=dict)
     halted: bool = False
+    steps: int = 0
 
     # === Stack Operations ===
 
@@ -260,6 +261,7 @@ class MachineState:
         self.input.clear()
         self.output.clear()
         self.halted = False
+        self.steps = 0
 
     def snapshot(self) -> dict[str, Any]:
         """Create a snapshot of current state for debugging."""
