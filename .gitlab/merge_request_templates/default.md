@@ -17,7 +17,7 @@
 
 ## Checklist
 
-- [ ] Commit subject lines are 50 characters or fewer and use the imperative mood
+- [ ] Commit subject lines are 72 characters or fewer and use the imperative mood
 - [ ] Commits are signed off (`git commit -s`)
 - [ ] `cargo fmt --all` run
 - [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes

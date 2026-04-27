@@ -77,3 +77,8 @@ coverage.xml
 *.swp
 *.swo
 *~
+
+### Developer-local agent/tool artifacts ###
+CLAUDE.md
+.claude/
+graphify-out/
