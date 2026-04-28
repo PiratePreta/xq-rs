@@ -78,13 +78,17 @@
 # single-crate dry-run, pyproject manifest issues -- without leaving
 # half-published artefacts behind on a partial failure.
 #
-# Crate dry-run note: xqvm gets a full `cargo publish --dry-run`
-# (verify build included). xqasm/xqcli use `--no-verify` because
-# their workspace dep on xqvm resolves to a version that won't exist
-# on crates.io until `release:publish-crates` runs; --no-verify skips
-# the build-from-packaged-source step but still validates manifest
-# metadata, license file, and package contents -- the actual things
-# this gate exists to catch.
+# Crate dry-run note (QUI-498): xqvm gets a full `cargo publish
+# --dry-run` because it has no internal workspace deps. xqasm/xqcli
+# go through `scripts/validate-crate-publish.sh` because cargo's
+# pack step still resolves their `xqvm = "X.Y.Z"` workspace dep
+# against crates.io (even with `--no-verify`, which only skips the
+# *build* verify, not the *resolve* step). At the first publish of
+# the workspace the dep doesn't exist on crates.io yet, so the
+# wrapper tolerates that specific failure mode and lets the validate
+# job pass; any other dry-run error (real metadata drift, missing
+# license file, etc.) still fails the job. From v0.1.1 onwards
+# (xqvm on crates.io), the wrapper is just a pass-through.
 release:validate:
     stage: release
     <<: *on-release-tag
@@ -93,8 +97,8 @@ release:validate:
     script:
         - cargo --version
         - cargo publish --dry-run --locked -p xqvm
-        - cargo publish --dry-run --locked --no-verify -p xqasm
-        - cargo publish --dry-run --locked --no-verify -p xqcli
+        - bash scripts/validate-crate-publish.sh xqasm --no-verify
+        - bash scripts/validate-crate-publish.sh xqcli --no-verify
         # See scripts/python-dists.sh for the package list and the
         # build/check sequence (shared with release:dry-run:pypi).
         - bash scripts/python-dists.sh check
