@@ -60,6 +60,11 @@ make docs             # mdbook build (runs docs-check first)
 make docs-regen       # regenerate docs/bytecode-semantics.md from opcodes.yaml
 make docs-check       # assert bytecode-semantics.md matches regenerated output
 make docs-serve       # mdbook serve --open
+
+# Changelog (CHANGELOG.md is gitignored; cliff.toml + git history is source of truth)
+make changelog                              # generate CHANGELOG.md (preview unreleased)
+make changelog-release VERSION=v0.2.0       # preview a tag's release notes
+make changelog-render                       # render-only validation (lint smoke)
 ```
 
 ## Shared Conventions
@@ -301,10 +306,21 @@ For deliberately one-sided changes (e.g. aligning one impl to existing behaviour
 
 | Stage | What it covers |
 | --- | --- |
-| lint | clippy, rustdoc, cargo-deny, ruff, format checks, opcode parity, atomic spec-MR guard |
+| lint | clippy, rustdoc, cargo-deny, ruff, format checks, opcode parity, atomic spec-MR guard, changelog render |
 | test | unit, integration, doc tests (Rust); pytest (Python) |
 | conformance | Rust + Python conformance vectors, example smoke tests |
 | docs | mdbook build + bytecode-semantics freshness check |
-| release | packaging and publishing |
+| release | packaging, publishing, GitLab Release notes via git-cliff |
 
 Jobs are authored in per-stage files under `.gitlab/ci/` and composed via `include:` in the root `.gitlab-ci.yml`.
+
+### Changelog
+
+`CHANGELOG.md` is **not** committed to the source tree. The source of truth is `cliff.toml` plus the conventional-commit log; the file is regenerated on demand via `make changelog` and published as the GitLab Release description on tag (`release:changelog` -> `release:notes` in `.gitlab/ci/release.yml`).
+
+Caveats:
+
+- The `cliff.toml` `footer` carries the `[0.1.0]` placeholder section as a stub until v0.1.0 is actually tagged. Once a v0.2.0 cycle starts, drop that footer; from then on the whole file is 100% generated from history.
+- Pre-conventional-commits history (everything before QUI-480) is filtered out by `filter_unconventional = true`; only commits on or after the QUI-480 enforcement appear in the rendered output. The static footer is appended to whatever `make changelog` produces, so an empty render plus footer is the expected state until the first user-visible `feat`/`fix` lands.
+- `chore`, `style`, `test`, `ci`, `build` are **dropped silently** -- if a commit under one of those types ships a user-visible change (e.g. a security-relevant dep bump under `chore`), promote it to `feat`/`fix`/`security` before merging or it will be invisible in release notes.
+- Before tagging a release, run `make changelog-release VERSION=vX.Y.Z` locally to preview what the GitLab Release page will say. Bad commit subjects can be fixed on the source branch and re-merged before the tag is cut.

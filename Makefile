@@ -7,7 +7,8 @@
         opcode-parity opcode-parity-rust opcode-parity-python \
         conformance conformance-rust conformance-python \
         example-smoke regen-example-goldens \
-        docs docs-regen docs-check docs-serve
+        docs docs-regen docs-check docs-serve \
+        changelog changelog-render changelog-release
 
 all: fmt lint test
 
@@ -227,3 +228,41 @@ docs-check:
 docs-serve:
 	mdbook-mermaid install .
 	mdbook serve --open
+
+# -- Changelog --------------------------------------------------------------
+
+# Generate CHANGELOG.md from git history via git-cliff (cliff.toml).
+# CHANGELOG.md is gitignored: cliff.toml + the conventional-commit log
+# are the in-tree source of truth, the file itself is a build output
+# (like docs/book/). Run locally to preview unreleased notes; CI runs
+# the same target on tag and publishes the result as the GitLab
+# Release description.
+changelog:
+	git-cliff --config cliff.toml --output CHANGELOG.md
+
+# Render-only validation of cliff.toml against current history. Used
+# by the lint stage to catch broken templates / parser regexes before
+# they break a release. Writes to a temp file and discards.
+changelog-render:
+	@tmp=$$(mktemp); \
+		git-cliff --config cliff.toml --output "$$tmp" >/dev/null; \
+		rm -f "$$tmp"
+
+# Generate the changelog / release notes for a tagged release.
+# Invoked from `release:changelog` in .gitlab/ci/release.yml with
+# VERSION set to the pushed tag, STRIP=all (the GitLab Release page
+# supplies its own framing so the cliff.toml header/footer would
+# duplicate it), and OUTPUT=release-notes.md. Locally, the same target
+# previews a release's CHANGELOG.md before tagging:
+#   make changelog-release VERSION=v0.2.0
+# Optional flags:
+#   STRIP=all|header|footer   forwarded to git-cliff --strip
+#   OUTPUT=path               write target (default CHANGELOG.md)
+changelog-release:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "error: VERSION is required (e.g. make changelog-release VERSION=v0.2.0)" >&2; \
+		exit 2; \
+	fi
+	git-cliff --config cliff.toml --tag $(VERSION) \
+		$(if $(STRIP),--strip $(STRIP)) \
+		--output $(or $(OUTPUT),CHANGELOG.md)

@@ -25,6 +25,22 @@
     rules:
         - if: $CI_COMMIT_TAG =~ /^v\d/
 
+# Same trigger as `.on-release-tag`, but the job sits as a manual
+# "play" button until a maintainer clicks it (QUI-495). Used by the
+# publish jobs so a tag push fires validate + GitLab Release notes
+# automatically while the irreversible registry uploads (cargo
+# publish, twine upload) wait for explicit confirmation. The tag is
+# effectively a "draft release" until the click happens.
+#
+# `allow_failure: true` keeps the pipeline reported as green while
+# the manual job sits unclicked -- otherwise an unclicked draft tag
+# would show as a failed pipeline forever.
+.on-release-tag-manual: &on-release-tag-manual
+    rules:
+        - if: $CI_COMMIT_TAG =~ /^v\d/
+          when: manual
+          allow_failure: true
+
 # Run on every MR and push; never on the release tag (that's what the
 # actual release jobs are for). These dry-runs prove the release path
 # works without publishing.
@@ -55,13 +71,43 @@
 # Release jobs (tag-triggered)
 # ---------------------------------------------------------------------------
 
+# Validate-then-publish gate (QUI-473). Runs against the tagged commit
+# on the real runner before anything touches a registry. Catches
+# packaging regressions -- missing license file, broken maturin
+# config, metadata drift in xqasm/xqcli not visible to the MR-time
+# single-crate dry-run, pyproject manifest issues -- without leaving
+# half-published artefacts behind on a partial failure.
+#
+# Crate dry-run note: xqvm gets a full `cargo publish --dry-run`
+# (verify build included). xqasm/xqcli use `--no-verify` because
+# their workspace dep on xqvm resolves to a version that won't exist
+# on crates.io until `release:publish-crates` runs; --no-verify skips
+# the build-from-packaged-source step but still validates manifest
+# metadata, license file, and package contents -- the actual things
+# this gate exists to catch.
+release:validate:
+    stage: release
+    <<: *on-release-tag
+    before_script:
+        - *setup-python-publish
+    script:
+        - cargo --version
+        - cargo publish --dry-run --locked -p xqvm
+        - cargo publish --dry-run --locked --no-verify -p xqasm
+        - cargo publish --dry-run --locked --no-verify -p xqcli
+        # See scripts/python-dists.sh for the package list and the
+        # build/check sequence (shared with release:dry-run:pypi).
+        - bash scripts/python-dists.sh check
+
 # Publish the three Rust crates to crates.io in topological dependency
 # order: xqvm (no deps) → xqasm (depends on xqvm) → xqcli (depends on
 # both). The `xqffi` crate keeps `publish = false` — it's a pyo3
 # cdylib consumed via the PyPI wheel, not a crates.io dependency.
-release:crates:
+release:publish-crates:
     stage: release
-    <<: *on-release-tag
+    needs:
+        - release:validate
+    <<: *on-release-tag-manual
     script:
         - cargo --version
         - cargo publish --locked -p xqvm --token "${CARGO_REGISTRY_TOKEN}"
@@ -82,21 +128,80 @@ release:crates:
 # tag. The full matrix (linux-x86_64 + linux-aarch64 + macos-arm64 +
 # windows-x86_64) requires a multi-runner fan-out; for v0.1.0 we ship
 # linux-x86_64 only and track the matrix as a RELEASING.md follow-up.
-release:pypi:
+release:publish-pypi:
     stage: release
     needs:
-        - release:crates
-    <<: *on-release-tag
+        - release:validate
+        - release:publish-crates
+    <<: *on-release-tag-manual
     before_script:
         - *setup-python-publish
     script:
-        - maturin publish --manifest-path xqffi/Cargo.toml --username __token__ --password "${PYPI_TOKEN}" --skip-existing
-        # `uv build` inside a workspace member defaults to the workspace-
-        # root `dist/`; pin `--out-dir dist` so `twine upload dist/*`
-        # resolves files under the package subdir we just cd'd into.
-        - for pkg in xqvm_py xqcp xqsa xquad; do
-              (cd "${pkg}" && uv build --out-dir dist && twine upload --non-interactive --skip-existing --username __token__ --password "${PYPI_TOKEN}" dist/*);
-          done
+        # See scripts/python-dists.sh for the package list and the
+        # build/upload sequence.
+        - bash scripts/python-dists.sh publish
+
+# Generate GitLab Release notes from the conventional-commit history
+# via git-cliff (cliff.toml). Runs on every release tag and uploads
+# `release-notes.md` as an artefact for `release:notes` to consume.
+#
+# `STRIP=all` drops the cliff.toml header/footer so the published
+# notes contain only the tag's own section -- the GitLab release page
+# already supplies its own framing (tag name, date, etc.).
+#
+# CHANGELOG.md is gitignored; the in-tree source of truth for release
+# notes is `cliff.toml` plus the conventional-commit log.
+#
+# `GIT_DEPTH: 0` overrides GitLab's default shallow clone -- git-cliff
+# walks the full commit history back through tag boundaries to render
+# release sections, so a shallow clone produces silently truncated
+# notes. The same override is set on `lint:changelog`.
+release:changelog:
+    stage: release
+    # Decoupled from publish-pypi (QUI-495) so the GitLab Release page
+    # goes up automatically on tag push, regardless of whether the
+    # manual publish jobs are eventually clicked. The page describes
+    # the release; whether artefacts are on crates.io / PyPI yet is
+    # orthogonal.
+    needs:
+        - release:validate
+    <<: *on-release-tag
+    variables:
+        GIT_DEPTH: 0
+    before_script:
+        - export PATH="${CARGO_HOME}/bin:${PATH}"
+        # Install only git-cliff (version pinned in
+        # scripts/cargo-tools.lock); the rest of the cargo toolchain
+        # isn't needed to render the changelog.
+        - bash scripts/install-cargo-tools.sh --only git-cliff
+    script:
+        - make changelog-release VERSION="${CI_COMMIT_TAG}" STRIP=all OUTPUT=release-notes.md
+        - cat release-notes.md
+    artifacts:
+        paths:
+            - release-notes.md
+        expire_in: 30 days
+
+# Create the GitLab Release page for the tag with the git-cliff-
+# generated notes as the description. Uses GitLab's `release:`
+# keyword (declarative) which talks to the project API via the
+# CI_JOB_TOKEN -- no extra secrets needed.
+release:notes:
+    stage: release
+    image: registry.gitlab.com/gitlab-org/release-cli:latest
+    # Alpine-based release-cli image -- the rust default cache paths
+    # are irrelevant here.
+    cache: []
+    needs:
+        - job: release:changelog
+          artifacts: true
+    <<: *on-release-tag
+    script:
+        - echo "Publishing GitLab Release for ${CI_COMMIT_TAG}"
+    release:
+        tag_name: "${CI_COMMIT_TAG}"
+        name: "xquad ${CI_COMMIT_TAG}"
+        description: ./release-notes.md
 
 # ---------------------------------------------------------------------------
 # Dry-run jobs (MR / push — validate the release path without publishing)
@@ -107,12 +212,11 @@ release:pypi:
 # versions, etc. Running for every MR catches release-blocking
 # regressions long before the tag is cut.
 #
-# Only `xqvm` can be dry-run in isolation because xqasm + xqcli's
-# workspace dependencies resolve against crates.io (where the
-# just-bumped xqvm hasn't been pushed yet during a dry-run). The real
-# `release:crates` job publishes `xqvm` first so the downstream
-# dry-runs can resolve it; there is no dry-run path that exercises
-# the same ordering without touching the live registry.
+# Only `xqvm` is dry-run with the full verify build because xqasm +
+# xqcli's workspace dependencies resolve against crates.io (where the
+# just-bumped xqvm hasn't been pushed yet during a dry-run). The
+# tag-time `release:validate` job covers all three crates -- xqvm
+# fully, xqasm/xqcli with `--no-verify` -- before any publish runs.
 release:dry-run:crates:
     stage: lint
     <<: *on-pr-or-push
@@ -128,9 +232,6 @@ release:dry-run:pypi:
     before_script:
         - *setup-python-publish
     script:
-        - maturin build --release --manifest-path xqffi/Cargo.toml --out xqffi/dist
-        - twine check xqffi/dist/*
-        # See release:pypi for the `--out-dir dist` rationale.
-        - for pkg in xqvm_py xqcp xqsa xquad; do
-              (cd "${pkg}" && uv build --out-dir dist && twine check dist/*);
-          done
+        # See scripts/python-dists.sh for the package list and the
+        # build/check sequence (shared with release:validate).
+        - bash scripts/python-dists.sh check

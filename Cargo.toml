@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-repository = "https://gitlab.com/quip.network/xq-rs"
+repository = "https://gitlab.com/quip.network/xquad"
 license    = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
