@@ -13,21 +13,29 @@
 # PATH, so CI cache hits skip straight through.
 #
 # Usage:
-#   scripts/install-cargo-tools.sh [--upgrade]
+#   scripts/install-cargo-tools.sh [--upgrade] [--only NAME]
 #
 # With --upgrade, every entry in scripts/cargo-tools.lock is
 # reinstalled regardless of current state (useful after a lock-file
 # bump).
+#
+# With --only NAME, install just that single tool from the lock file
+# (e.g. `--only git-cliff`). Used by lightweight CI jobs that need
+# one tool rather than the whole toolchain.
 
 set -euo pipefail
 
 LOCK="$(cd "$(dirname "$0")" && pwd)/cargo-tools.lock"
 UPGRADE=0
+ONLY=""
 
-for arg in "$@"; do
-    case "$arg" in
-        --upgrade) UPGRADE=1 ;;
-        *) echo "error: unknown arg: $arg" >&2; exit 2 ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --upgrade) UPGRADE=1; shift ;;
+        --only)
+            [[ $# -ge 2 ]] || { echo "error: --only requires a tool name" >&2; exit 2; }
+            ONLY="$2"; shift 2 ;;
+        *) echo "error: unknown arg: $1" >&2; exit 2 ;;
     esac
 done
 
@@ -77,13 +85,28 @@ install_one() {
     cargo binstall --no-confirm --locked "${name}@${version}"
 }
 
-# Walk the lock file, skipping empty lines and comments.
+# Walk the lock file, skipping empty lines and comments. When --only
+# is set, install just the matching entry and error if it isn't
+# present (catches typos in CI yaml against the lock file).
+matched=0
 while IFS= read -r raw; do
     line="${raw%%#*}"
     line="${line#"${line%%[![:space:]]*}"}"
     line="${line%"${line##*[![:space:]]}"}"
     [[ -z "${line}" ]] && continue
+    if [[ -n "${ONLY}" ]]; then
+        # The first whitespace-separated field is `name=version`; match
+        # against `name` only.
+        spec="${line%% *}"
+        [[ "${spec%=*}" == "${ONLY}" ]] || continue
+        matched=1
+    fi
     install_one "${line}"
 done < "${LOCK}"
+
+if [[ -n "${ONLY}" && "${matched}" -eq 0 ]]; then
+    echo "error: --only ${ONLY}: no matching entry in $(basename "${LOCK}")" >&2
+    exit 2
+fi
 
 echo ">> cargo tools ready"

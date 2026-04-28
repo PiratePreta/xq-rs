@@ -1,0 +1,131 @@
+# git-cliff configuration -- generates CHANGELOG.md from conventional
+# commits (QUI-480) per Keep-a-Changelog conventions.
+#
+# Run `make changelog` to regenerate CHANGELOG.md from `main`'s history.
+# The release pipeline regenerates on each tagged release; see
+# `.gitlab/ci/release.yml` and RELEASING.md for the full flow.
+#
+# Pre-conventional-commits content (the v0.1.0 hand-written section) is
+# pinned in `footer` below until v0.1.0 ships. Once v0.1.0 is tagged
+# and a v0.2.0 cycle starts, drop the footer; from that point on the
+# whole file is 100% generated from git history.
+
+[changelog]
+# What lands at the top of CHANGELOG.md on every regeneration. Mirrors
+# the preamble we hand-authored, so the file's framing stays stable.
+header = """
+# Changelog
+
+All notable changes to the XQuad toolchain are recorded here. The
+format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+versioning is [SemVer](https://semver.org/) across both the Rust
+crates and the Python distributions (single version string across the
+whole workspace).
+
+"""
+
+# Tera template rendering one release block (`## [version] - date`
+# plus grouped `### <Section>` entries). Conventional-commit types are
+# remapped to Keep-a-Changelog sections in `commit_parsers` below.
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
+{{ commit.message | upper_first }}\
+{% if commit.breaking %} \
+**[BREAKING]**\
+{% endif %}\
+{% if commit.footers %}\
+{% for footer in commit.footers %}\
+{% if footer.token == "Fixes" or footer.token == "Implements" or footer.token == "Closes" %}\
+ ({{ footer.token }} {{ footer.value }})\
+{% endif %}\
+{% endfor %}\
+{% endif %}
+{% endfor %}\
+{% endfor %}\n
+"""
+
+# Static block appended once at the very end of CHANGELOG.md. Keeps
+# the v0.1.0 hand-written notes in place until the release ships;
+# delete this footer (and bump cliff.toml back to a single trailing
+# newline) once a real v0.2.0 entry exists.
+#
+# The `YYYY-MM-DD` below is a deliberate placeholder -- it gets
+# replaced with the real release date when v0.1.0 is tagged and the
+# footer is removed in the same MR.
+footer = """
+## [0.1.0] - YYYY-MM-DD
+
+First public release of the unified XQuad toolchain -- the end state
+of the xq-rs / xq-py merge (QUI-412). Everything below was previously
+available only to in-repo consumers; this is the first tag published
+to crates.io and PyPI. See the v0.1.0 git tag annotation for the full
+hand-written release notes.
+
+[Unreleased]: https://gitlab.com/quip.network/xquad/-/compare/v0.1.0...main
+[0.1.0]: https://gitlab.com/quip.network/xquad/-/releases/v0.1.0
+"""
+
+trim = true
+
+[git]
+# Only conventional commits feed the changelog. Anything pre-QUI-480
+# that lacks a `<type>(<scope>):` prefix is silently dropped, so the
+# pre-enforcement history doesn't pollute the output.
+conventional_commits  = true
+filter_unconventional = true
+
+# Breaking changes survive even when their type would otherwise be
+# filtered. Treat them as load-bearing regardless of category.
+protect_breaking_commits = true
+
+# Drop commits that don't match any commit_parsers below. Combined
+# with `filter_unconventional` this keeps GitLab "Merge branch …"
+# subjects -- which fail the conventional-commit grammar -- out of
+# the output so they never produce a duplicate entry alongside the
+# squashed change.
+filter_commits = true
+skip_tags      = "^v0\\.0\\."
+topo_order     = false
+sort_commits   = "newest"
+
+# Conventional-commit type -> Keep-a-Changelog section. `chore`,
+# `style`, `test`, `ci`, `build` are deliberately dropped: they're
+# bookkeeping and rarely user-visible. Anything truly user-facing
+# under those types should be promoted to feat/fix/refactor instead.
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    # Reverts undo a prior change rather than removing a feature, so
+    # they map to "Changed" -- "Removed" in Keep-a-Changelog is reserved
+    # for deliberate feature removal (dropping an API, a CLI flag, …).
+    { message = "^revert", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^security", group = "Security" },
+    { message = "^deprecate", group = "Deprecated" },
+    # Catch-all -- breaking changes from any other type still surface.
+    { body = ".*BREAKING CHANGE.*", group = "Changed" },
+    # Drop chore/style/test/ci/build silently.
+    { message = "^chore", skip = true },
+    { message = "^style", skip = true },
+    { message = "^test", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^build", skip = true },
+]
+
+# Auto-link any QUI-NNN reference appearing in a rendered entry to
+# its Linear ticket. Catches both subject-line scope refs and the
+# `Fixes QUI-NNN` / `Implements QUI-NNN` trailers rendered inline by
+# the body template above.
+[[git.link_parsers]]
+pattern = "QUI-(\\d+)"
+href    = "https://linear.app/quip-network/issue/QUI-$1"

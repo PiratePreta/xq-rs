@@ -1,6 +1,6 @@
 # Releasing the xquad toolchain
 
-Cutting a release publishes eight artefacts in one shot from a single
+Cutting a release publishes nine artefacts in one shot from a single
 `v<X.Y.Z>` git tag:
 
 | # | Artefact | Registry | Ordering |
@@ -13,10 +13,17 @@ Cutting a release publishes eight artefacts in one shot from a single
 | 6 | [`xqcp`](xqcp/) sdist | PyPI | before xquad |
 | 7 | [`xqsa`](xqsa/) sdist | PyPI | before xquad |
 | 8 | [`xquad`](xquad/) sdist | PyPI | last — depends on 4-7 |
+| 9 | GitLab Release notes | GitLab | last — `release:changelog` + `release:notes` |
 
 Triggered by `.gitlab/ci/release.yml`; see that file for the exact
 ordering and rules. `xqffi` the Rust *crate* stays `publish = false`
-(cdylib-only, consumed via PyPI).
+(cdylib-only, consumed via PyPI). The release-notes step generates
+notes from conventional-commit history via [git-cliff] (config in
+[`cliff.toml`](cliff.toml)) and creates the GitLab Release page; no
+in-tree `CHANGELOG.md` exists -- the release page is the canonical
+view.
+
+[git-cliff]: https://git-cliff.org/
 
 ## Prerequisites (one-time)
 
@@ -51,8 +58,11 @@ Before cutting a tag:
 3. **Verify workspace version is bumped.** Every crate's
    `Cargo.toml` and every Python package's `pyproject.toml` must
    agree on the version being tagged.
-4. **Update `CHANGELOG.md`** (when it exists — tracked as a later
-   QUI-442 follow-up). At minimum for v0.1.0, write the first entry.
+4. **Preview release notes** with `make changelog-release VERSION=vX.Y.Z`.
+   The output `CHANGELOG.md` is gitignored; it lets you sanity-check
+   what the GitLab Release page will say before tagging. If a
+   conventional-commit subject was poorly worded, fix it on the
+   relevant feature branch and re-merge before cutting the tag.
 
 ## Cutting a release
 
@@ -74,12 +84,40 @@ git tag -s vX.Y.Z -m "xquad vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The tag push triggers `release:crates` (stage `release`), which on
-success triggers `release:pypi` via `needs:`. Watch the pipeline.
+The tag push triggers an automatic + manual two-phase pipeline in
+stage `release`:
 
-If either stage fails mid-way, rerun **only the failed job** — both
-jobs pass `--skip-existing` / `--locked` flags so re-runs are
-idempotent. Do not retag unless the failure was a version mistake.
+**Auto (fires on tag push):**
+
+1. **`release:validate`** — packaging dry-run for all three crates and
+   all five Python distributions against the tagged commit. Nothing
+   is uploaded; this is the gate that catches manifest / license /
+   metadata regressions before any registry sees them.
+2. **`release:changelog` → `release:notes`** — git-cliff renders the
+   GitLab Release page from the conventional-commit history. Runs
+   off `release:validate` (decoupled from the publishes), so the
+   announcement page goes live immediately on a clean validate.
+
+**Manual (sit waiting for click):**
+
+3. **`release:publish-crates`** — `cargo publish` for `xqvm` →
+   `xqasm` → `xqcli`. Click "play" in the pipeline UI to fire.
+4. **`release:publish-pypi`** — `maturin publish` for `xqffi` then
+   `uv build` + `twine upload` for `xqvm_py` / `xqcp` / `xqsa` /
+   `xquad`. Click "play" to fire; `needs: [release:publish-crates]`
+   enforces ordering (PyPI can't fire before crates).
+
+The two manual jobs are **independent** — each is its own button.
+A Rust-only release (no PyPI yet) is just clicking publish-crates
+and skipping publish-pypi. The tag is effectively a "draft release"
+until the click happens.
+
+Watch the pipeline. If a publish job fails after the click, rerun
+**only the failed job** — both pass `--skip-existing` / `--locked`
+so re-runs are idempotent. Do not retag unless the failure was a
+version mistake. If `release:validate` fails, no registry has been
+touched; fix the underlying issue, force-push to the tag's commit
+(or move the tag), and rerun the pipeline.
 
 ## Post-flight
 
@@ -109,7 +147,7 @@ idempotent. Do not retag unless the failure was a version mistake.
   previous upload. The `--skip-existing` flag should make re-runs a
   no-op; if not, check PyPI and either bump the version or delete the
   uploaded file (within 24h) and retry.
-- **`release:pypi` runs but `pip install xquad` still fails:** PyPI
+- **`release:publish-pypi` runs but `pip install xquad` still fails:** PyPI
   index propagation can take a few minutes for the *first* release of
   a new package name. Retry after 5 min before digging further.
 - **Dry-run passes on MR but real release fails:** usually means the
@@ -131,9 +169,6 @@ idempotent. Do not retag unless the failure was a version mistake.
   runners — tracked as a QUI-442 follow-up.
 - **Automated version bumps.** No `cargo-release` / `hatch version`
   integration yet; versions are edited by hand per the step above.
-- **Release notes autogeneration.** CHANGELOG.md is maintained
-  manually; conventional-commits-based generation is a future
-  consideration.
 - **Signed tags + signed artefacts.** Tags are expected to be git-
   signed (`git tag -s`); crates.io / PyPI artefact signing (sigstore
   cosign, PEP 740) is not wired. Tracked separately.
