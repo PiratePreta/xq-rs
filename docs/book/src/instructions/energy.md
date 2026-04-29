@@ -12,7 +12,7 @@ a `Sample`. Both checks are strict: a `RegisterType` error is raised if either
 register holds the wrong kind of value. The previous "model-as-sample"
 shortcut, where a `Model` could appear in the sample slot and have its linear
 table read as variable assignments, was removed in QUI-410 to align with
-`spec/xqvm/SPEC.md` and the xq-py reference.
+`spec/xqvm/HLF.md` and the xq-py reference.
 
 To populate a sample with concrete variable assignments, construct an
 `XqmxSample` in the host (via `aglais_xqvm_vm::XqmxSample`) and pass it to the
