@@ -278,7 +278,7 @@ Control flow, stack/register I/O, arithmetic (including `SQR`, `ABS`, `INC`, `DE
 
 The `spec/` directory contains authoritative specifications for each toolchain component. Read the relevant spec before modifying that component:
 
-- `spec/xqvm/SPEC.md` -- XQVM architecture (opcodes, control flow, type system)
+- `spec/xqvm/` -- XQVM architecture (opcodes, control flow, type system, encoding)
 - `spec/xqcp/README.md` -- XQCP constraint programming DSL
 - `spec/xqsa/README.md` -- XQSA solver adapter interface
 
@@ -290,7 +290,7 @@ Behavioural parity between `xqvm_py` (Python reference) and the Rust `xqvm` crat
 
 ### Atomic Spec-MR Rule
 
-Any MR that changes VM semantics must touch **all four** layers in the same MR: (1) `spec/xqvm/SPEC.md`, (2) `xqvm/src/**/*.rs`, (3) `xqvm_py/{executor,opcodes,xqmx,state,vector,tracer,errors}.py`, (4) `conformance/vectors/**` or `conformance/opcodes.yaml`. CI enforces this via `lint:atomic-spec-mr` (`scripts/check-atomic-spec-mr.sh`). MRs touching 0 or all 4 layers pass; partial changes (1-3 layers) fail.
+Any MR that changes VM semantics must touch **all four** layers in the same MR: (1) `spec/xqvm/*.md`, (2) `xqvm/src/**/*.rs`, (3) `xqvm_py/{executor,opcodes,xqmx,state,vector,tracer,errors}.py`, (4) `conformance/vectors/**` or `conformance/opcodes.yaml`. CI enforces this via `lint:atomic-spec-mr` (`scripts/check-atomic-spec-mr.sh`). MRs touching 0 or all 4 layers pass; partial changes (1-3 layers) fail.
 
 For deliberately one-sided changes (e.g. aligning one impl to existing behaviour), add an `Atomic-Spec-Exempt: <reason>` trailer to a commit message. The guard scans every commit in the MR range and bypasses when it finds at least one trailer. See `docs/xquad-development-workflow.md` for the full rationale and exempt cases.
 

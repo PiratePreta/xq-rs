@@ -7,7 +7,7 @@
 # Enforces the xquad two-impl development discipline: any MR that
 # touches VM semantics must touch **all four** of
 #
-#   1. spec/xqvm/SPEC.md             — the normative specification
+#   1. spec/xqvm/*.md                — the normative specification
 #   2. xqvm/src/**/*.rs              — the Rust production impl
 #   3. xqvm_py/{executor,opcodes,xqmx,state,vector,tracer,errors}.py
 #                                     — the Python reference impl
@@ -100,7 +100,7 @@ while IFS= read -r file; do
     [[ -z "${file}" ]] && continue
 
     # Layer 1 — normative spec
-    if [[ "${file}" == "spec/xqvm/SPEC.md" ]]; then
+    if [[ "${file}" == spec/xqvm/*.md ]]; then
         has_spec=1
         touched_spec+=("${file}")
         continue
@@ -163,7 +163,7 @@ fi
 # Partial change — report cleanly and fail.
 echo "error: atomic spec-MR guard failed — VM-semantics MRs must touch all four layers."
 echo ""
-echo "  spec        (spec/xqvm/SPEC.md)                                 : $([[ ${has_spec} -eq 1 ]] && echo '✓' || echo '✗')"
+echo "  spec        (spec/xqvm/*.md)                                    : $([[ ${has_spec} -eq 1 ]] && echo '✓' || echo '✗')"
 echo "  xqvm        (xqvm/src/**/*.rs)                                  : $([[ ${has_xqvm} -eq 1 ]] && echo '✓' || echo '✗')"
 echo "  xqvm_py     (xqvm_py/{executor,opcodes,xqmx,state,vector,..}.py): $([[ ${has_xqvm_py} -eq 1 ]] && echo '✓' || echo '✗')"
 echo "  conformance (conformance/{vectors/**,opcodes.yaml})             : $([[ ${has_conformance} -eq 1 ]] && echo '✓' || echo '✗')"
