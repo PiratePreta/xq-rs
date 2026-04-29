@@ -111,12 +111,14 @@ The following conventions are used throughout this section to describe opcode be
 | `0x05` | `LIDX` | `reg` | `[...] → [...]` | `write` — `reg ← index + start_offset` | Copy the current loop index (offset-adjusted) into `reg`. For RANGE loops: equivalent to LVAL (values are indices). For ITER loops: returns the original vec index (`frame.index + start_idx`). Error: `LoopError` if no active loop. |
 | `0x06` | `LVAL` | `reg` | `[...] → [...]` | `write` — `reg ← values[index]` | Copy the current loop value into `reg`. For RANGE loops: `reg ← int`. For ITER loops: `reg ← vec element` (type preserved: int or xqmx). Error: `LoopError` if no active loop. |
 | `0x07` | `NEXT` | — | `[...] → [...]` | — | Advance the active loop frame index. If more values remain, set PC to `frame.target` (loop body start). Otherwise pop the frame and fall through. Error: `LoopError` if no loop frame is active. |
-| `0x08` | `RANGE` | — | `[..., start, count] → [...]` | — | Pop `count`, then `start`. Generate values `[start, start+1, ..., start+count-1]`. Push a loop frame with `target = PC+1` and `start_offset = start`. If `count <= 0`, the loop body is skipped entirely. |
+| `0x08` | `RANGE` | — | `[..., start, count] → [...]` | — | Pop `count`, then `start`. Generate values `[start, start+1, ..., start+count-1]`. Push a loop frame with `target = PC+1` and `start_offset = start`. If `count <= 0`, the loop body is skipped entirely (see **Empty-loop skip** below). |
 | `0x09` | `ITER` | `reg` | `[..., start_idx, end_idx] → [...]` | `read` — validates `reg` holds `vec` | Pop `end_idx`, then `start_idx`. Read vec from `reg`. Copy elements `vec[start_idx:end_idx]` into a loop frame with `target = PC+1` and `start_offset = start_idx`. If `start_idx >= end_idx`, the loop body is skipped. Elements are copied for immutability. Error: `TypeMismatch` if `reg` is not a vec. |
 | `0xF0` | `NOP` | — | `[...] → [...]` | — | No operation. |
 | `0xFF` | `HALT` | — | `[...] → [...]` | — | Stop execution immediately. |
 
 **JUMP sugar:** In assembly source, `JUMP .N` and `JUMPI .N` are syntactic sugar. The assembler resolves the label and selects `JUMP1`/`JUMPI1` (u8) or `JUMP2`/`JUMPI2` (u16) based on the target ID value, mirroring the `PUSH`/`PUSH1`–`PUSH8` sugar pattern.
+
+**Empty-loop skip:** When `RANGE` is executed with `count <= 0` (or `ITER` with `start_idx >= end_idx`), the VM must not push a loop frame or execute the loop body. Instead, the VM scans forward from the next instruction, maintaining a nesting-depth counter initialised to 1. Each `RANGE` or `ITER` encountered increments the counter; each `NEXT` decrements it. When the counter reaches 0, execution resumes at the instruction immediately after that matching `NEXT`. If the instruction stream ends before a matching `NEXT` is found, the VM faults with an unmatched-loop error.
 
 ---
 

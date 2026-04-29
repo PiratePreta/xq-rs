@@ -140,6 +140,11 @@ pub enum Error {
     #[error("XQMX/XSMX requires k >= 2 for the [-k, k-1] domain, got k = {k} at byte {pos:#06x}")]
     InvalidDiscreteK { pos: usize, k: i64 },
 
+    /// A RANGE or ITER skip-forward scan reached end-of-stream without
+    /// finding a matching NEXT (nesting depth never reached zero).
+    #[error("unmatched RANGE/ITER at byte {pos:#06x}: no matching NEXT found")]
+    UnmatchedLoop { pos: usize },
+
     /// A tracer callback returned an error (e.g. I/O write failure).
     #[error("trace failed at byte {pos:#06x}: {message}")]
     TraceFailed { pos: usize, message: String },
@@ -201,6 +206,7 @@ impl Error {
             | Self::InvalidShift { pos, .. }
             | Self::InvalidGridDimensions { pos, .. }
             | Self::InvalidDiscreteK { pos, .. }
+            | Self::UnmatchedLoop { pos }
             | Self::TraceFailed { pos, .. }
             | Self::BadJumpTarget { pos, .. }
             | Self::InvalidLabel { pos, .. }

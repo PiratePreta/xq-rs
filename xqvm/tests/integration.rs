@@ -469,18 +469,18 @@ fn range_loop_sum_0_to_5() {
 }
 
 #[test]
-fn range_loop_do_while_semantics() {
-    // RANGE with count=0: body still runs once (do-while semantics).
-    // RANGE [0, 0): current=0, end=0. Body runs once, NEXT: 1 < 0 is false, exits.
+fn range_loop_zero_count_skips_body() {
+    // RANGE with count=0: body is skipped entirely (no do-while).
+    // The VM scans forward to the matching NEXT without pushing a loop frame.
     let mut b = InstructionBuilder::new();
     b.emit_push(0).emit_push(0).emit_range();
-    b.emit_push(99); // body: always runs once
+    b.emit_push(99); // body: never runs
     b.emit_next();
     b.emit_halt();
     let bytecode = b.build().unwrap();
     let mut vm = Vm::new();
     vm.run(&bytecode).unwrap();
-    assert_eq!(vm.stack(), &[99]);
+    assert_eq!(vm.stack(), &[]);
 }
 
 // ---------------------------------------------------------------------------

@@ -168,6 +168,113 @@ class TestControlFlow:
         )
         assert ex.state.get_register(0) == 10
 
+    def test_range_count_zero_skips_body(self):
+        """RANGE with count=0 skips the loop body entirely."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (7,)),
+                Instruction(Opcode.STOW, (0,)),  # r0 = 7 (sentinel)
+                Instruction(Opcode.PUSH1, (0,)),  # start
+                Instruction(Opcode.PUSH1, (0,)),  # count = 0
+                Instruction(Opcode.RANGE),
+                Instruction(Opcode.PUSH1, (99,)),
+                Instruction(Opcode.STOW, (0,)),  # would overwrite sentinel
+                Instruction(Opcode.NEXT),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.get_register(0) == 7
+
+    def test_range_count_negative_skips_body(self):
+        """RANGE with negative count skips the loop body entirely."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (42,)),
+                Instruction(Opcode.STOW, (0,)),  # r0 = 42 (sentinel)
+                Instruction(Opcode.PUSH1, (0,)),  # start
+                Instruction(Opcode.PUSH1, (0xFD,)),  # count = -3 (signed i8)
+                Instruction(Opcode.RANGE),
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.STOW, (0,)),  # would zero sentinel
+                Instruction(Opcode.NEXT),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.get_register(0) == 42
+
+    def test_range_count_zero_nested_skips(self):
+        """Zero-count outer RANGE correctly skips past nested inner loops."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (0,)),  # outer start
+                Instruction(Opcode.PUSH1, (0,)),  # outer count = 0
+                Instruction(Opcode.RANGE),  # outer: should skip to outer NEXT
+                Instruction(Opcode.PUSH1, (0,)),  # inner start
+                Instruction(Opcode.PUSH1, (3,)),  # inner count
+                Instruction(Opcode.RANGE),  # inner
+                Instruction(Opcode.PUSH1, (99,)),
+                Instruction(Opcode.NEXT),  # inner NEXT
+                Instruction(Opcode.NEXT),  # outer NEXT
+                Instruction(Opcode.PUSH1, (42,)),
+                Instruction(Opcode.STOW, (0,)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.get_register(0) == 42
+
+    def test_range_count_zero_unmatched_raises(self):
+        """RANGE with count=0 and no matching NEXT raises LoopError."""
+        with pytest.raises(LoopError, match="unmatched"):
+            run_program(
+                [
+                    Instruction(Opcode.PUSH1, (0,)),
+                    Instruction(Opcode.PUSH1, (0,)),
+                    Instruction(Opcode.RANGE),
+                    Instruction(Opcode.HALT),
+                ]
+            )
+
+    def test_range_count_one_executes_body_once(self):
+        """RANGE with count=1 executes the loop body exactly once."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.STOW, (0,)),  # r0 = 0 (counter)
+                Instruction(Opcode.PUSH1, (5,)),  # start
+                Instruction(Opcode.PUSH1, (1,)),  # count = 1
+                Instruction(Opcode.RANGE),
+                Instruction(Opcode.LOAD, (0,)),
+                Instruction(Opcode.INC),
+                Instruction(Opcode.STOW, (0,)),  # r0 += 1
+                Instruction(Opcode.NEXT),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.get_register(0) == 1
+
+    def test_range_positive_nested_still_works(self):
+        """Positive-count nested RANGE loops still work after skip changes."""
+        # outer: count=2, inner: count=3 -> body runs 6 times
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.STOW, (0,)),  # r0 = 0 (counter)
+                Instruction(Opcode.PUSH1, (0,)),  # outer start
+                Instruction(Opcode.PUSH1, (2,)),  # outer count
+                Instruction(Opcode.RANGE),
+                Instruction(Opcode.PUSH1, (0,)),  # inner start
+                Instruction(Opcode.PUSH1, (3,)),  # inner count
+                Instruction(Opcode.RANGE),
+                Instruction(Opcode.LOAD, (0,)),
+                Instruction(Opcode.INC),
+                Instruction(Opcode.STOW, (0,)),
+                Instruction(Opcode.NEXT),  # inner
+                Instruction(Opcode.NEXT),  # outer
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.get_register(0) == 6
+
     def test_iter_loop(self):
         """ITER iterates over vector elements."""
         ex = run_program(

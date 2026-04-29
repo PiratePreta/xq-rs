@@ -1,0 +1,21 @@
+; range_negative_skip: RANGE with negative count must skip the loop body.
+;
+; calldata[0] = -5 (count), sentinel r1 = 42.
+; If the body runs, r1 gets zeroed.
+; Expected: output[0] = 42 (body was skipped).
+
+PUSH 42
+STOW r1        ; r1 = 42 (sentinel)
+
+PUSH 0
+PUSH 0
+INPUT r0       ; r0 = calldata[0] = -5
+LOAD r0
+RANGE          ; loop [0, 0+(-5)) -- negative count, should skip
+PUSH 0
+STOW r1        ; would zero sentinel
+NEXT
+
+PUSH 0
+OUTPUT r1
+HALT
