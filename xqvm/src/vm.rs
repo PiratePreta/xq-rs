@@ -117,6 +117,8 @@ pub(crate) enum StepResult {
     Halt,
     /// Push a new loop frame; the run loop sets `body_start` to `stream.pos()`.
     StartLoop { kind: LoopKind },
+    /// Skip the loop body: scan forward to the matching NEXT without pushing a frame.
+    SkipLoop,
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +456,25 @@ impl Vm {
                     let body_start = stream.pos();
                     self.loop_stack.push(LoopFrame { kind, body_start });
                 }
+                StepResult::SkipLoop => {
+                    let mut depth: u32 = 1;
+                    loop {
+                        let Some(item) = stream.next_instruction() else {
+                            return Err(Error::UnmatchedLoop { pos });
+                        };
+                        let (_scan_pos, _label, scan_instr) = item.map_err(Error::from)?;
+                        match scan_instr {
+                            Instruction::Range {} | Instruction::Iter { .. } => depth += 1,
+                            Instruction::Next {} => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
 
@@ -677,6 +698,9 @@ impl Vm {
     fn exec_range(&mut self, pos: usize) -> Result<StepResult, Error> {
         let count = self.pop(pos)?;
         let start = self.pop(pos)?;
+        if count <= 0 {
+            return Ok(StepResult::SkipLoop);
+        }
         Ok(StepResult::StartLoop {
             kind: LoopKind::Range {
                 current: start,
@@ -2026,5 +2050,124 @@ mod tests {
         let mut vm = Vm::new();
         vm.run(&program).unwrap();
         assert_eq!(vm.stack(), &[99]);
+    }
+
+    #[test]
+    fn range_count_zero_skips_body() {
+        let mut b = InstructionBuilder::new();
+        let _ = b
+            .emit_push(0)
+            .emit_push(0)
+            .emit_range()
+            .emit_push(99)
+            .emit_next()
+            .emit_push(42)
+            .emit_halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[42]);
+    }
+
+    #[test]
+    fn range_count_negative_skips_body() {
+        let mut b = InstructionBuilder::new();
+        let _ = b
+            .emit_push(0)
+            .emit_push(-3)
+            .emit_range()
+            .emit_push(99)
+            .emit_next()
+            .emit_push(42)
+            .emit_halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[42]);
+    }
+
+    #[test]
+    fn range_count_zero_nested_skips() {
+        // Outer RANGE has count=0. Its body contains an inner RANGE(count=3)/NEXT.
+        // The skip-forward scan must track nesting depth to find the outer NEXT.
+        let mut b = InstructionBuilder::new();
+        let _ = b
+            .emit_push(0)
+            .emit_push(0)
+            .emit_range() // outer: count=0, should skip to outer NEXT
+            .emit_push(0)
+            .emit_push(3)
+            .emit_range() // inner: count=3
+            .emit_push(99)
+            .emit_next() // inner NEXT
+            .emit_next() // outer NEXT
+            .emit_push(42)
+            .emit_halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(vm.stack(), &[42]);
+    }
+
+    #[test]
+    fn range_count_one_executes_body_once() {
+        // Boundary: count=1 must execute the body exactly once.
+        let mut b = InstructionBuilder::new();
+        let _ = b
+            .emit_push(0)
+            .emit_push(0)
+            .emit_stow(Register(0)) // r0 = 0 (counter)
+            .emit_push(5) // start
+            .emit_push(1) // count = 1
+            .emit_range()
+            .emit_load(Register(0))
+            .emit_inc()
+            .emit_stow(Register(0)) // r0 += 1
+            .emit_next()
+            .emit_halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(*vm.reg(Register(0)), RegVal::Int(1));
+    }
+
+    #[test]
+    fn range_positive_nested_still_works() {
+        // Both loops have positive counts; verify nesting is unaffected.
+        // outer: count=2, inner: count=3 -> body runs 6 times total.
+        let mut b = InstructionBuilder::new();
+        let _ = b
+            .emit_push(0)
+            .emit_stow(Register(0)) // r0 = 0 (counter)
+            .emit_push(0)
+            .emit_push(2)
+            .emit_range() // outer
+            .emit_push(0)
+            .emit_push(3)
+            .emit_range() // inner
+            .emit_load(Register(0))
+            .emit_inc()
+            .emit_stow(Register(0))
+            .emit_next() // inner NEXT
+            .emit_next() // outer NEXT
+            .emit_halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        vm.run(&program).unwrap();
+        assert_eq!(*vm.reg(Register(0)), RegVal::Int(6));
+    }
+
+    #[test]
+    fn range_count_zero_unmatched_faults() {
+        // RANGE with count=0 and no matching NEXT must fault.
+        let mut b = InstructionBuilder::new();
+        let _ = b.emit_push(0).emit_push(0).emit_range().emit_halt();
+        let program = b.build().unwrap();
+        let mut vm = Vm::new();
+        let err = vm.run(&program).unwrap_err();
+        assert!(
+            matches!(err, Error::UnmatchedLoop { .. }),
+            "expected UnmatchedLoop, got {err:?}"
+        );
     }
 }

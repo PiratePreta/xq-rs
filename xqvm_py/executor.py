@@ -384,8 +384,28 @@ class Executor:
     def _runner_RANGE(self, instr: Instruction) -> None:
         """RANGE: Start range loop. Pop count, start -> iterate [start, start+count)."""
         count, start = self.state.pop_n(2)
-        # Store current PC + 1 as the loop target (next instruction)
+        if count <= 0:
+            self._skip_to_matching_next()
+            return
         self.state.jc.push_loop_range(self.state.pc + 1, start, count)
+
+    def _skip_to_matching_next(self) -> None:
+        """Scan forward to the matching NEXT, skipping the loop body."""
+        from .errors import LoopError
+
+        depth = 1
+        scan_pc = self.state.pc + 1
+        while scan_pc < len(self.program):
+            scan_instr = self.program[scan_pc]
+            if scan_instr.opcode in (Opcode.RANGE, Opcode.ITER):
+                depth += 1
+            elif scan_instr.opcode == Opcode.NEXT:
+                depth -= 1
+                if depth == 0:
+                    self.state.jump_to(scan_pc + 1)
+                    return
+            scan_pc += 1
+        raise LoopError("unmatched RANGE: no matching NEXT found")
 
     def _runner_ITER(self, instr: Instruction) -> None:
         """ITER: Start vec iteration. Pop end_idx, start_idx -> iterate vec[start:end]."""
