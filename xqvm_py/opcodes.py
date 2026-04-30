@@ -371,6 +371,14 @@ class Opcode(Enum):
         (),
         "Decrement: push(top - 1)",
     )
+    BITLEN = OpcodeMeta(
+        0x2C,
+        1,
+        1,
+        0,
+        (),
+        "Bit length: push(floor(log2(a))+1), 0 if a<=0",
+    )
 
     # Logical — Comparison (0x30-0x34)
     EQ = OpcodeMeta(
@@ -605,6 +613,14 @@ class Opcode(Enum):
         (OperandType.REGISTER,),
         "Push vec length onto stack",
     )
+    SLACK = OpcodeMeta(
+        0x54,
+        2,
+        0,
+        2,
+        (OperandType.REGISTER, OperandType.REGISTER),
+        "Append slack variable indices and power-of-two coefficients to vec pair",
+    )
 
     # Vector Math (0x5A-0x5B)
     IDXGRID = OpcodeMeta(
@@ -749,6 +765,38 @@ class Opcode(Enum):
         (OperandType.REGISTER,),
         "Add implication constraint with penalty",
     )
+    EQUALITY = OpcodeMeta(
+        0x74,
+        2,
+        0,
+        3,
+        (OperandType.REGISTER, OperandType.REGISTER, OperandType.REGISTER),
+        "Expand weighted equality constraint into QUBO terms",
+    )
+    ATLEAST = OpcodeMeta(
+        0x75,
+        2,
+        0,
+        2,
+        (OperandType.REGISTER, OperandType.REGISTER),
+        "Expand at-least-k constraint with slack variables",
+    )
+    ATLEASTW = OpcodeMeta(
+        0x76,
+        2,
+        0,
+        3,
+        (OperandType.REGISTER, OperandType.REGISTER, OperandType.REGISTER),
+        "Expand weighted at-least-k constraint with slack variables",
+    )
+    REDUCE = OpcodeMeta(
+        0x77,
+        3,
+        1,
+        1,
+        (OperandType.REGISTER,),
+        "Rosenberg reduction: replace product with auxiliary variable",
+    )
     ENERGY = OpcodeMeta(
         0x7F,
         0,
@@ -806,4 +854,4 @@ class Opcode(Enum):
 
 
 # Verify we have exactly 87 opcodes
-assert len(Opcode) == 87, f"Expected 87 opcodes, got {len(Opcode)}"
+assert len(Opcode) == 93, f"Expected 93 opcodes, got {len(Opcode)}"

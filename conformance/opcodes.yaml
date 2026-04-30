@@ -314,6 +314,7 @@ opcodes:
   - {code: 0x29, mnemonic: MAX, variant: Max, category: arithmetic, operands: [], stack_pop: 2, stack_push: 1, doc: "Pop b and a; push max(a, b)."}
   - {code: 0x2A, mnemonic: INC, variant: Inc, category: arithmetic, operands: [], stack_pop: 1, stack_push: 1, doc: "Pop a; push a + 1."}
   - {code: 0x2B, mnemonic: DEC, variant: Dec, category: arithmetic, operands: [], stack_pop: 1, stack_push: 1, doc: "Pop a; push a - 1."}
+  - {code: 0x2C, mnemonic: BITLEN, variant: BitLen, category: arithmetic, operands: [], stack_pop: 1, stack_push: 1, doc: "Pop a; push floor(log2(a))+1. If a <= 0, push 0."}
 
   # ------------------------------------------------------------------------
   # Comparison (0x30-0x34) — result is 1 if true, 0 if false
@@ -420,6 +421,17 @@ opcodes:
   - {code: 0x52, mnemonic: VECSET,  variant: VecSet,  category: vector-access, operands: [{name: reg, type: register, width: 1}], stack_pop: 2, stack_push: 0, doc: "Pop value and index; set `vec[index]` in the register's vec."}
   - {code: 0x53, mnemonic: VECLEN,  variant: VecLen,  category: vector-access, operands: [{name: reg, type: register, width: 1}], stack_pop: 0, stack_push: 1, doc: "Push the length of the register's vec onto the stack."}
 
+  - code: 0x54
+    mnemonic: SLACK
+    variant: Slack
+    category: vector-ops
+    operands:
+      - {name: indices, type: register, width: 1}
+      - {name: coeffs, type: register, width: 1}
+    stack_pop: 2
+    stack_push: 0
+    doc: "Pop capacity and start_index; append slack variable indices and power-of-two coefficients to two register vecs."
+
   # ------------------------------------------------------------------------
   # Index Math (0x5A-0x5B)
   # ------------------------------------------------------------------------
@@ -456,6 +468,51 @@ opcodes:
   - {code: 0x71, mnemonic: ONEHOTC, variant: OneHotC, category: xqmx-high-level, operands: [{name: reg, type: register, width: 1}], stack_pop: 2, stack_push: 0, doc: "Pop penalty and col; add a one-hot constraint over the grid column."}
   - {code: 0x72, mnemonic: EXCLUDE, variant: Exclude, category: xqmx-high-level, operands: [{name: reg, type: register, width: 1}], stack_pop: 3, stack_push: 0, doc: "Pop penalty, j, and i; add a mutual-exclusion constraint between variables i and j."}
   - {code: 0x73, mnemonic: IMPLIES, variant: Implies, category: xqmx-high-level, operands: [{name: reg, type: register, width: 1}], stack_pop: 3, stack_push: 0, doc: "Pop penalty, j, and i; add an implication constraint from variable i to variable j."}
+
+  - code: 0x74
+    mnemonic: EQUALITY
+    variant: Equality
+    category: xqmx-high-level
+    operands:
+      - {name: model, type: register, width: 1}
+      - {name: indices, type: register, width: 1}
+      - {name: coeffs, type: register, width: 1}
+    stack_pop: 2
+    stack_push: 0
+    doc: "Pop penalty and target; expand weighted equality constraint into QUBO terms on a model."
+
+  - code: 0x75
+    mnemonic: ATLEAST
+    variant: AtLeast
+    category: xqmx-high-level
+    operands:
+      - {name: model, type: register, width: 1}
+      - {name: indices, type: register, width: 1}
+    stack_pop: 2
+    stack_push: 0
+    doc: "Pop penalty and k; allocate slack variables and apply at-least-k constraint."
+
+  - code: 0x76
+    mnemonic: ATLEASTW
+    variant: AtLeastW
+    category: xqmx-high-level
+    operands:
+      - {name: model, type: register, width: 1}
+      - {name: indices, type: register, width: 1}
+      - {name: coeffs, type: register, width: 1}
+    stack_pop: 2
+    stack_push: 0
+    doc: "Pop penalty and k; allocate slack variables and apply weighted at-least-k constraint."
+
+  - code: 0x77
+    mnemonic: REDUCE
+    variant: Reduce
+    category: xqmx-high-level
+    operands:
+      - {name: model, type: register, width: 1}
+    stack_pop: 3
+    stack_push: 1
+    doc: "Pop P_aux, var_b, var_a; allocate auxiliary variable and add Rosenberg enforcement terms; push aux index."
 
   - code: 0x7F
     mnemonic: ENERGY
