@@ -448,6 +448,63 @@ def compute_energy(model: XQMX, sample: XQMX) -> int:
     return energy
 
 
+def expand_equality(
+    model: XQMX,
+    indices: list[int],
+    coeffs: list[int],
+    target: int,
+    penalty: int,
+) -> None:
+    """
+    Expand weighted equality constraint P * (sum(a_k * x_k) - b)^2 into QUBO terms.
+
+    For binary variables (x^2 = x):
+      linear[idx_k]      += P * a_k * (a_k - 2*b)
+      quad[idx_k, idx_m]  += P * 2 * a_k * a_m   for k < m
+    """
+    require_model_mode(model, "EQUALITY")
+
+    n = len(indices)
+    if n != len(coeffs):
+        raise ValueError(f"EQUALITY: indices length {n} != coeffs length {len(coeffs)}")
+
+    two_b = 2 * target
+    for k in range(n):
+        a_k = coeffs[k]
+        model.add_linear(indices[k], penalty * a_k * (a_k - two_b))
+
+    two_p = 2 * penalty
+    for k in range(n):
+        a_k = coeffs[k]
+        for m in range(k + 1, n):
+            a_m = coeffs[m]
+            model.add_quadratic(indices[k], indices[m], two_p * a_k * a_m)
+
+
+def expand_reduce(model: XQMX, var_a: int, var_b: int, p_aux: int) -> int:
+    """
+    Rosenberg reduction: replace x_a * x_b with auxiliary variable w.
+
+    Allocates w at model.size, adds enforcement terms, returns w.
+    """
+    require_model_mode(model, "REDUCE")
+
+    if var_a < 0 or var_a >= model.size:
+        raise ValueError(f"REDUCE: var_a={var_a} out of range [0, {model.size})")
+    if var_b < 0 or var_b >= model.size:
+        raise ValueError(f"REDUCE: var_b={var_b} out of range [0, {model.size})")
+
+    w = model.size
+    model.size += 1
+
+    model.add_quadratic(var_a, var_b, p_aux)
+    model.add_quadratic(var_a, w, -2 * p_aux)
+    model.add_quadratic(var_b, w, -2 * p_aux)
+    model.add_linear(w, 3 * p_aux)
+
+    return w
+
+
 def triu(i: int, j: int) -> int:
     """Upper triangular index: maps (i, j) to a linear index (auto-swaps so i < j)."""
     if i >= j:
