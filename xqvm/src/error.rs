@@ -121,6 +121,16 @@ pub enum Error {
         sample_len: usize,
     },
 
+    /// Two parallel vectors used together (e.g. EQUALITY's `indices` and
+    /// `coeffs` registers) have different lengths.
+    #[error("vector length mismatch: {what} has {a} entries but {other} has {b}")]
+    VecLengthMismatch {
+        what: &'static str,
+        a: usize,
+        other: &'static str,
+        b: usize,
+    },
+
     /// Execution exceeded the configured step limit.
     #[error("step limit of {limit} exceeded")]
     StepLimitExceeded { limit: u64 },
@@ -216,6 +226,7 @@ impl Error {
             | Self::CallDataIndex { .. }
             | Self::OutputIndex { .. }
             | Self::SizeMismatch { .. }
+            | Self::VecLengthMismatch { .. }
             | Self::StepLimitExceeded { .. } => None,
         }
     }

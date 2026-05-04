@@ -416,10 +416,10 @@ opcodes:
   # Vector Access (0x50-0x53)
   # ------------------------------------------------------------------------
 
-  - {code: 0x50, mnemonic: VECPUSH, variant: VecPush, category: vector-access, operands: [{name: reg, type: register, width: 1}], stack_pop: 1, stack_push: 0, doc: "Pop a value; append it to the register's vec."}
-  - {code: 0x51, mnemonic: VECGET,  variant: VecGet,  category: vector-access, operands: [{name: reg, type: register, width: 1}], stack_pop: 1, stack_push: 1, doc: "Pop index; push `vec[index]` from the register's vec."}
-  - {code: 0x52, mnemonic: VECSET,  variant: VecSet,  category: vector-access, operands: [{name: reg, type: register, width: 1}], stack_pop: 2, stack_push: 0, doc: "Pop value and index; set `vec[index]` in the register's vec."}
-  - {code: 0x53, mnemonic: VECLEN,  variant: VecLen,  category: vector-access, operands: [{name: reg, type: register, width: 1}], stack_pop: 0, stack_push: 1, doc: "Push the length of the register's vec onto the stack."}
+  - {code: 0x50, mnemonic: VECPUSH, variant: VecPush, category: vector-ops, operands: [{name: reg, type: register, width: 1}], stack_pop: 1, stack_push: 0, doc: "Pop a value; append it to the register's vec."}
+  - {code: 0x51, mnemonic: VECGET,  variant: VecGet,  category: vector-ops, operands: [{name: reg, type: register, width: 1}], stack_pop: 1, stack_push: 1, doc: "Pop index; push `vec[index]` from the register's vec."}
+  - {code: 0x52, mnemonic: VECSET,  variant: VecSet,  category: vector-ops, operands: [{name: reg, type: register, width: 1}], stack_pop: 2, stack_push: 0, doc: "Pop value and index; set `vec[index]` in the register's vec."}
+  - {code: 0x53, mnemonic: VECLEN,  variant: VecLen,  category: vector-ops, operands: [{name: reg, type: register, width: 1}], stack_pop: 0, stack_push: 1, doc: "Push the length of the register's vec onto the stack."}
 
   - code: 0x54
     mnemonic: SLACK

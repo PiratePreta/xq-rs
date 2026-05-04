@@ -114,6 +114,10 @@ impl Instruction {
     /// Returns the set of register slots whose current values are consumed
     /// by this instruction. Stack-only and control-flow-only instructions
     /// return an empty set.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive match over the full instruction set; splitting it would scatter the read/write classification across helper fns"
+    )]
     pub fn read_registers(&self) -> RegisterEffect {
         match self {
             // -- No register reads --
@@ -153,6 +157,7 @@ impl Instruction {
             | Self::Max { .. }
             | Self::Inc { .. }
             | Self::Dec { .. }
+            | Self::BitLen { .. }
             // Comparison
             | Self::Eq { .. }
             | Self::Lt { .. }
@@ -213,11 +218,24 @@ impl Instruction {
             | Self::OneHotR { reg }
             | Self::OneHotC { reg }
             | Self::Exclude { reg }
-            | Self::Implies { reg } => RegisterEffect::one(reg.slot()),
+            | Self::Implies { reg }
+            | Self::Reduce { model: reg } => RegisterEffect::one(reg.slot()),
 
             // -- Two register reads --
             Self::Energy { model, sample } => {
                 RegisterEffect::two(model.slot(), sample.slot())
+            }
+            // AtLeast reads model and indices vec.
+            Self::AtLeast { model, indices } => {
+                RegisterEffect::two(model.slot(), indices.slot())
+            }
+            // Slack reads+writes both vec registers; Equality and AtLeastW
+            // read the two vec registers (model is also read but
+            // RegisterEffect caps at two entries).
+            Self::Slack { indices, coeffs }
+            | Self::Equality { indices, coeffs, .. }
+            | Self::AtLeastW { indices, coeffs, .. } => {
+                RegisterEffect::two(indices.slot(), coeffs.slot())
             }
         }
     }
@@ -266,6 +284,7 @@ impl Instruction {
             | Self::Max { .. }
             | Self::Inc { .. }
             | Self::Dec { .. }
+            | Self::BitLen { .. }
             // Comparison
             | Self::Eq { .. }
             | Self::Lt { .. }
@@ -318,7 +337,7 @@ impl Instruction {
             | Self::Vec { reg }
             | Self::VecI { reg }
             | Self::VecX { reg }
-            // Read+write
+            // Read+write: single register
             | Self::VecPush { reg }
             | Self::VecSet { reg }
             | Self::SetLine { reg }
@@ -329,7 +348,17 @@ impl Instruction {
             | Self::OneHotR { reg }
             | Self::OneHotC { reg }
             | Self::Exclude { reg }
-            | Self::Implies { reg } => RegisterEffect::one(reg.slot()),
+            | Self::Implies { reg }
+            // EQUALITY / ATLEAST / ATLEASTW / REDUCE write to the model register.
+            | Self::Equality { model: reg, .. }
+            | Self::AtLeast { model: reg, .. }
+            | Self::AtLeastW { model: reg, .. }
+            | Self::Reduce { model: reg } => RegisterEffect::one(reg.slot()),
+
+            // SLACK mutates both vec registers.
+            Self::Slack { indices, coeffs } => {
+                RegisterEffect::two(indices.slot(), coeffs.slot())
+            }
         }
     }
 }
@@ -473,8 +502,8 @@ mod tests {
     }
 
     #[test]
-    fn instruction_count_is_87() {
-        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 87);
+    fn instruction_count_is_93() {
+        assert_eq!(opcodes!(all_instruction_opcode_pairs).len(), 93);
     }
 
     #[test]

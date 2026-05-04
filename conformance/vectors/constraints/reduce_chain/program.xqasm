@@ -1,0 +1,32 @@
+; reduce_chain: two chained Rosenberg reductions.
+;
+; REDUCE stack convention (per spec): [..., var_a, var_b, p_aux]
+; with p_aux on TOS (popped first).
+;
+; First REDUCE: var_a=0, var_b=1, p_aux=2 → w1=4 (model.size 4→5).
+;   linear[4] += 3 * p_aux = 6.
+; Second REDUCE: var_a=w1=4, var_b=2, p_aux=2 → w2=5 (model.size 5→6).
+;   linear[5] += 3 * p_aux = 6.
+
+PUSH 4
+BQMX r0
+
+PUSH 0           ; var_a
+PUSH 1           ; var_b
+PUSH 2           ; p_aux (TOS)
+REDUCE r0        ; pushes w1=4
+
+STOW r5          ; save w1
+LOAD r5          ; var_a = w1 = 4
+PUSH 2           ; var_b
+PUSH 2           ; p_aux (TOS)
+REDUCE r0        ; pushes w2=5
+
+PUSH 4
+GETLINE r0       ; linear[4] = 6
+PUSH 5
+GETLINE r0       ; linear[5] = 6
+
+LOAD r5          ; restore w1 = 4 onto stack
+
+HALT

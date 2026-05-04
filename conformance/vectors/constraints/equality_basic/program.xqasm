@@ -1,0 +1,39 @@
+; equality_basic: 3-variable unit-weight EQUALITY with penalty=2, target=1.
+;
+; EQUALITY expands P*(sum(a_k*x_k) - b)^2 into QUBO terms.
+; With coeffs=[1,1,1], target=1, penalty=2:
+;   linear[k]   = 2*1*(1-2) = -2 for each k
+;   quad[k,m]   = 2*2*1*1  =  4 for each pair
+;
+; This matches ONEHOTR with penalty=2 over 3 variables.
+
+PUSH 3
+BQMX r0
+
+VECI r1          ; indices vec
+PUSH 0
+VECPUSH r1
+PUSH 1
+VECPUSH r1
+PUSH 2
+VECPUSH r1
+
+VECI r2          ; coeffs vec
+PUSH 1
+VECPUSH r2
+PUSH 1
+VECPUSH r2
+PUSH 1
+VECPUSH r2
+
+PUSH 1           ; target
+PUSH 2           ; penalty
+EQUALITY r0 r1 r2
+
+PUSH 0
+GETLINE r0       ; linear[0] = -2
+PUSH 0
+PUSH 1
+GETQUAD r0       ; quad[0,1] = 4
+
+HALT
