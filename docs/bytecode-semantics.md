@@ -26,7 +26,7 @@ Columns:
 
 Reserved wire bytes (rejected by the decoder as illegal): `0x0D`, `0x19`, `0x35`.
 
-Total: **87 opcodes**.
+Total: **93 opcodes**.
 
 ---
 
@@ -94,6 +94,7 @@ Total: **87 opcodes**.
 | `0x29` | `MAX` | — | `2 → 1` | Pop b and a; push max(a, b). |
 | `0x2A` | `INC` | — | `1 → 1` | Pop a; push a + 1. |
 | `0x2B` | `DEC` | — | `1 → 1` | Pop a; push a - 1. |
+| `0x2C` | `BITLEN` | — | `1 → 1` | Pop a; push floor(log2(a))+1. If a <= 0, push 0. |
 
 ---
 
@@ -149,17 +150,6 @@ Total: **87 opcodes**.
 
 ---
 
-## Vector Access
-
-| Code | Mnemonic | Operands | Stack | Description |
-|------|----------|----------|-------|-------------|
-| `0x50` | `VECPUSH` | `reg: Register` | `1 → 0` | Pop a value; append it to the register's vec. |
-| `0x51` | `VECGET` | `reg: Register` | `1 → 1` | Pop index; push `vec[index]` from the register's vec. |
-| `0x52` | `VECSET` | `reg: Register` | `2 → 0` | Pop value and index; set `vec[index]` in the register's vec. |
-| `0x53` | `VECLEN` | `reg: Register` | `0 → 1` | Push the length of the register's vec onto the stack. |
-
----
-
 ## Index Math
 
 | Code | Mnemonic | Operands | Stack | Description |
@@ -202,6 +192,10 @@ Total: **87 opcodes**.
 | `0x71` | `ONEHOTC` | `reg: Register` | `2 → 0` | Pop penalty and col; add a one-hot constraint over the grid column. |
 | `0x72` | `EXCLUDE` | `reg: Register` | `3 → 0` | Pop penalty, j, and i; add a mutual-exclusion constraint between variables i and j. |
 | `0x73` | `IMPLIES` | `reg: Register` | `3 → 0` | Pop penalty, j, and i; add an implication constraint from variable i to variable j. |
+| `0x74` | `EQUALITY` | `model: Register`, `indices: Register`, `coeffs: Register` | `2 → 0` | Pop penalty and target; expand weighted equality constraint into QUBO terms on a model. |
+| `0x75` | `ATLEAST` | `model: Register`, `indices: Register` | `2 → 0` | Pop penalty and k; allocate slack variables and apply at-least-k constraint. |
+| `0x76` | `ATLEASTW` | `model: Register`, `indices: Register`, `coeffs: Register` | `2 → 0` | Pop penalty and k; allocate slack variables and apply weighted at-least-k constraint. |
+| `0x77` | `REDUCE` | `model: Register` | `3 → 1` | Pop P_aux, var_b, var_a; allocate auxiliary variable and add Rosenberg enforcement terms; push aux index. |
 | `0x7F` | `ENERGY` | `model: Register`, `sample: Register` | `0 → 1` | Compute the Hamiltonian energy of a sample against a model; push the result. |
 
 ---
