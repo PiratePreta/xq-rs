@@ -1,0 +1,51 @@
+; equality_additive: two consecutive EQUALITY calls accumulate coefficients.
+;
+; First call: penalty=2, target=1, coeffs=[1,1,1]:
+;   linear[0] += -2, quad[0,1] += 4
+; Second call: penalty=1, target=2, coeffs=[2,2,2]:
+;   linear[0] += 1*2*(2-4) = -4,  quad[0,1] += 2*1*2*2 = 8
+; Final: linear[0] = -6, quad[0,1] = 12
+
+PUSH 3
+BQMX r0
+
+VECI r1
+PUSH 0
+VECPUSH r1
+PUSH 1
+VECPUSH r1
+PUSH 2
+VECPUSH r1
+
+VECI r2
+PUSH 1
+VECPUSH r2
+PUSH 1
+VECPUSH r2
+PUSH 1
+VECPUSH r2
+
+PUSH 1           ; target
+PUSH 2           ; penalty
+EQUALITY r0 r1 r2
+
+; reuse same indices vec; replace coeffs with [2,2,2]
+VECI r3
+PUSH 2
+VECPUSH r3
+PUSH 2
+VECPUSH r3
+PUSH 2
+VECPUSH r3
+
+PUSH 2           ; target
+PUSH 1           ; penalty
+EQUALITY r0 r1 r3
+
+PUSH 0
+GETLINE r0       ; -6
+PUSH 0
+PUSH 1
+GETQUAD r0       ; 12
+
+HALT

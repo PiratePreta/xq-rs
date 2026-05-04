@@ -1,0 +1,15 @@
+; bitlen_small: verify BITLEN for values 0, 1, 2, 7, 8.
+;
+; BITLEN pops a; pushes floor(log2(a))+1, or 0 if a <= 0.
+
+PUSH 0
+BITLEN
+PUSH 1
+BITLEN
+PUSH 2
+BITLEN
+PUSH 7
+BITLEN
+PUSH 8
+BITLEN
+HALT

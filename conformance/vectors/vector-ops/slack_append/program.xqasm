@@ -1,0 +1,24 @@
+; slack_append: SLACK appends to pre-populated vecs rather than overwriting.
+;
+; Start: indices=[99], coeffs=[200].
+; SLACK(capacity=2, start_index=5) appends: indices=[99,5,6], coeffs=[200,1,2].
+;
+; Verify: vec length = 3, indices[2] = 6.
+
+VECI r0
+VECI r1
+
+PUSH 99
+VECPUSH r0       ; indices = [99]
+PUSH 200
+VECPUSH r1       ; coeffs  = [200]
+
+PUSH 5           ; start_index
+PUSH 2           ; capacity (TOS, popped first per spec)
+SLACK r0 r1
+
+VECLEN r0        ; → 3
+PUSH 2
+VECGET r0        ; indices[2] = 6
+
+HALT

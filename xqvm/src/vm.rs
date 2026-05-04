@@ -1022,6 +1022,17 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
+    fn exec_bit_len(&mut self, pos: usize) -> Result<StepResult, Error> {
+        let a = self.pop(pos)?;
+        let result = if a > 0 {
+            i64::from(i64::BITS - a.leading_zeros())
+        } else {
+            0
+        };
+        self.push_stack(result, pos)?;
+        Ok(StepResult::Continue)
+    }
+
     // -- Comparison --
 
     fn exec_eq(&mut self, pos: usize) -> Result<StepResult, Error> {
@@ -1295,6 +1306,57 @@ impl Vm {
         // Vec lengths are bounded by isize::MAX ≤ i64::MAX on all supported platforms;
         // try_from never fails in practice.
         self.push_stack(i64::try_from(len).unwrap_or(i64::MAX), pos)?;
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_slack(
+        &mut self,
+        pos: usize,
+        indices: Register,
+        coeffs: Register,
+    ) -> Result<StepResult, Error> {
+        let capacity = self.pop(pos)?;
+        let start_index = self.pop(pos)?;
+        if capacity <= 0 {
+            return Ok(StepResult::Continue);
+        }
+        // Append index entries to the indices register.
+        {
+            let vec =
+                self.reg_mut(indices)
+                    .as_vec_int_mut()
+                    .map_err(|got| Error::RegisterType {
+                        reg: indices.slot(),
+                        expected: "vec<int>",
+                        got,
+                    })?;
+            let mut power = 1i64;
+            let mut i = 0i64;
+            // `power > 0` guards against wrapping_mul overflow: once `power`
+            // reaches 2^62 the next doubling wraps to i64::MIN, which would
+            // otherwise be `<= capacity` and loop forever.
+            while power > 0 && power <= capacity {
+                vec.push(start_index + i);
+                power = power.wrapping_mul(2);
+                i += 1;
+            }
+        }
+        // Append power-of-two coefficient entries to the coeffs register.
+        {
+            let vec = self
+                .reg_mut(coeffs)
+                .as_vec_int_mut()
+                .map_err(|got| Error::RegisterType {
+                    reg: coeffs.slot(),
+                    expected: "vec<int>",
+                    got,
+                })?;
+            let mut power = 1i64;
+            while power > 0 && power <= capacity {
+                vec.push(power);
+                power = power.wrapping_mul(2);
+            }
+        }
         Ok(StepResult::Continue)
     }
 
@@ -1718,6 +1780,228 @@ impl Vm {
         Ok(StepResult::Continue)
     }
 
+    fn exec_equality(
+        &mut self,
+        pos: usize,
+        model: Register,
+        indices: Register,
+        coeffs: Register,
+    ) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let target = self.pop(pos)?;
+        let idx_vec: Vec<i64> = self
+            .reg(indices)
+            .as_vec_int()
+            .map_err(|got| Error::RegisterType {
+                reg: indices.slot(),
+                expected: "vec<int>",
+                got,
+            })?
+            .clone();
+        let coeff_vec: Vec<i64> = self
+            .reg(coeffs)
+            .as_vec_int()
+            .map_err(|got| Error::RegisterType {
+                reg: coeffs.slot(),
+                expected: "vec<int>",
+                got,
+            })?
+            .clone();
+        if idx_vec.len() != coeff_vec.len() {
+            return Err(Error::VecLengthMismatch {
+                what: "indices",
+                a: idx_vec.len(),
+                other: "coeffs",
+                b: coeff_vec.len(),
+            });
+        }
+        let m = self
+            .reg_mut(model)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: model.slot(),
+                expected: "model",
+                got,
+            })?;
+        let idx_us = indices_to_usize(&idx_vec, pos, m.size)?;
+        expand_equality(m, &idx_us, &coeff_vec, target, penalty);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_at_least(
+        &mut self,
+        pos: usize,
+        model: Register,
+        indices: Register,
+    ) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let k = self.pop(pos)?;
+        let idx_vec: Vec<i64> = self
+            .reg(indices)
+            .as_vec_int()
+            .map_err(|got| Error::RegisterType {
+                reg: indices.slot(),
+                expected: "vec<int>",
+                got,
+            })?
+            .clone();
+        let n = idx_vec.len();
+        // `idx_vec.len()` is bounded by isize::MAX ≤ i64::MAX on every
+        // supported platform; try_from never fails in practice.
+        let n_i64 = i64::try_from(n).unwrap_or(i64::MAX);
+        if k <= 0 || k > n_i64 {
+            return Err(Error::IndexOutOfBounds {
+                pos,
+                index: k,
+                len: n,
+            });
+        }
+        let m = self
+            .reg_mut(model)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: model.slot(),
+                expected: "model",
+                got,
+            })?;
+        let max_excess = n_i64 - k;
+        if max_excess <= 0 {
+            let unit_coeffs = vec![1i64; n];
+            let idx_us = indices_to_usize(&idx_vec, pos, m.size)?;
+            expand_equality(m, &idx_us, &unit_coeffs, k, penalty);
+            return Ok(StepResult::Continue);
+        }
+        // `max_excess > 0` here (the `<= 0` branch returned above), so
+        // `leading_zeros` operates on a positive i64 and the bit-length
+        // fits in u32; widening u32 → usize is lossless on every supported
+        // target.
+        let num_slacks = (i64::BITS - max_excess.leading_zeros()) as usize;
+        let slack_start = m.size;
+        let idx_us = indices_to_usize(&idx_vec, pos, slack_start)?;
+        m.size += num_slacks;
+        let mut all_indices = idx_us;
+        let mut all_coeffs = vec![1i64; n];
+        for i in 0..num_slacks {
+            all_indices.push(slack_start + i);
+            all_coeffs.push(-(1i64 << i));
+        }
+        expand_equality(m, &all_indices, &all_coeffs, k, penalty);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_at_least_w(
+        &mut self,
+        pos: usize,
+        model: Register,
+        indices: Register,
+        coeffs: Register,
+    ) -> Result<StepResult, Error> {
+        let penalty = self.pop(pos)?;
+        let k = self.pop(pos)?;
+        let idx_vec: Vec<i64> = self
+            .reg(indices)
+            .as_vec_int()
+            .map_err(|got| Error::RegisterType {
+                reg: indices.slot(),
+                expected: "vec<int>",
+                got,
+            })?
+            .clone();
+        let coeff_vec: Vec<i64> = self
+            .reg(coeffs)
+            .as_vec_int()
+            .map_err(|got| Error::RegisterType {
+                reg: coeffs.slot(),
+                expected: "vec<int>",
+                got,
+            })?
+            .clone();
+        let n = idx_vec.len();
+        if n != coeff_vec.len() {
+            return Err(Error::VecLengthMismatch {
+                what: "indices",
+                a: n,
+                other: "coeffs",
+                b: coeff_vec.len(),
+            });
+        }
+        if k <= 0 {
+            return Err(Error::IndexOutOfBounds {
+                pos,
+                index: k,
+                len: n,
+            });
+        }
+        let m = self
+            .reg_mut(model)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: model.slot(),
+                expected: "model",
+                got,
+            })?;
+        let weight_sum: i64 = coeff_vec.iter().sum();
+        let max_excess = weight_sum - k;
+        if max_excess <= 0 {
+            let idx_us = indices_to_usize(&idx_vec, pos, m.size)?;
+            expand_equality(m, &idx_us, &coeff_vec, k, penalty);
+            return Ok(StepResult::Continue);
+        }
+        // `max_excess > 0` here (the `<= 0` branch returned above), so
+        // `leading_zeros` operates on a positive i64 and the bit-length
+        // fits in u32; widening u32 → usize is lossless on every supported
+        // target.
+        let num_slacks = (i64::BITS - max_excess.leading_zeros()) as usize;
+        let slack_start = m.size;
+        let idx_us = indices_to_usize(&idx_vec, pos, slack_start)?;
+        m.size += num_slacks;
+        let mut all_indices = idx_us;
+        let mut all_coeffs = coeff_vec.clone();
+        for i in 0..num_slacks {
+            all_indices.push(slack_start + i);
+            all_coeffs.push(-(1i64 << i));
+        }
+        expand_equality(m, &all_indices, &all_coeffs, k, penalty);
+        Ok(StepResult::Continue)
+    }
+
+    fn exec_reduce(&mut self, pos: usize, model: Register) -> Result<StepResult, Error> {
+        let p_aux = self.pop(pos)?;
+        let var_b = self.pop(pos)?;
+        let var_a = self.pop(pos)?;
+        let m = self
+            .reg_mut(model)
+            .as_model_mut()
+            .map_err(|got| Error::RegisterType {
+                reg: model.slot(),
+                expected: "model",
+                got,
+            })?;
+        let ua =
+            usize::try_from(var_a)
+                .ok()
+                .filter(|&v| v < m.size)
+                .ok_or(Error::IndexOutOfBounds {
+                    pos,
+                    index: var_a,
+                    len: m.size,
+                })?;
+        let ub =
+            usize::try_from(var_b)
+                .ok()
+                .filter(|&v| v < m.size)
+                .ok_or(Error::IndexOutOfBounds {
+                    pos,
+                    index: var_b,
+                    len: m.size,
+                })?;
+        let w = expand_reduce(m, ua, ub, p_aux);
+        // `model.size` is bounded by isize::MAX ≤ i64::MAX on every
+        // supported platform; try_from never fails in practice.
+        self.push_stack(i64::try_from(w).unwrap_or(i64::MAX), pos)?;
+        Ok(StepResult::Continue)
+    }
+
     // -- Energy --
 
     fn exec_energy(
@@ -1756,6 +2040,68 @@ impl Vm {
         self.push_stack(energy, pos)?;
         Ok(StepResult::Continue)
     }
+}
+
+// ---------------------------------------------------------------------------
+// XQMX high-level expansion helpers
+// ---------------------------------------------------------------------------
+
+/// Expand P*(∑ aₖ·xₖ - b)² into linear and quadratic QUBO terms.
+///
+/// For binary variables (x² = x):
+///   linear[idxₖ]       += P·aₖ·(aₖ - 2b)
+///   quadratic[idxₖ,idxₘ] += 2P·aₖ·aₘ   for k < m
+///
+/// `indices` and `coeffs` are required by the caller to have equal length;
+/// the iterator-based access here cannot panic on out-of-range indexing.
+fn expand_equality(
+    model: &mut XqmxModel,
+    indices: &[usize],
+    coeffs: &[i64],
+    target: i64,
+    penalty: i64,
+) {
+    let two_b = 2 * target;
+    for (&idx, &a_k) in indices.iter().zip(coeffs.iter()) {
+        model.add_linear(idx, penalty * a_k * (a_k - two_b));
+    }
+    let two_p = 2 * penalty;
+    for (k, (&idx_k, &a_k)) in indices.iter().zip(coeffs.iter()).enumerate() {
+        for (&idx_m, &a_m) in indices.iter().zip(coeffs.iter()).skip(k + 1) {
+            model.add_quad(idx_k, idx_m, two_p * a_k * a_m);
+        }
+    }
+}
+
+/// Convert vector-of-i64 indices to vector-of-usize, validating each is
+/// in `[0, model_size)`. Returns the first out-of-range index as
+/// [`Error::IndexOutOfBounds`].
+fn indices_to_usize(idxs: &[i64], pos: usize, model_size: usize) -> Result<Vec<usize>, Error> {
+    idxs.iter()
+        .map(|&i| {
+            usize::try_from(i)
+                .ok()
+                .filter(|&u| u < model_size)
+                .ok_or(Error::IndexOutOfBounds {
+                    pos,
+                    index: i,
+                    len: model_size,
+                })
+        })
+        .collect()
+}
+
+/// Rosenberg degree reduction: replace `x_a·x_b` with auxiliary variable w.
+///
+/// Allocates w at `model.size`, adds 4 enforcement terms, returns w.
+fn expand_reduce(model: &mut XqmxModel, var_a: usize, var_b: usize, p_aux: i64) -> usize {
+    let w = model.size;
+    model.size += 1;
+    model.add_quad(var_a, var_b, p_aux);
+    model.add_quad(var_a, w, -2 * p_aux);
+    model.add_quad(var_b, w, -2 * p_aux);
+    model.add_linear(w, 3 * p_aux);
+    w
 }
 
 #[cfg(test)]

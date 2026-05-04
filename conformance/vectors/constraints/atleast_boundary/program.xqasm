@@ -1,0 +1,28 @@
+; atleast_boundary: 3 variables, k=3 (all must be set, max_excess=0).
+;
+; max_excess = 3-3 = 0, so expand_equality directly without slack:
+;   linear[k] = 1*1*(1-2*3) = -5 for each k
+;   quad[k,m] = 2*1*1*1     =  2 for each pair
+
+PUSH 3
+BQMX r0
+
+VECI r1
+PUSH 0
+VECPUSH r1
+PUSH 1
+VECPUSH r1
+PUSH 2
+VECPUSH r1
+
+PUSH 3           ; k
+PUSH 1           ; penalty
+ATLEAST r0 r1
+
+PUSH 0
+GETLINE r0       ; -5
+PUSH 0
+PUSH 1
+GETQUAD r0       ; 2
+
+HALT
