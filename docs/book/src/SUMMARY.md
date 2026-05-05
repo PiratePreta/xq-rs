@@ -34,7 +34,7 @@
   - [Logical Boolean](instructions/logical.md)
   - [Bitwise](instructions/bitwise.md)
   - [Allocators](instructions/allocators.md)
-  - [Vector Access](instructions/vector-access.md)
+  - [Vector Operations](instructions/vector-ops.md)
   - [Index Math](instructions/index-math.md)
   - [Coefficient Access](instructions/coefficient-access.md)
   - [Grid Operations](instructions/grid.md)

@@ -1,6 +1,6 @@
 # Instruction Set Reference
 
-This section documents all 84 XQVM instructions, organised by category. Each
+This section documents all 93 XQVM instructions, organised by category. Each
 instruction page includes the opcode byte, mnemonic, operands, stack effect,
 register effect, and a prose description.
 
@@ -43,7 +43,7 @@ actual variant names.
 The following byte values are unassigned gaps; the decoder rejects them as
 illegal:
 
-`0x08`, `0x0D`, `0x19`, `0x35`
+`0x0D`, `0x19`, `0x35`
 
 All other byte values outside the assigned ranges are likewise illegal.
 
@@ -83,6 +83,7 @@ All other byte values outside the assigned ranges are likewise illegal.
 | `0x29` | `MAX` | [Arithmetic](arithmetic.md) | Signed maximum |
 | `0x2A` | `INC` | [Arithmetic](arithmetic.md) | Wrapping increment |
 | `0x2B` | `DEC` | [Arithmetic](arithmetic.md) | Wrapping decrement |
+| `0x2C` | `BITLEN` | [Arithmetic](arithmetic.md) | Bit length of non-negative int |
 | `0x30` | `EQ` | [Comparison](comparison.md) | Equality |
 | `0x31` | `LT` | [Comparison](comparison.md) | Less-than |
 | `0x32` | `GT` | [Comparison](comparison.md) | Greater-than |
@@ -107,10 +108,11 @@ All other byte values outside the assigned ranges are likewise illegal.
 | `0x4A` | `VEC` | [Allocators](allocators.md) | Create empty vec |
 | `0x4B` | `VECI` | [Allocators](allocators.md) | Create empty vec\<int\> |
 | `0x4C` | `VECX` | [Allocators](allocators.md) | Create empty vec\<xqmx\> |
-| `0x50` | `VECPUSH` | [Vector Access](vector-access.md) | Append to vec |
-| `0x51` | `VECGET` | [Vector Access](vector-access.md) | Read vec element |
-| `0x52` | `VECSET` | [Vector Access](vector-access.md) | Write vec element |
-| `0x53` | `VECLEN` | [Vector Access](vector-access.md) | Push vec length |
+| `0x50` | `VECPUSH` | [Vector Operations](vector-ops.md) | Append to vec |
+| `0x51` | `VECGET` | [Vector Operations](vector-ops.md) | Read vec element |
+| `0x52` | `VECSET` | [Vector Operations](vector-ops.md) | Write vec element |
+| `0x53` | `VECLEN` | [Vector Operations](vector-ops.md) | Push vec length |
+| `0x54` | `SLACK` | [Vector Operations](vector-ops.md) | Generate slack variable entries |
 | `0x5A` | `IDXGRID` | [Index Math](index-math.md) | Row-major flat index |
 | `0x5B` | `IDXTRIU` | [Index Math](index-math.md) | Upper-triangular index |
 | `0x60` | `GETLINE` | [Coefficient Access](coefficient-access.md) | Get linear coefficient |
@@ -128,6 +130,10 @@ All other byte values outside the assigned ranges are likewise illegal.
 | `0x71` | `ONEHOTC` | [Constraints](constraints.md) | One-hot over column |
 | `0x72` | `EXCLUDE` | [Constraints](constraints.md) | Mutual exclusion |
 | `0x73` | `IMPLIES` | [Constraints](constraints.md) | Implication constraint |
+| `0x74` | `EQUALITY` | [Constraints](constraints.md) | Weighted equality constraint |
+| `0x75` | `ATLEAST` | [Constraints](constraints.md) | At-least-k constraint |
+| `0x76` | `ATLEASTW` | [Constraints](constraints.md) | Weighted at-least-k constraint |
+| `0x77` | `REDUCE` | [Constraints](constraints.md) | HOBO degree reduction |
 | `0x7F` | `ENERGY` | [Energy](energy.md) | Evaluate Hamiltonian |
 | `0x80` | `JUMP1` | [Control Flow](control-flow.md) | Unconditional jump by u8 label (narrow form) |
 | `0x81` | `JUMPI1` | [Control Flow](control-flow.md) | Conditional jump (if non-zero) by u8 label (narrow form) |
