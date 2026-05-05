@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from .expression import (
     BinOp,
+    BitLenExpr,
     ColFindExpr,
     ColSumExpr,
     CompareOp,
@@ -55,6 +56,7 @@ from .symbols import (
     OutputRef,
     QuadraticProxy,
     SampleRef,
+    VecRef,
 )
 
 # ---------------------------------------------------------------------------
@@ -120,6 +122,11 @@ def xq_bnot(val: Expr | int) -> UnaryOp:
     return UnaryOp("BNOT", coerce(val))
 
 
+def xq_bitlen(val: Expr | int) -> BitLenExpr:
+    """Bit length (floor(log2(value)) + 1): compiles to BITLEN opcode."""
+    return BitLenExpr(coerce(val))
+
+
 __all__ = [
     # DSL entry points
     "Problem",
@@ -137,6 +144,7 @@ __all__ = [
     "xq_or",
     "xq_xor",
     "xq_bnot",
+    "xq_bitlen",
     # Expression types (for advanced use / testing)
     "Expr",
     "Literal",
@@ -153,6 +161,7 @@ __all__ = [
     "RowSumExpr",
     "ColSumExpr",
     "VecLenExpr",
+    "BitLenExpr",
     "GetLineExpr",
     "GetQuadExpr",
     # Symbolic references
@@ -164,6 +173,7 @@ __all__ = [
     "CoefficientRef",
     "LinearProxy",
     "QuadraticProxy",
+    "VecRef",
     # Internals
     "Action",
 ]

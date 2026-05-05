@@ -6,7 +6,7 @@
         test test-unit test-integration test-doc test-miri test-python \
         opcode-parity opcode-parity-rust opcode-parity-python \
         conformance conformance-rust conformance-python \
-        example-smoke regen-example-goldens \
+        example-smoke \
         docs docs-regen docs-check docs-serve \
         changelog changelog-render changelog-release
 
@@ -193,22 +193,7 @@ repl: deps-python
 # against the checked-in golden.json. Catches drift between the two
 # interpreters and regressions in either path.
 example-smoke: deps-python
-	@set -e; \
-	for ex in tsp maxcut; do \
-		echo "==> examples/$$ex (python)"; \
-		uv run --no-sync python examples/$$ex/runner.py --seed 42 --interpreter python -o /tmp/xquad-$$ex-py.json; \
-		diff examples/$$ex/golden.json /tmp/xquad-$$ex-py.json; \
-		echo "==> examples/$$ex (rust)"; \
-		uv run --no-sync python examples/$$ex/runner.py --seed 42 --interpreter rust -o /tmp/xquad-$$ex-rust.json; \
-		diff examples/$$ex/golden.json /tmp/xquad-$$ex-rust.json; \
-	done
-
-# Regenerate each example's golden.json from the current Python-path
-# runner output. Use after an intentional runner / xqcp / xqsa change;
-# pair with `make example-smoke` to confirm parity on both paths.
-regen-example-goldens: deps-python
-	uv run --no-sync python examples/tsp/runner.py --seed 42 --interpreter python -o examples/tsp/golden.json
-	uv run --no-sync python examples/maxcut/runner.py --seed 42 --interpreter python -o examples/maxcut/golden.json
+	uv run --no-sync python scripts/example-smoke.py
 
 # -- Documentation ----------------------------------------------------------
 

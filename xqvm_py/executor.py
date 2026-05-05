@@ -911,6 +911,8 @@ class Executor:
         penalty, target = self.state.pop_n(2)
         indices = [indices_vec.get(i) for i in range(indices_vec.length)]
         coeffs = [coeffs_vec.get(i) for i in range(coeffs_vec.length)]
+        if indices:
+            model.size = max(model.size, max(indices) + 1)
         expand_equality(model, indices, coeffs, target, penalty)
 
     def _runner_ATLEAST(self, instr: Instruction) -> None:
