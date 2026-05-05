@@ -35,6 +35,7 @@ from .expression import (
     Expr,
     GetLineExpr,
     GetQuadExpr,
+    RegLoad,
     RowFindExpr,
     RowSumExpr,
     Types,
@@ -256,6 +257,51 @@ class ModelRef:
         """Apply implication constraint (a implies b)."""
         self._problem._record_implies(self, coord_a, coord_b, penalty)
 
+    def apply_equality(
+        self,
+        indices: VecRef,
+        coeffs: VecRef,
+        target: Expr | int,
+        penalty: int,
+    ) -> None:
+        """Apply weighted equality constraint: P*(sum(a_k*x_k) - b)^2."""
+        self._problem._record_equality(self, indices, coeffs, target, penalty)
+
+    def apply_atleast(self, indices: VecRef, k: Expr | int, penalty: int) -> None:
+        """Apply at-least-k constraint with unit weights."""
+        self._problem._record_atleast(self, indices, k, penalty)
+
+    def apply_atleastw(
+        self,
+        indices: VecRef,
+        coeffs: VecRef,
+        k: Expr | int,
+        penalty: int,
+    ) -> None:
+        """Apply weighted at-least-k constraint."""
+        self._problem._record_atleastw(self, indices, coeffs, k, penalty)
+
+    def apply_inequality(
+        self,
+        indices: VecRef,
+        coeffs: VecRef,
+        target: Expr | int,
+        capacity: Expr | int,
+        penalty: int,
+    ) -> None:
+        """Apply inequality constraint via SLACK + EQUALITY composition."""
+        self._problem._record_inequality(self, indices, coeffs, target, capacity, penalty)
+
+    def reduce(self, var_a: Expr | int, var_b: Expr | int, p_aux: Expr | int) -> RegLoad:
+        """HOBO degree reduction: replaces x_a*x_b with auxiliary variable w.
+
+        Allocates one auxiliary variable, records the REDUCE action, and
+        returns a RegLoad so the caller can chain further reductions.
+        """
+        stow_reg = self._problem._alloc.alloc()
+        self._problem._record_reduce(self, var_a, var_b, p_aux, stow_reg)
+        return RegLoad(stow_reg)
+
 
 # ---------------------------------------------------------------------------
 # OutputRef
@@ -289,3 +335,28 @@ class OutputRef:
         if self.type_ != Types.Vec:
             raise TypeError(f"Cannot index into {self.type_.value} output '{self.name}'")
         self._problem._record_output_setitem(self, index, value)
+
+
+# ---------------------------------------------------------------------------
+# VecRef
+# ---------------------------------------------------------------------------
+
+
+class VecRef:
+    """Symbolic reference to a user-constructed vector register."""
+
+    def __init__(self, problem: Problem, reg: int) -> None:
+        self._problem = problem
+        self.reg = reg
+
+    def push(self, value: Expr | int) -> None:
+        """Append a value to the vector (emits VECPUSH)."""
+        self._problem._record_vec_push(self, value)
+
+    def get(self, index: Expr | int) -> VecGetExpr:
+        """Access an element by index (emits VECGET)."""
+        return VecGetExpr(self.reg, coerce(index))
+
+    def veclen(self) -> VecLenExpr:
+        """Get the length of the vector (emits VECLEN)."""
+        return VecLenExpr(self.reg)

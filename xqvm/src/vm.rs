@@ -1823,6 +1823,12 @@ impl Vm {
                 expected: "model",
                 got,
             })?;
+        if let Some(&max_idx) = idx_vec.iter().max()
+            && let Ok(needed) = usize::try_from(max_idx + 1)
+            && needed > m.size
+        {
+            m.size = needed;
+        }
         let idx_us = indices_to_usize(&idx_vec, pos, m.size)?;
         expand_equality(m, &idx_us, &coeff_vec, target, penalty);
         Ok(StepResult::Continue)

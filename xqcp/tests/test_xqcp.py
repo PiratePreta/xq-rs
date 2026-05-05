@@ -157,6 +157,13 @@ class TestExpressions:
         Literal(1).emit(lines, 2)
         assert lines == ["    PUSH 1"]
 
+    def test_bitlen_expr(self) -> None:
+        from xqcp import BitLenExpr, Literal
+
+        lines: list[str] = []
+        BitLenExpr(Literal(7)).emit(lines, 0)
+        assert lines == ["PUSH 7", "BITLEN"]
+
 
 # ---------------------------------------------------------------------------
 # Compilation tests

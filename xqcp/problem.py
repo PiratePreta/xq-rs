@@ -33,7 +33,7 @@ from typing import Any
 from xqvm_py import XQMXDomain
 
 from .expression import Expr, RegLoad, Types, coerce
-from .symbols import InputRef, LoopVar, ModelRef, OutputRef, SampleRef
+from .symbols import InputRef, LoopVar, ModelRef, OutputRef, SampleRef, VecRef
 
 # ---------------------------------------------------------------------------
 # Register allocator
@@ -241,6 +241,23 @@ class Problem:
         )
         return RegLoad(reg)
 
+    def vec(self) -> VecRef:
+        """Allocate an untyped vector register. Returns a symbolic VecRef."""
+        reg = self._alloc.alloc()
+        ref = VecRef(self, reg)
+        self._actions.append(Action("vec_alloc", {"ref": ref}))
+        return ref
+
+    def slack(
+        self,
+        indices: VecRef,
+        coeffs: VecRef,
+        start_index: Expr | int,
+        capacity: Expr | int,
+    ) -> None:
+        """Generate slack variable entries and append to index/coefficient vectors."""
+        self._record_slack(indices, coeffs, start_index, capacity)
+
     def branch(self, *args: Any) -> None:
         """Multi-arm conditional branch.
 
@@ -437,6 +454,143 @@ class Problem:
         )
         self._actions.append(action)
         self._constraints.append(action)
+
+    def _record_equality(
+        self,
+        model: ModelRef,
+        indices: VecRef,
+        coeffs: VecRef,
+        target: Expr | int,
+        penalty: int,
+    ) -> None:
+        action = Action(
+            "equality",
+            {
+                "model": model,
+                "indices": indices,
+                "coeffs": coeffs,
+                "target": coerce(target),
+                "penalty": penalty,
+            },
+        )
+        self._actions.append(action)
+        self._constraints.append(action)
+
+    def _record_atleast(
+        self,
+        model: ModelRef,
+        indices: VecRef,
+        k: Expr | int,
+        penalty: int,
+    ) -> None:
+        action = Action(
+            "atleast",
+            {
+                "model": model,
+                "indices": indices,
+                "k": coerce(k),
+                "penalty": penalty,
+            },
+        )
+        self._actions.append(action)
+        self._constraints.append(action)
+
+    def _record_atleastw(
+        self,
+        model: ModelRef,
+        indices: VecRef,
+        coeffs: VecRef,
+        k: Expr | int,
+        penalty: int,
+    ) -> None:
+        action = Action(
+            "atleastw",
+            {
+                "model": model,
+                "indices": indices,
+                "coeffs": coeffs,
+                "k": coerce(k),
+                "penalty": penalty,
+            },
+        )
+        self._actions.append(action)
+        self._constraints.append(action)
+
+    def _record_reduce(
+        self,
+        model: ModelRef,
+        var_a: Expr | int,
+        var_b: Expr | int,
+        p_aux: Expr | int,
+        stow_reg: int,
+    ) -> None:
+        # REDUCE is not added to _constraints -- it is a structural
+        # transformation, not a domain constraint.
+        self._actions.append(
+            Action(
+                "reduce",
+                {
+                    "model": model,
+                    "var_a": coerce(var_a),
+                    "var_b": coerce(var_b),
+                    "p_aux": coerce(p_aux),
+                    "stow_reg": stow_reg,
+                },
+            )
+        )
+
+    def _record_inequality(
+        self,
+        model: ModelRef,
+        indices: VecRef,
+        coeffs: VecRef,
+        target: Expr | int,
+        capacity: Expr | int,
+        penalty: int,
+    ) -> None:
+        action = Action(
+            "inequality",
+            {
+                "model": model,
+                "indices": indices,
+                "coeffs": coeffs,
+                "target": coerce(target),
+                "capacity": coerce(capacity),
+                "penalty": penalty,
+            },
+        )
+        self._actions.append(action)
+        self._constraints.append(action)
+
+    def _record_vec_push(self, vec: VecRef, value: Expr | int) -> None:
+        self._actions.append(
+            Action(
+                "vec_push",
+                {
+                    "vec": vec,
+                    "value_expr": coerce(value),
+                },
+            )
+        )
+
+    def _record_slack(
+        self,
+        indices: VecRef,
+        coeffs: VecRef,
+        start_index: Expr | int,
+        capacity: Expr | int,
+    ) -> None:
+        self._actions.append(
+            Action(
+                "slack",
+                {
+                    "indices": indices,
+                    "coeffs": coeffs,
+                    "start_index": coerce(start_index),
+                    "capacity": coerce(capacity),
+                },
+            )
+        )
 
     def _record_output_append(self, output: OutputRef, value_expr: Expr | int) -> None:
         self._actions.append(
