@@ -1,0 +1,38 @@
+; atleastw_basic: 3 variables, weights=[2,3,5], k=4, penalty=1.
+;
+; sum(weights)=10, max_excess=6, num_slacks=bit_length(6)=3.
+; model.size grows from 3 to 6.
+; combined_coeffs = [2,3,5,-1,-2,-4].
+; expand_equality(target=4, penalty=1):
+;   linear[0] = 1*2*(2-8) = -12
+;   linear[5] = 1*(-4)*(-4-8) = 48  (last slack, proves growth)
+
+PUSH 3
+BQMX r0
+
+VECI r1
+PUSH 0
+VECPUSH r1
+PUSH 1
+VECPUSH r1
+PUSH 2
+VECPUSH r1
+
+VECI r2
+PUSH 2
+VECPUSH r2
+PUSH 3
+VECPUSH r2
+PUSH 5
+VECPUSH r2
+
+PUSH 4           ; k
+PUSH 1           ; penalty
+ATLEASTW r0 r1 r2
+
+PUSH 0
+GETLINE r0       ; -12
+PUSH 5
+GETLINE r0       ; 48
+
+HALT

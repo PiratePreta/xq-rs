@@ -1,0 +1,5 @@
+; bitlen_negative: BITLEN of a negative value returns 0.
+
+PUSH -5
+BITLEN
+HALT

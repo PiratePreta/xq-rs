@@ -30,9 +30,11 @@ from xqvm_py.xqmx import (
     col_indices,
     col_sum,
     compute_energy,
+    expand_equality,
     expand_exclude,
     expand_implies,
     expand_onehot,
+    expand_reduce,
     require_model_mode,
     row_find,
     row_indices,
@@ -365,6 +367,162 @@ class TestHLFExpandImplies:
         sample = XQMX.binary_sample(size=5)
         with pytest.raises(XQMXModeError):
             expand_implies(sample, 0, 1, penalty=1)
+
+
+class TestHLFExpandEquality:
+    """Tests for expand_equality high-level function."""
+
+    def test_unit_coeffs_matches_onehot(self):
+        """Unit coefficients with target=1 produces same terms as expand_onehot."""
+        model_eq = XQMX.binary_model(size=5)
+        model_oh = XQMX.binary_model(size=5)
+        indices = [0, 1, 2]
+        expand_equality(model_eq, indices, [1, 1, 1], target=1, penalty=10)
+        expand_onehot(model_oh, indices, penalty=10)
+        assert model_eq.linear == model_oh.linear
+        assert model_eq.quadratic == model_oh.quadratic
+
+    def test_linear_terms(self):
+        """Verify linear term formula: P * a_k * (a_k - 2*b)."""
+        model = XQMX.binary_model(size=3)
+        # indices=[0,1], coeffs=[2,3], target=5, penalty=1
+        # linear[0] = 1 * 2 * (2 - 10) = -16
+        # linear[1] = 1 * 3 * (3 - 10) = -21
+        expand_equality(model, [0, 1], [2, 3], target=5, penalty=1)
+        assert model.get_linear(0) == -16
+        assert model.get_linear(1) == -21
+
+    def test_quadratic_terms(self):
+        """Verify quadratic term formula: P * 2 * a_k * a_m for k < m."""
+        model = XQMX.binary_model(size=3)
+        # indices=[0,1], coeffs=[2,3], target=5, penalty=1
+        # quad[0,1] = 1 * 2 * 2 * 3 = 12
+        expand_equality(model, [0, 1], [2, 3], target=5, penalty=1)
+        assert model.get_quadratic(0, 1) == 12
+
+    def test_single_variable(self):
+        """Single variable produces only linear term, no quadratic."""
+        model = XQMX.binary_model(size=3)
+        # linear[0] = 10 * 3 * (3 - 2*2) = 10 * 3 * -1 = -30
+        expand_equality(model, [0], [3], target=2, penalty=10)
+        assert model.get_linear(0) == -30
+        assert len(model.quadratic) == 0
+
+    def test_zero_penalty(self):
+        """Zero penalty adds no terms."""
+        model = XQMX.binary_model(size=3)
+        expand_equality(model, [0, 1], [1, 1], target=1, penalty=0)
+        assert len(model.linear) == 0
+        assert len(model.quadratic) == 0
+
+    def test_length_mismatch_raises(self):
+        """Mismatched indices/coeffs lengths raise ValueError."""
+        model = XQMX.binary_model(size=5)
+        with pytest.raises(ValueError, match="indices length"):
+            expand_equality(model, [0, 1, 2], [1, 1], target=1, penalty=1)
+
+    def test_requires_model_mode(self):
+        """expand_equality requires MODEL mode."""
+        sample = XQMX.binary_sample(size=5)
+        with pytest.raises(XQMXModeError):
+            expand_equality(sample, [0, 1], [1, 1], target=1, penalty=1)
+
+    def test_three_vars_weighted(self):
+        """Three variables with distinct weights — verify all terms."""
+        model = XQMX.binary_model(size=5)
+        # indices=[0,1,2], coeffs=[1,2,3], target=3, penalty=2
+        # linear[0] = 2 * 1 * (1 - 6) = -10
+        # linear[1] = 2 * 2 * (2 - 6) = -16
+        # linear[2] = 2 * 3 * (3 - 6) = -18
+        # quad[0,1] = 2 * 2 * 1 * 2 = 8
+        # quad[0,2] = 2 * 2 * 1 * 3 = 12
+        # quad[1,2] = 2 * 2 * 2 * 3 = 24
+        expand_equality(model, [0, 1, 2], [1, 2, 3], target=3, penalty=2)
+        assert model.get_linear(0) == -10
+        assert model.get_linear(1) == -16
+        assert model.get_linear(2) == -18
+        assert model.get_quadratic(0, 1) == 8
+        assert model.get_quadratic(0, 2) == 12
+        assert model.get_quadratic(1, 2) == 24
+
+
+class TestHLFExpandReduce:
+    """Tests for expand_reduce high-level function."""
+
+    def test_allocates_auxiliary(self):
+        """expand_reduce grows model.size by 1 and returns old size."""
+        model = XQMX.binary_model(size=3)
+        w = expand_reduce(model, 0, 1, p_aux=10)
+        assert w == 3
+        assert model.size == 4
+
+    def test_rosenberg_terms(self):
+        """Verify Rosenberg enforcement terms."""
+        model = XQMX.binary_model(size=3)
+        w = expand_reduce(model, 0, 1, p_aux=10)
+        # quad[0,1] += 10
+        assert model.get_quadratic(0, 1) == 10
+        # quad[0,w] += -20
+        assert model.get_quadratic(0, w) == -20
+        # quad[1,w] += -20
+        assert model.get_quadratic(1, w) == -20
+        # linear[w] += 30
+        assert model.get_linear(w) == 30
+
+    def test_var_a_out_of_range_raises(self):
+        """var_a out of range raises ValueError."""
+        model = XQMX.binary_model(size=3)
+        with pytest.raises(ValueError, match="var_a"):
+            expand_reduce(model, 5, 1, p_aux=10)
+
+    def test_var_b_out_of_range_raises(self):
+        """var_b out of range raises ValueError."""
+        model = XQMX.binary_model(size=3)
+        with pytest.raises(ValueError, match="var_b"):
+            expand_reduce(model, 0, 5, p_aux=10)
+
+    def test_negative_var_raises(self):
+        """Negative variable index raises ValueError."""
+        model = XQMX.binary_model(size=3)
+        with pytest.raises(ValueError):
+            expand_reduce(model, -1, 1, p_aux=10)
+
+    def test_requires_model_mode(self):
+        """expand_reduce requires MODEL mode."""
+        sample = XQMX.binary_sample(size=5)
+        with pytest.raises(XQMXModeError):
+            expand_reduce(sample, 0, 1, p_aux=10)
+
+    def test_chaining(self):
+        """Two successive REDUCE calls allocate distinct auxiliaries."""
+        model = XQMX.binary_model(size=4)
+        w1 = expand_reduce(model, 0, 1, p_aux=10)
+        w2 = expand_reduce(model, 2, 3, p_aux=10)
+        assert w1 == 4
+        assert w2 == 5
+        assert model.size == 6
+
+    def test_brute_force_cubic(self):
+        """Brute-force: minimum QUBO energy at w = x_a * x_b for all assignments."""
+        model = XQMX.binary_model(size=2)
+        w = expand_reduce(model, 0, 1, p_aux=10)
+        assert w == 2
+
+        for x_a in (0, 1):
+            for x_b in (0, 1):
+                expected_w = x_a * x_b
+                best_energy = None
+                best_w_val = None
+                for w_val in (0, 1):
+                    sample = XQMX.binary_sample(size=3)
+                    sample.set_linear(0, x_a)
+                    sample.set_linear(1, x_b)
+                    sample.set_linear(2, w_val)
+                    e = compute_energy(model, sample)
+                    if best_energy is None or e < best_energy:
+                        best_energy = e
+                        best_w_val = w_val
+                assert best_w_val == expected_w, f"x_a={x_a}, x_b={x_b}: expected w={expected_w}, got w={best_w_val}"
 
 
 class TestComputeEnergy:

@@ -226,9 +226,15 @@ macro_rules! impl_builder_methods {
         impl_builder_methods!($($rest)*);
     };
 
-    // Skip ENERGY -- `{model: ...}`
+    // Skip ENERGY / multi-register opcodes -- `{model: ...}`
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
        {model: $($rest_f:tt)*}), $($rest:tt)* ) => {
+        impl_builder_methods!($($rest)*);
+    };
+
+    // Skip SLACK -- `{indices: ...}`
+    ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
+       {indices: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 

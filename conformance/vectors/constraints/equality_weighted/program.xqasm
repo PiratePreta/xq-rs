@@ -1,0 +1,36 @@
+; equality_weighted: EQUALITY with distinct coefficients.
+;
+; indices=[0,1,2], coeffs=[5,3,7], target=10, penalty=1:
+;   linear[0] = 1*5*(5-20)  = -75
+;   quad[0,1] = 2*1*5*3     =  30
+
+PUSH 3
+BQMX r0
+
+VECI r1
+PUSH 0
+VECPUSH r1
+PUSH 1
+VECPUSH r1
+PUSH 2
+VECPUSH r1
+
+VECI r2
+PUSH 5
+VECPUSH r2
+PUSH 3
+VECPUSH r2
+PUSH 7
+VECPUSH r2
+
+PUSH 10          ; target
+PUSH 1           ; penalty
+EQUALITY r0 r1 r2
+
+PUSH 0
+GETLINE r0       ; -75
+PUSH 0
+PUSH 1
+GETQUAD r0       ; 30
+
+HALT

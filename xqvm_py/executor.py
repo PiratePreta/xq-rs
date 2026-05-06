@@ -42,9 +42,12 @@ from .xqmx import (
     col_find,
     col_indices,
     compute_energy,
+    expand_equality,
     expand_exclude,
     expand_implies,
     expand_onehot,
+    expand_reduce,
+    require_model_mode,
     row_find,
     row_indices,
 )
@@ -152,6 +155,7 @@ class Executor:
             Opcode.MAX: self._runner_MAX,
             Opcode.INC: self._runner_INC,
             Opcode.DEC: self._runner_DEC,
+            Opcode.BITLEN: self._runner_BITLEN,
             # Comparison
             Opcode.EQ: self._runner_EQ,
             Opcode.LT: self._runner_LT,
@@ -185,6 +189,7 @@ class Executor:
             Opcode.VECGET: self._runner_VECGET,
             Opcode.VECSET: self._runner_VECSET,
             Opcode.VECLEN: self._runner_VECLEN,
+            Opcode.SLACK: self._runner_SLACK,
             # XQMX Access
             Opcode.GETLINE: self._runner_GETLINE,
             Opcode.SETLINE: self._runner_SETLINE,
@@ -206,6 +211,10 @@ class Executor:
             Opcode.ONEHOTC: self._runner_ONEHOTC,
             Opcode.EXCLUDE: self._runner_EXCLUDE,
             Opcode.IMPLIES: self._runner_IMPLIES,
+            Opcode.EQUALITY: self._runner_EQUALITY,
+            Opcode.ATLEAST: self._runner_ATLEAST,
+            Opcode.ATLEASTW: self._runner_ATLEASTW,
+            Opcode.REDUCE: self._runner_REDUCE,
             Opcode.ENERGY: self._runner_ENERGY,
         }
 
@@ -565,6 +574,11 @@ class Executor:
         value = self.state.pop()
         self.state.push(value - 1)
 
+    def _runner_BITLEN(self, instr: Instruction) -> None:
+        """BITLEN: Push bit length of top value."""
+        a = self.state.pop()
+        self.state.push(a.bit_length() if a > 0 else 0)
+
     def _runner_EQ(self, instr: Instruction) -> None:
         """EQ: push(1 if second == top else 0)."""
         b, a = self.state.pop_n(2)
@@ -732,6 +746,23 @@ class Executor:
         vec = self._get_register_as_vec(reg)
         self.state.push(vec.length)
 
+    def _runner_SLACK(self, instr: Instruction) -> None:
+        """SLACK: Append slack variable indices and power-of-two coefficients."""
+        indices_reg = instr.operands[0]
+        coeffs_reg = instr.operands[1]
+        indices_vec = self._get_register_as_vec(indices_reg)
+        coeffs_vec = self._get_register_as_vec(coeffs_reg)
+        capacity, start_index = self.state.pop_n(2)
+        if capacity <= 0:
+            return
+        power = 1
+        i = 0
+        while power <= capacity:
+            indices_vec.push(start_index + i)
+            coeffs_vec.push(power)
+            power *= 2
+            i += 1
+
     def _runner_GETLINE(self, instr: Instruction) -> None:
         """GETLINE: Get linear coefficient."""
         reg = instr.operands[0]
@@ -868,6 +899,80 @@ class Executor:
         model = self._get_register_as_xqmx(reg)
         penalty, j, i = self.state.pop_n(3)
         expand_implies(model, i, j, penalty)
+
+    def _runner_EQUALITY(self, instr: Instruction) -> None:
+        """EQUALITY: Expand weighted equality constraint into QUBO terms."""
+        model_reg = instr.operands[0]
+        indices_reg = instr.operands[1]
+        coeffs_reg = instr.operands[2]
+        model = self._get_register_as_xqmx(model_reg)
+        indices_vec = self._get_register_as_vec(indices_reg)
+        coeffs_vec = self._get_register_as_vec(coeffs_reg)
+        penalty, target = self.state.pop_n(2)
+        indices = [indices_vec.get(i) for i in range(indices_vec.length)]
+        coeffs = [coeffs_vec.get(i) for i in range(coeffs_vec.length)]
+        if indices:
+            model.size = max(model.size, max(indices) + 1)
+        expand_equality(model, indices, coeffs, target, penalty)
+
+    def _runner_ATLEAST(self, instr: Instruction) -> None:
+        """ATLEAST: At-least-k constraint with slack variables."""
+        model_reg = instr.operands[0]
+        indices_reg = instr.operands[1]
+        model = self._get_register_as_xqmx(model_reg)
+        indices_vec = self._get_register_as_vec(indices_reg)
+        penalty, k = self.state.pop_n(2)
+        require_model_mode(model, "ATLEAST")
+        n = indices_vec.length
+        if k <= 0 or k > n:
+            raise ValueError(f"ATLEAST: k={k} out of valid range (0, {n}]")
+        orig_indices = [indices_vec.get(i) for i in range(n)]
+        max_excess = n - k
+        if max_excess <= 0:
+            expand_equality(model, orig_indices, [1] * n, k, penalty)
+            return
+        num_slacks = max_excess.bit_length()
+        slack_start = model.size
+        model.size += num_slacks
+        combined_indices = orig_indices + [slack_start + i for i in range(num_slacks)]
+        combined_coeffs = [1] * n + [-(1 << i) for i in range(num_slacks)]
+        expand_equality(model, combined_indices, combined_coeffs, k, penalty)
+
+    def _runner_ATLEASTW(self, instr: Instruction) -> None:
+        """ATLEASTW: Weighted at-least-k constraint with slack variables."""
+        model_reg = instr.operands[0]
+        indices_reg = instr.operands[1]
+        coeffs_reg = instr.operands[2]
+        model = self._get_register_as_xqmx(model_reg)
+        indices_vec = self._get_register_as_vec(indices_reg)
+        coeffs_vec = self._get_register_as_vec(coeffs_reg)
+        penalty, k = self.state.pop_n(2)
+        require_model_mode(model, "ATLEASTW")
+        n = indices_vec.length
+        if n != coeffs_vec.length:
+            raise ValueError(f"ATLEASTW: indices length {n} != coeffs length {coeffs_vec.length}")
+        if k <= 0:
+            raise ValueError(f"ATLEASTW: k={k} must be > 0")
+        orig_indices = [indices_vec.get(i) for i in range(n)]
+        weights = [coeffs_vec.get(i) for i in range(n)]
+        max_excess = sum(weights) - k
+        if max_excess <= 0:
+            expand_equality(model, orig_indices, weights, k, penalty)
+            return
+        num_slacks = max_excess.bit_length()
+        slack_start = model.size
+        model.size += num_slacks
+        combined_indices = orig_indices + [slack_start + i for i in range(num_slacks)]
+        combined_coeffs = weights + [-(1 << i) for i in range(num_slacks)]
+        expand_equality(model, combined_indices, combined_coeffs, k, penalty)
+
+    def _runner_REDUCE(self, instr: Instruction) -> None:
+        """REDUCE: Rosenberg degree reduction."""
+        model_reg = instr.operands[0]
+        model = self._get_register_as_xqmx(model_reg)
+        p_aux, var_b, var_a = self.state.pop_n(3)
+        w = expand_reduce(model, var_a, var_b, p_aux)
+        self.state.push(w)
 
     def _runner_ENERGY(self, instr: Instruction) -> None:
         """ENERGY: Compute energy of sample against model."""

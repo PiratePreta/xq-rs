@@ -258,7 +258,15 @@ fn run_python_file(
     program_path: &std::path::Path,
 ) -> Result<Outcome, String> {
     let output = Command::new(runner)
-        .args(["run", "python", "-m", "xqvm_py", "run", "--inputs"])
+        .args([
+            "run",
+            "--no-sync",
+            "python",
+            "-m",
+            "xqvm_py",
+            "run",
+            "--inputs",
+        ])
         .arg(vector.dir.join("inputs.json"))
         .args(["--outputs", &vector.inputs.output_slots.to_string()])
         .arg(program_path)

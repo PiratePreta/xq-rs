@@ -1,0 +1,35 @@
+; reduce_basic: Rosenberg reduction on a 3-variable model.
+;
+; REDUCE stack convention (per spec): [..., var_a, var_b, p_aux]
+; with p_aux on TOS (popped first). Allocates w = model.size; pushes w.
+; With var_a=0, var_b=1, p_aux=1:
+;   w = 3, model.size becomes 4.
+;   quad[0,1] += 1,  quad[0,3] += -2,  quad[1,3] += -2,  linear[3] += 3.
+;
+; Verify the enforcement coefficients with GETQUAD/GETLINE so the vector
+; distinguishes correct REDUCE expansion from operand-swap regressions.
+
+PUSH 3
+BQMX r0
+
+PUSH 0           ; var_a
+PUSH 1           ; var_b
+PUSH 1           ; p_aux (TOS)
+REDUCE r0        ; pushes w=3
+
+PUSH 0           ; i=0
+PUSH 1           ; j=1
+GETQUAD r0       ; quad[0,1] = 1
+
+PUSH 0           ; i=0
+PUSH 3           ; j=3
+GETQUAD r0       ; quad[0,3] = -2
+
+PUSH 1           ; i=1
+PUSH 3           ; j=3
+GETQUAD r0       ; quad[1,3] = -2
+
+PUSH 3           ; i=3
+GETLINE r0       ; linear[3] = 3
+
+HALT

@@ -98,8 +98,8 @@ const _: () = assert!(
 mod tests {
     #[test]
     fn tables_have_expected_size() {
-        assert_eq!(super::MACRO_OPCODES.len(), 87);
-        assert_eq!(super::YAML_OPCODES.len(), 87);
+        assert_eq!(super::MACRO_OPCODES.len(), 93);
+        assert_eq!(super::YAML_OPCODES.len(), 93);
     }
 
     #[test]

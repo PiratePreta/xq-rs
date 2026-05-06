@@ -43,7 +43,7 @@ from .expression import (
     line,
     resolve_coord,
 )
-from .symbols import InputRef, LoopVar, ModelRef, OutputRef
+from .symbols import InputRef, LoopVar, ModelRef, OutputRef, VecRef
 
 if TYPE_CHECKING:
     from .problem import Action, Problem
@@ -178,7 +178,16 @@ def _input_reg(expr: Expr) -> int | None:
 
 def _partition_body(body_actions: list[Action]) -> tuple[list[Action], list[Action]]:
     """Split body actions into objective and constraint sections by top-level block."""
-    constraint_kinds = {"onehot_row", "onehot_col", "exclude", "implies"}
+    constraint_kinds = {
+        "onehot_row",
+        "onehot_col",
+        "exclude",
+        "implies",
+        "equality",
+        "atleast",
+        "atleastw",
+        "inequality",
+    }
     blocks: list[list[Action]] = []
     current_block: list[Action] = []
     depth = 0
@@ -264,6 +273,51 @@ def _emit_body_actions(actions: list[Action], lines: list[str], indent: int, tar
 
         elif kind == "implies":
             _emit_implies(d, lines, indent)
+
+        elif kind == "vec_alloc":
+            ref: VecRef = d["ref"]
+            lines.append(line(f"VEC r{ref.reg}", indent))
+
+        elif kind == "vec_push":
+            d["value_expr"].emit(lines, indent)
+            lines.append(line(f"VECPUSH r{d['vec'].reg}", indent))
+
+        elif kind == "slack":
+            d["start_index"].emit(lines, indent)
+            d["capacity"].emit(lines, indent)
+            lines.append(line(f"SLACK r{d['indices'].reg} r{d['coeffs'].reg}", indent))
+
+        elif kind == "equality":
+            d["target"].emit(lines, indent)
+            lines.append(line(f"PUSH {fmt_int(d['penalty'])}", indent))
+            lines.append(line(f"EQUALITY r{d['model'].reg} r{d['indices'].reg} r{d['coeffs'].reg}", indent))
+
+        elif kind == "atleast":
+            d["k"].emit(lines, indent)
+            lines.append(line(f"PUSH {fmt_int(d['penalty'])}", indent))
+            lines.append(line(f"ATLEAST r{d['model'].reg} r{d['indices'].reg}", indent))
+
+        elif kind == "atleastw":
+            d["k"].emit(lines, indent)
+            lines.append(line(f"PUSH {fmt_int(d['penalty'])}", indent))
+            lines.append(line(f"ATLEASTW r{d['model'].reg} r{d['indices'].reg} r{d['coeffs'].reg}", indent))
+
+        elif kind == "reduce":
+            d["var_a"].emit(lines, indent)
+            d["var_b"].emit(lines, indent)
+            d["p_aux"].emit(lines, indent)
+            lines.append(line(f"REDUCE r{d['model'].reg}", indent))
+            lines.append(line(f"STOW r{d['stow_reg']}", indent))
+
+        elif kind == "inequality":
+            # Composed SLACK + EQUALITY: target is the slack start index,
+            # capacity is both the slack bound and the equality target.
+            d["target"].emit(lines, indent)
+            d["capacity"].emit(lines, indent)
+            lines.append(line(f"SLACK r{d['indices'].reg} r{d['coeffs'].reg}", indent))
+            d["capacity"].emit(lines, indent)
+            lines.append(line(f"PUSH {fmt_int(d['penalty'])}", indent))
+            lines.append(line(f"EQUALITY r{d['model'].reg} r{d['indices'].reg} r{d['coeffs'].reg}", indent))
 
         elif kind == "branch":
             _emit_branch(d, lines, indent, targets)
@@ -435,9 +489,9 @@ def _emit_branch(d: dict[str, Any], lines: list[str], indent: int, targets: _Tar
                 _emit_body_actions(arm_actions, lines, indent + 1, targets)
 
             lines.append(line(f"JUMP .{end_target}", indent + 1))
-            lines.append(line("TARGET", indent))
+            lines.append(line(f"TARGET .{skip_target}", indent))
 
-    lines.append(line("TARGET", indent))
+    lines.append(line(f"TARGET .{end_target}", indent))
 
 
 # ---------------------------------------------------------------------------

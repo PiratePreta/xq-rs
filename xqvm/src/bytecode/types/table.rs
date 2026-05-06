@@ -17,7 +17,7 @@
 
 /// Invoke `$mac!` with the complete XQVM opcode table.
 ///
-/// The callback macro receives the full comma-separated list of 87 opcode
+/// The callback macro receives the full comma-separated list of 93 opcode
 /// entries. Each entry has the form:
 ///
 /// ```text
@@ -144,6 +144,8 @@ macro_rules! opcodes {
              {}),
             (0x2B, Dec,     "DEC",      "Pop a; push a - 1.",
              {}),
+            (0x2C, BitLen,  "BITLEN",   "Pop a; push floor(log2(a))+1. If a <= 0, push 0.",
+             {}),
             // ---------------------------------------------------------------
             // Comparison  (result: 1 if true, 0 if false)
             // ---------------------------------------------------------------
@@ -208,7 +210,7 @@ macro_rules! opcodes {
             (0x4C, VecX,    "VECX",     "Create an empty `vec<xqmx>` in a register.",
              {reg: $crate::Register}),
             // ---------------------------------------------------------------
-            // Vector Access
+            // Vector Operations
             // ---------------------------------------------------------------
             (0x50, VecPush, "VECPUSH",  "Pop a value; append it to the register's vec.",
              {reg: $crate::Register}),
@@ -218,6 +220,8 @@ macro_rules! opcodes {
              {reg: $crate::Register}),
             (0x53, VecLen,  "VECLEN",   "Push the length of the register's vec onto the stack.",
              {reg: $crate::Register}),
+            (0x54, Slack,   "SLACK",    "Pop capacity and `start_index`; append slack variable indices and power-of-two coefficients to two register vecs.",
+             {indices: $crate::Register, coeffs: $crate::Register}),
             // ---------------------------------------------------------------
             // Index Math
             // ---------------------------------------------------------------
@@ -262,9 +266,17 @@ macro_rules! opcodes {
              {reg: $crate::Register}),
             (0x72, Exclude, "EXCLUDE",  "Pop penalty, j, and i; add a mutual-exclusion constraint between variables i and j.",
              {reg: $crate::Register}),
-            (0x73, Implies, "IMPLIES",  "Pop penalty, j, and i; add an implication constraint from variable i to variable j.",
+            (0x73, Implies,  "IMPLIES",  "Pop penalty, j, and i; add an implication constraint from variable i to variable j.",
              {reg: $crate::Register}),
-            (0x7F, Energy,  "ENERGY",   "Compute the Hamiltonian energy of a sample against a model; push the result.",
+            (0x74, Equality, "EQUALITY", "Pop penalty and target; expand weighted equality constraint into QUBO terms on a model.",
+             {model: $crate::Register, indices: $crate::Register, coeffs: $crate::Register}),
+            (0x75, AtLeast,  "ATLEAST",  "Pop penalty and k; allocate slack variables and apply at-least-k constraint.",
+             {model: $crate::Register, indices: $crate::Register}),
+            (0x76, AtLeastW, "ATLEASTW", "Pop penalty and k; allocate slack variables and apply weighted at-least-k constraint.",
+             {model: $crate::Register, indices: $crate::Register, coeffs: $crate::Register}),
+            (0x77, Reduce,   "REDUCE",   "Pop `P_aux`, `var_b`, `var_a`; allocate auxiliary variable and add Rosenberg enforcement terms; push aux index.",
+             {model: $crate::Register}),
+            (0x7F, Energy,   "ENERGY",   "Compute the Hamiltonian energy of a sample against a model; push the result.",
              {model: $crate::Register, sample: $crate::Register}),
             // ---------------------------------------------------------------
             // Special

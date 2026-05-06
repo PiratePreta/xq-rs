@@ -46,7 +46,7 @@ push 42
 Push 42
 ```
 
-The assembler recognises all 84 XQVM instruction mnemonics. `PUSH` is a
+The assembler recognises all 93 XQVM instruction mnemonics. `PUSH` is a
 special mnemonic that accepts an integer operand and automatically selects the
 smallest `PUSH1`--`PUSH8` encoding. `PUSHC` is an alias for `PUSH`.
 

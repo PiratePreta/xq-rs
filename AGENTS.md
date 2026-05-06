@@ -236,7 +236,7 @@ After modifying files, run `make fmt` to format everything, or the per-file equi
 
 #### Key Patterns
 
-**X-Macro opcode table** (`xqvm/src/bytecode/types/table.rs`) -- The `opcodes!` macro is the single source of truth for all 87 instructions. The `Opcode` enum, `Instruction` enum, mnemonic strings, and operand arity are all derived from it. When adding or changing an opcode, edit only this table.
+**X-Macro opcode table** (`xqvm/src/bytecode/types/table.rs`) -- The `opcodes!` macro is the single source of truth for all 93 instructions. The `Opcode` enum, `Instruction` enum, mnemonic strings, and operand arity are all derived from it. When adding or changing an opcode, edit only this table.
 
 **Two-pass label resolution** (`xqvm/src/bytecode/builder.rs`) -- `InstructionBuilder` records unresolved jump fixups on the first pass and patches offsets at `build()` time, supporting both forward and backward label references.
 
@@ -246,9 +246,9 @@ After modifying files, run `make fmt` to format everything, or the per-file equi
 
 **VM interpreter** (`xqvm/`) -- `Vm` executes a `Program` (raw instruction bytes) via an incremental `InstructionStream` reader. State: 256-slot register file (`RegVal` enum: `Int(i64)`, `VecInt(Vec<i64>)`, `VecXqmx(Vec<XqmxModel>)`, `Model(XqmxModel)`, `Sample(XqmxSample)`), an unbounded integer stack, and a loop stack of `LoopFrame` records (one per `RANGE`/`ITER`). `StepResult` drives control flow: `Continue`, `Jump(offset)`, `Halt`, `StartLoop`. Default step limit is 10,000,000 (configurable via `set_step_limit()`). Calldata and output slots are injected before `run()` via `set_calldata()` / `set_output_slots()`. VM errors carry `into_diagnostic(&program, source_name)` which disassembles the failing offset for miette source annotation. `clippy::result_large_err` is explicitly allowed in the asm crate because `NamedSource<Arc<str>>` on the error path is intentional.
 
-#### Instruction Set Categories (87 total)
+#### Instruction Set Categories (93 total)
 
-Control flow, stack/register I/O, arithmetic (including `SQR`, `ABS`, `INC`, `DEC`, `MIN`, `MAX`), comparison, logical/bitwise, QUBO/Ising/discrete matrix allocators (`BQMX`, `SQMX`, `XQMX`), sample allocators, vector ops, index math, matrix coefficient access, grid ops, high-level constraints (`ONEHOTR`, `ONEHOTC`, `EXCLUDE`, `IMPLIES`), and `ENERGY`.
+Control flow, stack/register I/O, arithmetic (including `SQR`, `ABS`, `INC`, `DEC`, `MIN`, `MAX`), comparison, logical/bitwise, QUBO/Ising/discrete matrix allocators (`BQMX`, `SQMX`, `XQMX`), sample allocators, vector ops, index math, matrix coefficient access, grid ops, high-level constraints (`ONEHOTR`, `ONEHOTC`, `EXCLUDE`, `IMPLIES`, `EQUALITY`, `ATLEAST`, `ATLEASTW`, `REDUCE`), and `ENERGY`.
 
 ## Python
 
@@ -278,7 +278,7 @@ Control flow, stack/register I/O, arithmetic (including `SQR`, `ABS`, `INC`, `DE
 
 The `spec/` directory contains authoritative specifications for each toolchain component. Read the relevant spec before modifying that component:
 
-- `spec/xqvm/SPEC.md` -- XQVM architecture (opcodes, control flow, type system)
+- `spec/xqvm/` -- XQVM architecture (opcodes, control flow, type system, encoding)
 - `spec/xqcp/README.md` -- XQCP constraint programming DSL
 - `spec/xqsa/README.md` -- XQSA solver adapter interface
 
@@ -290,7 +290,7 @@ Behavioural parity between `xqvm_py` (Python reference) and the Rust `xqvm` crat
 
 ### Atomic Spec-MR Rule
 
-Any MR that changes VM semantics must touch **all four** layers in the same MR: (1) `spec/xqvm/SPEC.md`, (2) `xqvm/src/**/*.rs`, (3) `xqvm_py/{executor,opcodes,xqmx,state,vector,tracer,errors}.py`, (4) `conformance/vectors/**` or `conformance/opcodes.yaml`. CI enforces this via `lint:atomic-spec-mr` (`scripts/check-atomic-spec-mr.sh`). MRs touching 0 or all 4 layers pass; partial changes (1-3 layers) fail.
+Any MR that changes VM semantics must touch **all four** layers in the same MR: (1) `spec/xqvm/*.md`, (2) `xqvm/src/**/*.rs`, (3) `xqvm_py/{executor,opcodes,xqmx,state,vector,tracer,errors}.py`, (4) `conformance/vectors/**` or `conformance/opcodes.yaml`. CI enforces this via `lint:atomic-spec-mr` (`scripts/check-atomic-spec-mr.sh`). MRs touching 0 or all 4 layers pass; partial changes (1-3 layers) fail.
 
 For deliberately one-sided changes (e.g. aligning one impl to existing behaviour), add an `Atomic-Spec-Exempt: <reason>` trailer to a commit message. The guard scans every commit in the MR range and bypasses when it finds at least one trailer. See `docs/xquad-development-workflow.md` for the full rationale and exempt cases.
 

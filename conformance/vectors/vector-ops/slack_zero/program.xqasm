@@ -1,0 +1,12 @@
+; slack_zero: capacity=0 produces no entries.
+
+VECI r0
+VECI r1
+
+PUSH 0           ; capacity = 0
+PUSH 0           ; start_index
+SLACK r0 r1
+
+VECLEN r0        ; → 0
+
+HALT

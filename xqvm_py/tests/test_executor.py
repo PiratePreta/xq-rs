@@ -1784,6 +1784,473 @@ class TestXQMXHighLevel:
         assert ex.state.peek(0) == 3
 
 
+class TestBitlen:
+    """Tests for BITLEN opcode."""
+
+    def test_positive(self):
+        """BITLEN(8) = 4."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (8,)),
+                Instruction(Opcode.BITLEN),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.peek(0) == 4
+
+    def test_one(self):
+        """BITLEN(1) = 1."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.BITLEN),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.peek(0) == 1
+
+    def test_zero(self):
+        """BITLEN(0) = 0."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.BITLEN),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.peek(0) == 0
+
+    def test_negative(self):
+        """BITLEN(-1) = 0."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (0xFF,)),  # -1 in signed 1-byte
+                Instruction(Opcode.BITLEN),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.peek(0) == 0
+
+    def test_power_of_two(self):
+        """BITLEN(16) = 5."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (16,)),
+                Instruction(Opcode.BITLEN),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.peek(0) == 5
+
+
+class TestSlack:
+    """Tests for SLACK opcode."""
+
+    def test_basic(self):
+        """SLACK with capacity=7, start_index=10 produces 3 vars."""
+        ex = run_program(
+            [
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (10,)),  # start_index
+                Instruction(Opcode.PUSH1, (7,)),  # capacity
+                Instruction(Opcode.SLACK, (1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        idx_vec = ex.state.get_register(1)
+        coeff_vec = ex.state.get_register(2)
+        assert idx_vec.length == 3
+        assert [idx_vec.get(i) for i in range(3)] == [10, 11, 12]
+        assert coeff_vec.length == 3
+        assert [coeff_vec.get(i) for i in range(3)] == [1, 2, 4]
+
+    def test_capacity_zero(self):
+        """SLACK with capacity=0 appends nothing."""
+        ex = run_program(
+            [
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (0,)),  # start_index
+                Instruction(Opcode.PUSH1, (0,)),  # capacity
+                Instruction(Opcode.SLACK, (1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.get_register(1).length == 0
+        assert ex.state.get_register(2).length == 0
+
+    def test_capacity_negative(self):
+        """SLACK with capacity=-1 appends nothing."""
+        ex = run_program(
+            [
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (0,)),  # start_index
+                Instruction(Opcode.PUSH1, (0xFF,)),  # -1 in signed 1-byte
+                Instruction(Opcode.SLACK, (1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        assert ex.state.get_register(1).length == 0
+
+    def test_capacity_one(self):
+        """SLACK with capacity=1 produces 1 var."""
+        ex = run_program(
+            [
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (5,)),  # start_index
+                Instruction(Opcode.PUSH1, (1,)),  # capacity
+                Instruction(Opcode.SLACK, (1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        idx_vec = ex.state.get_register(1)
+        coeff_vec = ex.state.get_register(2)
+        assert idx_vec.length == 1
+        assert idx_vec.get(0) == 5
+        assert coeff_vec.get(0) == 1
+
+    def test_appends_to_existing(self):
+        """SLACK appends to vecs that already have elements."""
+        ex = run_program(
+            [
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (99,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (77,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (0,)),  # start_index
+                Instruction(Opcode.PUSH1, (3,)),  # capacity
+                Instruction(Opcode.SLACK, (1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        idx_vec = ex.state.get_register(1)
+        coeff_vec = ex.state.get_register(2)
+        assert idx_vec.length == 3  # 1 existing + 2 slack
+        assert idx_vec.get(0) == 99
+        assert idx_vec.get(1) == 0
+        assert idx_vec.get(2) == 1
+        assert coeff_vec.get(0) == 77
+        assert coeff_vec.get(1) == 1
+        assert coeff_vec.get(2) == 2
+
+
+class TestEquality:
+    """Tests for EQUALITY opcode."""
+
+    def test_matches_onehot(self):
+        """EQUALITY with unit coeffs and target=1 matches ONEHOTR."""
+        # Build via EQUALITY
+        ex_eq = run_program(
+            [
+                Instruction(Opcode.PUSH1, (9,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (2,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (1,)),  # target
+                Instruction(Opcode.PUSH1, (10,)),  # penalty
+                Instruction(Opcode.EQUALITY, (0, 1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        # Build via ONEHOTR
+        ex_oh = run_program(
+            [
+                Instruction(Opcode.PUSH1, (9,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.RESIZE, (0,)),
+                Instruction(Opcode.PUSH1, (0,)),  # row
+                Instruction(Opcode.PUSH1, (10,)),  # penalty
+                Instruction(Opcode.ONEHOTR, (0,)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        m_eq = ex_eq.state.get_register(0)
+        m_oh = ex_oh.state.get_register(0)
+        assert m_eq.linear == m_oh.linear
+        assert m_eq.quadratic == m_oh.quadratic
+
+    def test_weighted(self):
+        """EQUALITY with weighted coefficients produces correct terms."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (5,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (2,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (5,)),  # target
+                Instruction(Opcode.PUSH1, (1,)),  # penalty
+                Instruction(Opcode.EQUALITY, (0, 1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        m = ex.state.get_register(0)
+        # linear[0] = 1 * 2 * (2 - 10) = -16
+        # linear[1] = 1 * 3 * (3 - 10) = -21
+        assert m.get_linear(0) == -16
+        assert m.get_linear(1) == -21
+        # quad[0,1] = 1 * 2 * 2 * 3 = 12
+        assert m.get_quadratic(0, 1) == 12
+
+
+class TestAtleast:
+    """Tests for ATLEAST opcode."""
+
+    def test_basic(self):
+        """ATLEAST with 4 vars, k=2 allocates slack vars and expands."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (4,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (2,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (2,)),  # k
+                Instruction(Opcode.PUSH1, (10,)),  # penalty
+                Instruction(Opcode.ATLEAST, (0, 1)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        m = ex.state.get_register(0)
+        # max_excess = 4 - 2 = 2, bit_length(2) = 2 slack vars
+        assert m.size == 6  # 4 original + 2 slack
+        assert len(m.linear) > 0 or len(m.quadratic) > 0
+
+    def test_k_equals_n(self):
+        """ATLEAST with k=N: no slack, just equality on all vars."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (2,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (3,)),  # k = N
+                Instruction(Opcode.PUSH1, (10,)),  # penalty
+                Instruction(Opcode.ATLEAST, (0, 1)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        m = ex.state.get_register(0)
+        assert m.size == 3  # no slack variables added
+
+    def test_k_zero_raises(self):
+        """ATLEAST with k=0 raises ValueError."""
+        with pytest.raises(ValueError, match="ATLEAST"):
+            run_program(
+                [
+                    Instruction(Opcode.PUSH1, (3,)),
+                    Instruction(Opcode.BQMX, (0,)),
+                    Instruction(Opcode.VECI, (1,)),
+                    Instruction(Opcode.PUSH1, (0,)),
+                    Instruction(Opcode.VECPUSH, (1,)),
+                    Instruction(Opcode.PUSH1, (0,)),  # k = 0
+                    Instruction(Opcode.PUSH1, (10,)),
+                    Instruction(Opcode.ATLEAST, (0, 1)),
+                    Instruction(Opcode.HALT),
+                ]
+            )
+
+    def test_k_exceeds_n_raises(self):
+        """ATLEAST with k > N raises ValueError."""
+        with pytest.raises(ValueError, match="ATLEAST"):
+            run_program(
+                [
+                    Instruction(Opcode.PUSH1, (3,)),
+                    Instruction(Opcode.BQMX, (0,)),
+                    Instruction(Opcode.VECI, (1,)),
+                    Instruction(Opcode.PUSH1, (0,)),
+                    Instruction(Opcode.VECPUSH, (1,)),
+                    Instruction(Opcode.PUSH1, (1,)),
+                    Instruction(Opcode.VECPUSH, (1,)),
+                    Instruction(Opcode.PUSH1, (5,)),  # k > N=2
+                    Instruction(Opcode.PUSH1, (10,)),
+                    Instruction(Opcode.ATLEAST, (0, 1)),
+                    Instruction(Opcode.HALT),
+                ]
+            )
+
+
+class TestAtleastw:
+    """Tests for ATLEASTW opcode."""
+
+    def test_weighted_basic(self):
+        """ATLEASTW with 3 vars, weights=[2,3,5], k=4 allocates slack vars."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.VECI, (1,)),
+                Instruction(Opcode.VECI, (2,)),
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (2,)),
+                Instruction(Opcode.VECPUSH, (1,)),
+                Instruction(Opcode.PUSH1, (2,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (5,)),
+                Instruction(Opcode.VECPUSH, (2,)),
+                Instruction(Opcode.PUSH1, (4,)),  # k
+                Instruction(Opcode.PUSH1, (10,)),  # penalty
+                Instruction(Opcode.ATLEASTW, (0, 1, 2)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        m = ex.state.get_register(0)
+        # max_excess = (2+3+5) - 4 = 6, bit_length(6) = 3 slack vars
+        assert m.size == 6  # 3 original + 3 slack
+        assert len(m.linear) > 0
+
+    def test_length_mismatch_raises(self):
+        """ATLEASTW with mismatched indices/coeffs raises ValueError."""
+        with pytest.raises(ValueError, match="ATLEASTW"):
+            run_program(
+                [
+                    Instruction(Opcode.PUSH1, (5,)),
+                    Instruction(Opcode.BQMX, (0,)),
+                    Instruction(Opcode.VECI, (1,)),
+                    Instruction(Opcode.VECI, (2,)),
+                    Instruction(Opcode.PUSH1, (0,)),
+                    Instruction(Opcode.VECPUSH, (1,)),
+                    Instruction(Opcode.PUSH1, (1,)),
+                    Instruction(Opcode.VECPUSH, (1,)),
+                    Instruction(Opcode.PUSH1, (1,)),
+                    Instruction(Opcode.VECPUSH, (2,)),  # only 1 coeff vs 2 indices
+                    Instruction(Opcode.PUSH1, (1,)),
+                    Instruction(Opcode.PUSH1, (10,)),
+                    Instruction(Opcode.ATLEASTW, (0, 1, 2)),
+                    Instruction(Opcode.HALT),
+                ]
+            )
+
+    def test_k_zero_raises(self):
+        """ATLEASTW with k=0 raises ValueError."""
+        with pytest.raises(ValueError, match="ATLEASTW"):
+            run_program(
+                [
+                    Instruction(Opcode.PUSH1, (3,)),
+                    Instruction(Opcode.BQMX, (0,)),
+                    Instruction(Opcode.VECI, (1,)),
+                    Instruction(Opcode.VECI, (2,)),
+                    Instruction(Opcode.PUSH1, (0,)),
+                    Instruction(Opcode.VECPUSH, (1,)),
+                    Instruction(Opcode.PUSH1, (1,)),
+                    Instruction(Opcode.VECPUSH, (2,)),
+                    Instruction(Opcode.PUSH1, (0,)),  # k = 0
+                    Instruction(Opcode.PUSH1, (10,)),
+                    Instruction(Opcode.ATLEASTW, (0, 1, 2)),
+                    Instruction(Opcode.HALT),
+                ]
+            )
+
+
+class TestReduce:
+    """Tests for REDUCE opcode."""
+
+    def test_basic(self):
+        """REDUCE allocates auxiliary and pushes its index."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.PUSH1, (0,)),  # var_a
+                Instruction(Opcode.PUSH1, (1,)),  # var_b
+                Instruction(Opcode.PUSH1, (10,)),  # P_aux
+                Instruction(Opcode.REDUCE, (0,)),
+                Instruction(Opcode.HALT),
+            ]
+        )
+        m = ex.state.get_register(0)
+        w = ex.state.peek(0)
+        assert w == 3
+        assert m.size == 4
+        assert m.get_quadratic(0, 1) == 10
+        assert m.get_quadratic(0, 3) == -20
+        assert m.get_quadratic(1, 3) == -20
+        assert m.get_linear(3) == 30
+
+    def test_chaining(self):
+        """Two successive REDUCE calls allocate distinct auxiliaries."""
+        ex = run_program(
+            [
+                Instruction(Opcode.PUSH1, (4,)),
+                Instruction(Opcode.BQMX, (0,)),
+                Instruction(Opcode.PUSH1, (0,)),
+                Instruction(Opcode.PUSH1, (1,)),
+                Instruction(Opcode.PUSH1, (10,)),
+                Instruction(Opcode.REDUCE, (0,)),  # w1 = 4
+                Instruction(Opcode.PUSH1, (2,)),
+                Instruction(Opcode.PUSH1, (3,)),
+                Instruction(Opcode.PUSH1, (10,)),
+                Instruction(Opcode.REDUCE, (0,)),  # w2 = 5
+                Instruction(Opcode.HALT),
+            ]
+        )
+        m = ex.state.get_register(0)
+        w2 = ex.state.peek(0)
+        # Pop w2 to get w1 underneath
+        ex.state.pop()
+        w1 = ex.state.peek(0)
+        assert w1 == 4
+        assert w2 == 5
+        assert m.size == 6
+
+    def test_var_out_of_range_raises(self):
+        """REDUCE with var_a out of range raises ValueError."""
+        with pytest.raises(ValueError, match="REDUCE"):
+            run_program(
+                [
+                    Instruction(Opcode.PUSH1, (3,)),
+                    Instruction(Opcode.BQMX, (0,)),
+                    Instruction(Opcode.PUSH1, (5,)),  # var_a out of range
+                    Instruction(Opcode.PUSH1, (1,)),
+                    Instruction(Opcode.PUSH1, (10,)),
+                    Instruction(Opcode.REDUCE, (0,)),
+                    Instruction(Opcode.HALT),
+                ]
+            )
+
+
 class TestErrorHandling:
     """Tests for error conditions."""
 

@@ -418,6 +418,17 @@ class VecLenExpr(Expr, _ExprOps):
         lines.append(line(f"VECLEN r{self.vec_reg}", indent))
 
 
+class BitLenExpr(Expr, _ExprOps):
+    """Bit length: BITLEN opcode (floor(log2(value)) + 1)."""
+
+    def __init__(self, inner: Expr) -> None:
+        self.inner = inner
+
+    def emit(self, lines: list[str], indent: int) -> None:
+        self.inner.emit(lines, indent)
+        lines.append(line("BITLEN", indent))
+
+
 # ---------------------------------------------------------------------------
 # Backward compatibility — NegExpr is now UnaryOp("NEG", ...)
 # ---------------------------------------------------------------------------

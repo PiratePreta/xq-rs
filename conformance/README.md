@@ -15,7 +15,7 @@ Rust-side pass (or vice versa).
 
 ```
 conformance/
-├── opcodes.yaml          single machine-readable source for the 87-opcode table
+├── opcodes.yaml          single machine-readable source for the 93-opcode table
 ├── vectors/
 │   ├── arithmetic/<name>/
 │   │   ├── program.xqasm       canonical assembly source

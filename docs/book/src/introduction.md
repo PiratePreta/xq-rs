@@ -37,9 +37,9 @@ integers, integer vectors, QUBO/Ising models (`XqmxModel`), model vectors, and
 candidate solutions (`XqmxSample`). A dedicated loop stack drives `RANGE`/`ITER`
 iteration.
 
-The instruction set comprises **84 instructions** across 14 categories:
+The instruction set comprises **93 instructions** across 14 categories:
 control flow, register I/O, stack manipulation, arithmetic, comparison, logical,
-bitwise, allocators, vector access, index math, coefficient access, grid
+bitwise, allocators, vector operations, index math, coefficient access, grid
 operations, high-level constraints, and energy evaluation.
 
 The opcode table (`opcodes!` x-macro in `crates/bytecode/src/types/table.rs`) is
@@ -58,7 +58,7 @@ order.
 - **[VM Architecture](architecture/README.md)** -- stack, registers, loops,
   I/O, and the execution model.
 - **[Assembly Language](assembly/README.md)** -- the `.xqasm` syntax.
-- **[Instruction Set Reference](instructions/README.md)** -- all 84
+- **[Instruction Set Reference](instructions/README.md)** -- all 93
   instructions with full semantics.
 - **[Bytecode Format](bytecode-format.md)** -- the binary wire format.
 - **[Builder API](builder-api.md)** -- programmatic bytecode construction in

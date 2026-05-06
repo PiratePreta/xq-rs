@@ -9,7 +9,7 @@ checked against these documents via the `conformance/` harness.
 
 - **[xqvm/](xqvm/)** — X-Quadratic Virtual Machine. Bytecode format,
   instruction semantics, stack and register model, binary encoding.
-  See [`xqvm/SPEC.md`](xqvm/SPEC.md).
+  See [`xqvm/README.md`](xqvm/README.md) for the document index.
 - **[xqcp/](xqcp/)** — X-Quadratic Constraint Programming DSL. Symbolic
   problem description and compilation to XQVM assembly. Draft — see
   [`xqcp/README.md`](xqcp/README.md).
@@ -20,7 +20,7 @@ checked against these documents via the `conformance/` harness.
 ## Drift policy
 
 There is no tolerated drift between spec and implementations. Any change
-to `xqvm/SPEC.md` that affects observable behaviour must land with:
+to the `xqvm/` spec files that affects observable behaviour must land with:
 
 1. A matching update to `../conformance/opcodes.yaml`.
 2. Updated or new conformance vectors under `../conformance/vectors/`.
