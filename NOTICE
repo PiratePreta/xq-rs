@@ -38,6 +38,12 @@ https://www.rust-lang.org
 --------------------------------------------------------------------------------
 
 --------------------------------------------------------------------------------
+crc32fast 1.5.0 (Apache-2.0 OR MIT)
+Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors
+https://github.com/srijs/rust-crc32fast
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
 thiserror 2.0.18 (Apache-2.0 OR MIT)
 Copyright (c) David Tolnay <dtolnay@gmail.com>
 https://github.com/dtolnay/thiserror

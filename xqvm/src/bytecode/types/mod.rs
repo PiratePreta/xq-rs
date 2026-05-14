@@ -33,7 +33,7 @@ mod parity;
 mod register_effect;
 
 pub use self::{
-    instruction::Instruction,
+    instruction::{Instruction, StackEffect},
     opcode::{DecodeError, Opcode},
     operand::Register,
     register_effect::RegisterEffect,

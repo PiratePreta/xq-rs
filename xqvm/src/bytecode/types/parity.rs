@@ -34,7 +34,7 @@ include!(concat!(env!("OUT_DIR"), "/opcodes_yaml.rs"));
 /// Build a `(code, mnemonic)` slice from the `opcodes!` macro expansion.
 macro_rules! macro_opcodes_table {
     (
-        $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, {$($f:tt)*}) ),*
+        $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, $_delta:expr, {$($f:tt)*}) ),*
         $(,)?
     ) => {
         const MACRO_OPCODES: &[(u8, &str)] = &[

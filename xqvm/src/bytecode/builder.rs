@@ -222,30 +222,30 @@ macro_rules! impl_builder_methods {
 
     // Skip JUMP / JUMPI  -- `{label: ...}`
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-       {label: $($rest_f:tt)*}), $($rest:tt)* ) => {
+       $_delta:expr, {label: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
     // Skip ENERGY / multi-register opcodes -- `{model: ...}`
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-       {model: $($rest_f:tt)*}), $($rest:tt)* ) => {
+       $_delta:expr, {model: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
     // Skip SLACK -- `{indices: ...}`
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-       {indices: $($rest_f:tt)*}), $($rest:tt)* ) => {
+       $_delta:expr, {indices: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
     // Skip PUSH1..PUSH8 -- `{val: ...}` -- dedicated emit_push() handles them.
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-       {val: $($rest_f:tt)*}), $($rest:tt)* ) => {
+       $_delta:expr, {val: $($rest_f:tt)*}), $($rest:tt)* ) => {
         impl_builder_methods!($($rest)*);
     };
 
     // No-argument variants -- empty field list `{}`
-    ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, {}),
+    ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, $_delta:expr, {}),
       $($rest:tt)* ) => {
         ::pastey::paste! {
             #[doc = $doc]
@@ -258,7 +258,7 @@ macro_rules! impl_builder_methods {
 
     // Single-register variants -- `{reg: <type>}`
     ( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-       {reg: $($ftype:tt)*}), $($rest:tt)* ) => {
+       $_delta:expr, {reg: $($ftype:tt)*}), $($rest:tt)* ) => {
         ::pastey::paste! {
             #[doc = $doc]
             pub fn [<emit_ $variant:snake>](&mut self, reg: Register) -> &mut Self {

@@ -5,7 +5,7 @@
 The XQVM toolchain uses two file formats for programs:
 
 - **`.xqasm`** — Human-readable text assembly source. Line comments begin with `;`. Supports syntactic sugar for `PUSH` and `JUMP`/`JUMPI` families. This is the authoring format.
-- **`.xqb`** — Raw binary bytecode. A headerless byte stream encoding instructions as opcode + operand bytes. This is the execution format produced by the assembler.
+- **`.xqb`** — Binary bytecode. A 15-byte XQBC header followed by the instruction stream. This is the execution format produced by the assembler.
 
 ---
 
@@ -51,7 +51,35 @@ The assembler accepts `JUMP .N` and `JUMPI .N` as syntactic sugar for the `JUMP1
 
 ## Binary Bytecode Format
 
-A program is encoded as a raw byte stream with no header, magic bytes, length prefix, or alignment padding. Each instruction is laid out as:
+Every `.xqb` file begins with a fixed 15-byte XQBC header, followed immediately by the instruction stream.
+
+### XQBC Header
+
+```
+ Offset  Width  Description
+ ------  -----  -----------
+   0..4    4    Magic: b"XQBC"
+      4    1    Version: 0x01 (current format version)
+      5    1    input_slots: u8 -- count of INPUT instructions (calldata arity)
+      6    1    output_slots: u8 -- count of OUTPUT instructions (minimum output-slot count)
+   7..11   4    code_len: u32 big-endian -- byte length of the instruction stream
+  11..15   4    crc32: u32 big-endian -- CRC-32/ISO-HDLC of the instruction stream
+  15+      *    instruction stream (raw opcode + operand bytes)
+```
+
+Decoders must:
+
+1. Reject files shorter than 15 bytes.
+2. Reject files whose first four bytes are not `b"XQBC"`.
+3. Reject files whose version byte is not `0x01`.
+4. Reject files where the payload length differs from `code_len`.
+5. Reject files where the CRC-32/ISO-HDLC of the payload does not match `crc32`.
+
+`input_slots` and `output_slots` are informational; decoders may use them to pre-size calldata and output-slot arrays without scanning the instruction stream. They are not validated by the decoder.
+
+### Instruction Stream
+
+Each instruction in the stream is laid out as:
 
 ```
 [ opcode : 1 byte ] [ operand bytes : 0 – 8 bytes ]

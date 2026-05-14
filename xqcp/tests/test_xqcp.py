@@ -594,3 +594,66 @@ class TestMaxCutPipeline:
         hw_part = hw_s.output[0]
         cp_part = cp_s.output[0]
         assert [hw_part.get(i) for i in range(n)] == [cp_part.get(i) for i in range(n)]
+
+
+# ---------------------------------------------------------------------------
+# Post-compilation verification tests
+# ---------------------------------------------------------------------------
+
+
+class TestPostCompilationVerification:
+    """verify_source is called on every compiled program inside compile()."""
+
+    def test_tsp_all_programs_pass_verification(self) -> None:
+        # compile() should not raise -- verifier accepts all three programs.
+        problem = build_tsp_problem()
+        programs = problem.compile()
+        assert programs is not None
+
+    def test_maxcut_all_programs_pass_verification(self) -> None:
+        problem = build_maxcut_problem()
+        programs = problem.compile()
+        assert programs is not None
+
+    def test_verify_compiled_called_per_program(self) -> None:
+        # Monkey-patch verify_source to record which sources were checked.
+
+        captured: list[str] = []
+
+        original = None
+        try:
+            import xqffi.verifier as _v
+
+            original = _v.verify_source
+            _v.verify_source = lambda src: captured.append(src)  # type: ignore[method-assign]
+
+            problem = build_tsp_problem()
+            programs = problem.compile()
+        finally:
+            if original is not None:
+                import xqffi.verifier as _v2
+
+                _v2.verify_source = original  # type: ignore[method-assign]
+
+        # All three programs must have been verified.
+        assert len(captured) == 3
+        assert programs.encoder in captured
+        assert programs.verifier in captured
+        assert programs.decoder in captured
+
+    def test_verification_error_names_failing_program(self) -> None:
+        import pytest
+
+        import xqffi.verifier as xfv
+
+        original = xfv.verify_source
+
+        def _always_fail(src: str) -> None:
+            raise ValueError("NoActiveLoop: NEXT at byte 0x0000 outside a RANGE block")
+
+        try:
+            xfv.verify_source = _always_fail  # type: ignore[method-assign]
+            with pytest.raises(ValueError, match="encoder verification failed"):
+                build_tsp_problem().compile()
+        finally:
+            xfv.verify_source = original  # type: ignore[method-assign]

@@ -26,6 +26,7 @@
 mod asm;
 mod dism;
 mod run;
+mod verify;
 
 use clap::{Parser, Subcommand};
 
@@ -46,6 +47,8 @@ enum Command {
     Dism(dism::Args),
     /// Run XQVM bytecode or assembly.
     Run(run::Args),
+    /// Run the bytecode verifier (all phases).
+    Verify(verify::Args),
 }
 
 fn main() -> miette::Result<()> {
@@ -54,5 +57,6 @@ fn main() -> miette::Result<()> {
         Command::Asm(args) => asm::exec(args),
         Command::Dism(args) => dism::exec(&args),
         Command::Run(args) => run::exec(args),
+        Command::Verify(args) => verify::run(&args),
     }
 }

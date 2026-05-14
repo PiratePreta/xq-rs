@@ -15,6 +15,6 @@ pub(super) mod stream;
 
 pub use builder::{InstructionBuilder, LabelId};
 pub use jump_table::JumpTable;
-pub use program::Program;
+pub use program::{Program, ProgramDecodeError};
 pub use stream::InstructionStream;
-pub use types::{Instruction, Opcode, Register, RegisterEffect};
+pub use types::{Instruction, Opcode, Register, RegisterEffect, StackEffect};

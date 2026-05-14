@@ -130,12 +130,15 @@ fn assemble_source<'py>(py: Python<'py>, source: &str) -> PyResult<Bound<'py, Py
 ///
 /// # Errors
 ///
-/// Raises `ValueError` on any write error; for valid inputs this
-/// should not occur as the underlying writer is an in-memory buffer.
+/// Raises `ValueError` if `bytecode` is not a valid XQBC file, or on any
+/// write error (which should not occur as the underlying writer is an
+/// in-memory buffer).
 #[pyfunction]
 fn disassemble(bytecode: &[u8]) -> PyResult<String> {
+    let program = xqvm::Program::decode(bytecode)
+        .map_err(|e| PyValueError::new_err(format!("decode error: {e}")))?;
     let mut out = Vec::new();
-    Disassembly::new(bytecode)
+    Disassembly::from_program(&program)
         .write_to(&mut out)
         .map_err(|e| PyValueError::new_err(format!("disassembly write failed: {e}")))?;
     String::from_utf8(out).map_err(|e| PyValueError::new_err(format!("disassembly not UTF-8: {e}")))

@@ -183,7 +183,7 @@ impl FmtOperand for u8 {
 
 macro_rules! impl_fmt_instruction {
     ( $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-          {$($fname:ident: $ftype:ty),*}) ),* $(,)? ) => {
+          $_delta:expr, {$($fname:ident: $ftype:ty),*}) ),* $(,)? ) => {
 
         fn fmt_instruction(
             instr: &Instruction,
