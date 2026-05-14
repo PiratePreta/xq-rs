@@ -17,7 +17,7 @@
 
 //! `PyO3` bindings for the `XQuad` Rust runtime.
 //!
-//! Exposes two Python submodules:
+//! Exposes three Python submodules:
 //!
 //! - `xqffi.asm` — bindings around [`xqasm`]: `parse_xqasm`,
 //!   `assemble_source`, `disassemble`, `instruction_count`.
@@ -25,6 +25,8 @@
 //!   with the `set_calldata` / `set_output_slots` / `run` / `outputs` /
 //!   `stack` surface that the conformance harness drives, plus thin
 //!   `XqmxModel` / `XqmxSample` wrappers with getters and setters.
+//! - `xqffi.verifier` — bindings around [`xqvm::verifier`]: `verify`
+//!   (bytecode bytes) and `verify_source` (`.xqasm` text).
 //!
 //! User-facing convenience (`Program`, `Session`, `RunResult`, model/sample
 //! dict conversion) lives in the `xquad` pure-Python umbrella package.
@@ -36,14 +38,15 @@
 use pyo3::prelude::*;
 
 mod asm;
+mod verifier;
 mod vm;
 
 /// Module entry point — registered as `xqffi` by maturin (via the
 /// `module-name` field in `pyproject.toml`, which matches the `[lib] name`
 /// in `Cargo.toml`).
 ///
-/// Submodules (`xqffi.asm`, `xqffi.vm`) are registered both as
-/// attributes of the parent module *and* in `sys.modules` so
+/// Submodules (`xqffi.asm`, `xqffi.vm`, `xqffi.verifier`) are registered
+/// both as attributes of the parent module *and* in `sys.modules` so
 /// `from xqffi.asm import parse_xqasm` resolves. `add_submodule`
 /// alone only sets the attribute; pyo3's module tree doesn't
 /// automatically populate `sys.modules` the way `__init__.py`-based
@@ -61,6 +64,11 @@ fn xqffi(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     vm::register(py, &vm_module)?;
     m.add_submodule(&vm_module)?;
     sys_modules.set_item("xqffi.vm", &vm_module)?;
+
+    let verifier_module = PyModule::new(py, "xqffi.verifier")?;
+    verifier::register(py, &verifier_module)?;
+    m.add_submodule(&verifier_module)?;
+    sys_modules.set_item("xqffi.verifier", &verifier_module)?;
 
     Ok(())
 }

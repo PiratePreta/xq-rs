@@ -26,7 +26,7 @@ use super::RegisterEffect;
 
 macro_rules! impl_instruction {
     (
-        $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, {$($fname:ident: $ftype:ty),*}) ),*
+        $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, $_delta:expr, {$($fname:ident: $ftype:ty),*}) ),*
         $(,)?
     ) => {
         /// A fully decoded XQVM instruction with its operands.
@@ -103,6 +103,67 @@ macro_rules! impl_instruction {
 }
 
 opcodes!(impl_instruction);
+
+// ---------------------------------------------------------------------------
+// Stack effect
+// ---------------------------------------------------------------------------
+
+/// Net effect of a single instruction on the value stack depth.
+///
+/// Most instructions apply a fixed `Delta(d)` where `d = pushes − pops`.
+/// The sole exception is [`SCLR`](Instruction::Sclr), which resets depth to
+/// zero regardless of the current depth (`Reset`).
+///
+/// The sentinel value `i8::MIN` in the [`opcodes!`](crate::opcodes) table
+/// maps to `Reset`; all other values map to `Delta`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackEffect {
+    /// Fixed net change to stack depth: positive means net push, negative means net pop.
+    Delta(i8),
+    /// Set depth to zero unconditionally (SCLR).
+    Reset,
+}
+
+impl StackEffect {
+    /// Convert the raw `i8` delta stored in the opcode table to a [`StackEffect`].
+    ///
+    /// `i8::MIN` is the sentinel for [`StackEffect::Reset`] (SCLR).
+    pub fn from_delta(delta: i8) -> Self {
+        if delta == i8::MIN {
+            Self::Reset
+        } else {
+            Self::Delta(delta)
+        }
+    }
+}
+
+macro_rules! impl_stack_effect {
+    (
+        $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, $delta:expr, {$($f:tt)*}) ),*
+        $(,)?
+    ) => {
+        impl Instruction {
+            /// Return the net stack effect of this instruction.
+            ///
+            /// # Examples
+            ///
+            /// ```rust
+            /// use xqvm::{Instruction, StackEffect};
+            ///
+            /// assert_eq!(Instruction::Add {}.stack_effect(), StackEffect::Delta(-1));
+            /// assert_eq!(Instruction::Push1 { val: [0] }.stack_effect(), StackEffect::Delta(1));
+            /// assert_eq!(Instruction::Sclr {}.stack_effect(), StackEffect::Reset);
+            /// ```
+            pub fn stack_effect(&self) -> StackEffect {
+                match self {
+                    $( Self::$variant { .. } => StackEffect::from_delta($delta as i8), )*
+                }
+            }
+        }
+    };
+}
+
+opcodes!(impl_stack_effect);
 
 // ---------------------------------------------------------------------------
 // Register introspection
@@ -466,7 +527,7 @@ mod tests {
     // Each operand is zero-initialised: Register(0), 0i16, 0i64.
     macro_rules! all_instruction_opcode_pairs {
         (
-            $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, {$($fname:ident: $ftype:ty),*}) ),*
+            $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal, $_delta:expr, {$($fname:ident: $ftype:ty),*}) ),*
             $(,)?
         ) => {
             [

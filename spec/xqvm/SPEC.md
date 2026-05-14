@@ -112,6 +112,10 @@ Expansion formulas, derivations, and the ENERGY computation: **[HLF.md](HLF.md)*
 
 ## Encoding and File Formats
 
-Programs exist in two representations. `.xqasm` is the human-readable text assembly format with line comments, register names (`r0`–`r255`), target labels (`.N`), and syntactic sugar for `PUSH` and `JUMP`/`JUMPI` families. `.xqb` is the binary bytecode format — a raw, headerless byte stream where each instruction is encoded as an opcode byte followed by zero to eight operand bytes. Instruction length is determined solely by the opcode.
+Programs exist in two representations. `.xqasm` is the human-readable text assembly format with line comments, register names (`r0`–`r255`), target labels (`.N`), and syntactic sugar for `PUSH` and `JUMP`/`JUMPI` families. `.xqb` is the binary bytecode format -- a 15-byte XQBC header (magic, version, slot counts, payload length, CRC-32) followed by a raw instruction stream where each instruction is encoded as an opcode byte followed by zero to eight operand bytes. Instruction length is determined solely by the opcode.
 
 File format definitions, assembly syntax, and binary encoding rules: **[ENCODING.md](ENCODING.md)**
+
+## Bytecode Verification
+
+Bytecode verification phases, error semantics, composable architecture, and per-opcode stack effects: **[VERIFIER.md](VERIFIER.md)**

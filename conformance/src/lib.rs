@@ -367,6 +367,7 @@ pub enum Impl {
 pub fn check_vector(category: &str, name: &str, imp: Impl) {
     let vector = load_vector(category, name)
         .unwrap_or_else(|e| panic!("load_vector({category}/{name}): {e}"));
+
     let outcome = match imp {
         Impl::Rust => run_rust(&vector),
         Impl::Python => run_python(&vector),

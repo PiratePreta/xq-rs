@@ -51,10 +51,13 @@ class Program:
     Attributes:
         instructions: List of instructions to execute
         name: Optional program name for debugging
+        jump_targets: Maps sequential TARGET id to instruction index; pre-built
+            at construction time so the executor skips the per-run pre-scan.
     """
 
     instructions: list[Instruction] = field(default_factory=list)
     name: str = ""
+    jump_targets: dict[int, int] = field(default_factory=dict)
 
     def __len__(self) -> int:
         return len(self.instructions)
@@ -63,9 +66,20 @@ class Program:
         return self.instructions[index]
 
 
+def _build_jump_targets(instructions: list[Instruction]) -> dict[int, int]:
+    """Scan instructions for TARGET opcodes and return the sequential-id map."""
+    result: dict[int, int] = {}
+    target_id = 0
+    for i, instr in enumerate(instructions):
+        if instr.opcode == Opcode.TARGET:
+            result[target_id] = i
+            target_id += 1
+    return result
+
+
 def make_program(instructions: list[Instruction]) -> Program:
     """Build a Program from a list of Instructions."""
-    return Program(instructions)
+    return Program(instructions, jump_targets=_build_jump_targets(instructions))
 
 
 def run_program(instructions: list[Instruction], input_data: dict[int, Any] | None = None):
@@ -78,31 +92,72 @@ def run_program(instructions: list[Instruction], input_data: dict[int, Any] | No
     return ex
 
 
-def program_from_bytecode(bytecode: bytes, name: str = "") -> Program:
-    """Decode raw ``.xqb`` bytecode into an executable ``Program``.
+_XQBC_MAGIC = b"XQBC"
+_XQBC_VERSION = 1
+_XQBC_HEADER_SIZE = 15
 
-    Pure-Python decoder — no FFI dependency. The wire format is a flat
-    stream of ``[opcode_u8, operand_bytes...]`` with no header or length
-    prefixes. Each opcode's ``OpcodeMeta.operand_count`` determines the
-    number of trailing bytes.
+
+def program_from_bytecode(bytecode: bytes, name: str = "") -> Program:
+    """Decode ``.xqb`` bytecode into an executable ``Program``.
+
+    Parses and validates the 15-byte XQBC header (magic, version, length,
+    CRC-32), then decodes the instruction stream.  No FFI dependency.
+
+    Header layout::
+
+        0..4   b"XQBC"          magic
+        4      version: u8      format version (currently 1)
+        5      input_slots: u8  count of INPUT instructions
+        6      output_slots: u8 count of OUTPUT instructions
+        7..11  code_len: u32 BE byte length of instruction stream
+        11..15 crc32: u32 BE    CRC-32/ISO-HDLC of instruction stream
+        15+    instruction stream
+
+    Raises:
+        ValueError: if the header is missing, malformed, or the checksum
+            does not match.
     """
+    import struct
+    import zlib
+
+    if len(bytecode) < _XQBC_HEADER_SIZE:
+        raise ValueError(f"not an XQBC file: too short ({len(bytecode)} bytes, need {_XQBC_HEADER_SIZE})")
+
+    magic = bytecode[:4]
+    if magic != _XQBC_MAGIC:
+        raise ValueError(f"not an XQBC file: wrong magic {magic!r}")
+
+    version = bytecode[4]
+    if version != _XQBC_VERSION:
+        raise ValueError(f"unsupported XQBC version {version} (expected {_XQBC_VERSION})")
+
+    (code_len,) = struct.unpack_from(">I", bytecode, 7)
+    (expected_crc,) = struct.unpack_from(">I", bytecode, 11)
+
+    code = bytecode[_XQBC_HEADER_SIZE:]
+    if len(code) != code_len:
+        raise ValueError(f"XQBC length mismatch: header says {code_len} bytes, got {len(code)}")
+
+    actual_crc = zlib.crc32(code) & 0xFFFF_FFFF
+    if actual_crc != expected_crc:
+        raise ValueError(f"XQBC CRC-32 mismatch: expected 0x{expected_crc:08X}, computed 0x{actual_crc:08X}")
+
     instructions: list[Instruction] = []
     pos = 0
-    while pos < len(bytecode):
-        code = bytecode[pos]
-        opcode = Opcode.from_code(code)
+    while pos < len(code):
+        opcode_byte = code[pos]
+        opcode = Opcode.from_code(opcode_byte)
         if opcode is None:
-            raise ValueError(f"unknown opcode 0x{code:02X} at byte offset {pos}")
+            raise ValueError(f"unknown opcode 0x{opcode_byte:02X} at byte offset {pos}")
         n = opcode.meta.operand_count
-        if pos + 1 + n > len(bytecode):
+        if pos + 1 + n > len(code):
             raise ValueError(
-                f"truncated operands for {opcode.name} at byte offset {pos}: "
-                f"need {n} bytes, have {len(bytecode) - pos - 1}"
+                f"truncated operands for {opcode.name} at byte offset {pos}: need {n} bytes, have {len(code) - pos - 1}"
             )
-        operands = tuple(bytecode[pos + 1 : pos + 1 + n])
+        operands = tuple(code[pos + 1 : pos + 1 + n])
         instructions.append(Instruction(opcode, operands))
         pos += 1 + n
-    return Program(instructions=instructions, name=name)
+    return Program(instructions=instructions, name=name, jump_targets=_build_jump_targets(instructions))
 
 
 def program_from_xqasm(source: str, name: str = "") -> Program:
@@ -122,4 +177,4 @@ def program_from_xqasm(source: str, name: str = "") -> Program:
 
     wire = parse_xqasm(source)
     instructions = [Instruction(Opcode.from_code(code), tuple(ops), int(pc)) for code, ops, pc in wire["instructions"]]
-    return Program(instructions=instructions, name=name)
+    return Program(instructions=instructions, name=name, jump_targets=_build_jump_targets(instructions))

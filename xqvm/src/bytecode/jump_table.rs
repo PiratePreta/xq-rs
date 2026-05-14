@@ -47,9 +47,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use super::stream::InstructionStream;
-use super::types::Instruction;
-
 // ---------------------------------------------------------------------------
 // JumpTable
 // ---------------------------------------------------------------------------
@@ -99,19 +96,12 @@ impl JumpTable {
     /// Scan an instruction-byte buffer and record the position of every
     /// `TARGET` opcode in stream order.
     ///
-    /// Truncated or unknown opcodes encountered during the scan are silently
-    /// skipped (they will surface again as proper errors when the VM walks
-    /// the same buffer at runtime). The scan is single-pass and allocates
-    /// only the output `Vec`.
+    /// Delegates to the shared `verifier::scan` kernel so that
+    /// TARGET collection and Phase 1 error detection share a single pass.
+    /// Any verification error found during the scan is discarded here --
+    /// callers that need it should call `verifier::scan` directly.
     pub fn scan(code: &[u8]) -> Self {
-        let mut targets = Vec::new();
-        let mut stream = InstructionStream::new(code);
-        while let Some(item) = stream.next_instruction() {
-            if let Ok((pos, _label, Instruction::Target {})) = item {
-                targets.push(pos);
-            }
-        }
-        Self { targets }
+        crate::verifier::scan(code).0
     }
 
     /// Look up the byte offset of the `TARGET` with sequential id `label`.
@@ -146,6 +136,7 @@ impl JumpTable {
 mod tests {
     use super::*;
     use crate::bytecode::codec;
+    use crate::bytecode::types::Instruction;
 
     fn assemble(instrs: &[Instruction]) -> Vec<u8> {
         instrs.iter().flat_map(codec::encode).collect()

@@ -37,23 +37,92 @@ def test_bytecode_round_trip():
         assert a.operands == b.operands, f"instruction {i}: operands mismatch {a.operands} != {b.operands}"
 
 
-def test_bytecode_decode_empty():
-    """Empty bytecode produces an empty program."""
-    prog = program_from_bytecode(b"")
+def _make_xqbc(code: bytes) -> bytes:
+    """Build a minimal valid XQBC-encoded byte string for the given code payload."""
+    import struct
+    import zlib
+
+    crc = zlib.crc32(code) & 0xFFFF_FFFF
+    return b"XQBC" + bytes([1, 0, 0]) + struct.pack(">II", len(code), crc) + code
+
+
+def test_bytecode_decode_empty_program():
+    """An empty instruction stream inside a valid XQBC header decodes to an empty program."""
+    prog = program_from_bytecode(_make_xqbc(b""))
     assert len(prog) == 0
 
 
 def test_bytecode_decode_unknown_opcode():
-    """Unknown opcode byte raises ValueError."""
+    """Unknown opcode byte in the payload raises ValueError."""
     import pytest
 
     with pytest.raises(ValueError, match="unknown opcode 0x0D"):
-        program_from_bytecode(bytes([0x0D]))
+        program_from_bytecode(_make_xqbc(bytes([0x0D])))
 
 
 def test_bytecode_decode_truncated():
-    """Truncated operands raise ValueError."""
+    """Truncated operands in the payload raise ValueError."""
     import pytest
 
     with pytest.raises(ValueError, match="truncated operands"):
-        program_from_bytecode(bytes([0x11]))  # PUSH1 needs 1 operand byte
+        program_from_bytecode(_make_xqbc(bytes([0x11])))  # PUSH1 needs 1 operand byte
+
+
+def test_bytecode_decode_bad_magic():
+    """Non-XQBC bytes raise ValueError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="wrong magic"):
+        program_from_bytecode(b"\x00" * 15)
+
+
+def test_bytecode_decode_too_short():
+    """Bytes shorter than the 15-byte header raise ValueError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="too short"):
+        program_from_bytecode(b"XQBC")
+
+
+def test_bytecode_decode_bad_version():
+    """Unsupported version byte raises ValueError."""
+    import struct
+    import zlib
+
+    import pytest
+
+    code = b"\xff"
+    crc = zlib.crc32(code) & 0xFFFF_FFFF
+    bad_version = b"XQBC" + bytes([99, 0, 0]) + struct.pack(">II", len(code), crc) + code
+    with pytest.raises(ValueError, match="unsupported XQBC version 99"):
+        program_from_bytecode(bad_version)
+
+
+def test_bytecode_decode_length_mismatch():
+    """Payload shorter than code_len raises ValueError."""
+    import struct
+    import zlib
+
+    import pytest
+
+    code = b"\xff"
+    crc = zlib.crc32(code) & 0xFFFF_FFFF
+    # Claim code_len=5 but provide only 1 byte.
+    bad_len = b"XQBC" + bytes([1, 0, 0]) + struct.pack(">II", 5, crc) + code
+    with pytest.raises(ValueError, match="length mismatch"):
+        program_from_bytecode(bad_len)
+
+
+def test_bytecode_decode_crc_mismatch():
+    """Corrupted payload raises ValueError."""
+    import struct
+    import zlib
+
+    import pytest
+
+    code = b"\xff"
+    crc = zlib.crc32(code) & 0xFFFF_FFFF
+    wrong_crc = (crc ^ 0xDEAD_BEEF) & 0xFFFF_FFFF
+    corrupted = b"XQBC" + bytes([1, 0, 0]) + struct.pack(">II", len(code), wrong_crc) + code
+    with pytest.raises(ValueError, match="CRC-32 mismatch"):
+        program_from_bytecode(corrupted)

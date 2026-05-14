@@ -487,7 +487,7 @@ impl Vm {
 macro_rules! impl_dispatch {
     (
         $( ($code:literal, $variant:ident, $mnem:literal, $doc:literal,
-            {$($field:ident: $ftype:ty),*}) ),*
+            $_delta:expr, {$($field:ident: $ftype:ty),*}) ),*
         $(,)?
     ) => {
         impl Vm {

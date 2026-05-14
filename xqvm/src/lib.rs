@@ -86,13 +86,16 @@ mod vm;
 #[cfg(feature = "std")]
 pub mod disasm;
 
+// Pre-execution bytecode verifier.
+pub mod verifier;
+
 // ---------------------------------------------------------------------------
 // Public API re-exports — bytecode types hoisted to crate root
 // ---------------------------------------------------------------------------
 
 pub use bytecode::{
     Instruction, InstructionBuilder, InstructionStream, JumpTable, LabelId, Opcode, Program,
-    Register, RegisterEffect,
+    ProgramDecodeError, Register, RegisterEffect, StackEffect,
 };
 
 // ---------------------------------------------------------------------------
@@ -109,4 +112,5 @@ pub use model::{Domain, XqmxModel, XqmxSample};
 pub use tracer::{JsonTracer, TextTracer};
 pub use tracer::{NoopTracer, StepState, Tracer};
 pub use value::RegVal;
+pub use verifier::{RegType, VerifierError};
 pub use vm::Vm;

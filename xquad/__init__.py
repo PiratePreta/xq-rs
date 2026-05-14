@@ -37,6 +37,6 @@ Users wanting a subset can still `pip install xqffi xqcp xqsa`
 individually; `pip install xquad` is the convenience path.
 """
 
-from xquad import asm, cp, program, sa, types, vm
+from xquad import asm, cp, program, sa, types, verifier, vm
 
-__all__ = ["asm", "cp", "program", "sa", "types", "vm"]
+__all__ = ["asm", "cp", "program", "sa", "types", "verifier", "vm"]
